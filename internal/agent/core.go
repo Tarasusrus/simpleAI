@@ -28,7 +28,7 @@ func (a *Agent) Run(query string) {
 	}
 	r, err := a.Ask(query)
 	if err != nil {
-		a.Error("error", err)
+		a.Error("RunFunc", "Err", err)
 	}
 	a.Info("ИИ", "ответ", r)
 }

@@ -8,7 +8,7 @@ import (
 	"log/slog"
 )
 
-var chatCompletionErr = errors.New("Completions.New.Err")
+var ErrChatCompletion = errors.New("Completions.New.Err")
 
 type Client struct {
 	api openai.Client
@@ -31,7 +31,7 @@ func (c *Client) Ask(promt string) (string, error) {
 		Model: openai.ChatModelGPT4_1Mini,
 	})
 	if err != nil {
-		c.l.Error("Failed to create chat", chatCompletionErr, err)
+		c.l.Error("Failed to create chat", ErrChatCompletion.Error(), err)
 		return "", err
 	}
 
