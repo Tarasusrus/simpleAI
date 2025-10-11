@@ -6,27 +6,30 @@ import (
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"log/slog"
+	"simpleAI/config"
 )
 
 var ErrChatCompletion = errors.New("Completions.New.Err")
 
 type Client struct {
 	api openai.Client
-	l   slog.Logger
+	l   *slog.Logger
+	cfg config.Config
 }
 
-func NewClient(key string, l slog.Logger) *Client {
+func NewClient(key string, l *slog.Logger, c config.Config) Client {
 	client := openai.NewClient(option.WithAPIKey(key))
-	return &Client{api: client, l: l}
+	return Client{api: client, l: l, cfg: c}
 }
 
-func (c *Client) Ask(promt string) (string, error) {
+func (c *Client) Ask(prompt string) (string, error) {
 	var (
 		ctx = context.Background()
 	)
 	chatCompletion, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage(promt),
+			openai.SystemMessage(c.cfg.SysPrompt),
+			openai.UserMessage(prompt),
 		},
 		Model: openai.ChatModelGPT4_1Mini,
 	})

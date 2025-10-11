@@ -7,17 +7,21 @@ import (
 )
 
 type Config struct {
-	APIKey string
+	APIKey    string
+	SysPrompt string
 }
 
-func LoadConfig() (*Config, error) {
+func LoadConfig() (Config, error) {
 	_ = godotenv.Load(".env")
 
-	config := Config{}
-	config.APIKey = os.Getenv("API_KEY")
-	if config.APIKey == "" {
-		return nil, fmt.Errorf("API key not found in .env")
+	cfg := Config{}
+	cfg.APIKey = os.Getenv("API_KEY")
+	if cfg.APIKey == "" {
+		return Config{}, fmt.Errorf("API key not found in .env")
 	}
-	fmt.Println("Загрузка конфига ок")
-	return &config, nil
+	cfg.SysPrompt = os.Getenv("SYS_PROMPT")
+	if cfg.SysPrompt == "" {
+		return Config{}, fmt.Errorf("SysPrompt not found in .env")
+	}
+	return cfg, nil
 }
