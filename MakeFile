@@ -1,0 +1,3 @@
+
+run-diff:
+	go run cmd/agent/main.go "$$(git diff main $$(git branch --show-current))"
