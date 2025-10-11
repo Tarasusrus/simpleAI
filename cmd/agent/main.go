@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"simpleAI/config"
@@ -11,18 +10,17 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		log.Fatal("Usage: agent <config>")
+	}
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Err while load the config", err)
 	}
 	l := tools.NewLogger()
-	c := llm.NewClient(cfg.APIKey, *l)
-	a := agent.NewAgent(*c, *l)
+	c := llm.NewClient(cfg.APIKey, l, cfg)
+	a := agent.NewAgent(c, l)
 
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: agent <config>")
-		os.Exit(1)
-	}
 	a.Run(os.Args[1])
 
 }
