@@ -17,3 +17,12 @@ run-diff-wsl:
 	@echo "Получаем diff из WSL..."
 	ssh work-wsl-linux "git -C $(WSL_PROJECT_CRM) diff origin/dev...\$$(git -C $(WSL_PROJECT_CRM) branch --show-current)" | \
 		go run cmd/agent/main.go
+
+db-up:
+	docker compose up -d
+
+migrate-up:
+	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" up
+
+migrate-down:
+	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" down
