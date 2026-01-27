@@ -1,3 +1,19 @@
-
 run-diff:
-	go run cmd/agent/main.go "$$(git diff main $$(git branch --show-current))"
+	@read -p "Введите путь к проекту: " PROJECT; \
+	echo "Используем проект: $$PROJECT"; \
+	git -C $$PROJECT diff dev $$(git -C $$PROJECT branch --show-current) | \
+		go run cmd/agent/main.go
+
+run-diff1:
+	@read -p "WSL project path: " PROJECT; \
+	ssh work-wsl-linux "git -C $$PROJECT diff origin/dev...\$$(git -C $$PROJECT branch --show-current)"
+
+# Укажи WSL проект
+WSL_PROJECT_CRM=/home/malinovskiy.t/GolandProjects/crm-backend
+WSL_PROJECT_CABINET=/home/malinovskiyt/projects/WB/cabinet-backend
+WSL_PROJECT_NS=/home/malinovskiyt/projects/WB/notification-service
+
+run-diff-wsl:
+	@echo "Получаем diff из WSL..."
+	ssh work-wsl-linux "git -C $(WSL_PROJECT_CRM) diff origin/dev...\$$(git -C $(WSL_PROJECT_CRM) branch --show-current)" | \
+		go run cmd/agent/main.go

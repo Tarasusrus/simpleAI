@@ -24,6 +24,7 @@ func (a *Agent) Run(query string) {
 	r, err := a.Ask(query)
 	if err != nil {
 		a.Error("RunFunc", "Err", err)
+		return
 	}
 	fmt.Println(r)
 }

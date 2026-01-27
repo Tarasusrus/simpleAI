@@ -7,6 +7,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"log/slog"
 	"simpleAI/config"
+	"time"
 )
 
 var ErrChatCompletion = errors.New("Completions.New.Err")
@@ -24,8 +25,9 @@ func NewClient(key string, l *slog.Logger, c config.Config) Client {
 
 func (c *Client) Ask(prompt string) (string, error) {
 	var (
-		ctx = context.Background()
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	)
+	defer cancel()
 	chatCompletion, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(c.cfg.SysPrompt),
@@ -34,46 +36,12 @@ func (c *Client) Ask(prompt string) (string, error) {
 		Model: openai.ChatModelGPT4_1Mini,
 	})
 	if err != nil {
-		c.l.Error("Failed to create chat", ErrChatCompletion.Error(), err)
+		c.l.Error("Failed to create chat", "err", err, "code", ErrChatCompletion.Error())
 		return "", err
 	}
 
-	return chatCompletion.Choices[0].Message.Content, nil
-}
-
-func (c *Client) Asksssss(prompt string) (string, error) {
-	var (
-		ctx = context.Background()
-	)
-	chatCompletion, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(c.cfg.SysPrompt),
-			openai.UserMessage(prompt),
-		},
-		Model: openai.ChatModelGPT4_1Mini,
-	})
-	if err != nil {
-		c.l.Error("Failed to create chat", ErrChatCompletion.Error(), err)
-		return "", err
-	}
-
-	return chatCompletion.Choices[0].Message.Content, nil
-}
-
-func (c *Client) Asksssssssss(prompt string) (string, error) {
-	var (
-		ctx = context.Background()
-	)
-	chatCompletion, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(c.cfg.SysPrompt),
-			openai.UserMessage(prompt),
-		},
-		Model: openai.ChatModelGPT4_1Mini,
-	})
-	if err != nil {
-		c.l.Error("Failed to create chat", ErrChatCompletion.Error(), err)
-		return "", err
+	if len(chatCompletion.Choices) == 0 {
+		return "", errors.New("empty chat completion choices")
 	}
 
 	return chatCompletion.Choices[0].Message.Content, nil
