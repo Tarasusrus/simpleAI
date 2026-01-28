@@ -7,9 +7,9 @@ import (
 )
 
 type Config struct {
-	APIKey    string   `env:"API_KEY"`
-	SysPrompt string   `env:"SYS_PROMPT"`
-	DB        DBConfig `env:",inline"`
+	APIKey    string    `env:"API_KEY"`
+	SysPrompt string    `env:"SYS_PROMPT"`
+	DB        DBConfig  `env:",inline"`
 	RAG       RAGConfig `env:",inline"`
 }
 
@@ -48,6 +48,17 @@ func LoadConfig() (Config, error) {
 		EmbeddingModel: getenvOrDefault("EMBEDDING_MODEL", "text-embedding-3-small"),
 	}
 	return cfg, nil
+}
+
+func LoadDBConfig() (DBConfig, error) {
+	_ = godotenv.Load(".env")
+	return DBConfig{
+		Host: getenvOrDefault("POSTGRES_HOST", "localhost"),
+		Port: getenvOrDefault("POSTGRES_PORT", "5432"),
+		Name: getenvOrDefault("POSTGRES_DB", "simpleai"),
+		User: getenvOrDefault("POSTGRES_USER", "simpleai"),
+		Pass: getenvOrDefault("POSTGRES_PASSWORD", "simpleai"),
+	}, nil
 }
 
 func getenvOrDefault(key, def string) string {

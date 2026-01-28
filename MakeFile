@@ -13,6 +13,13 @@ WSL_PROJECT_CRM=/home/malinovskiy.t/GolandProjects/crm-backend
 WSL_PROJECT_CABINET=/home/malinovskiyt/projects/WB/cabinet-backend
 WSL_PROJECT_NS=/home/malinovskiyt/projects/WB/notification-service
 
+# Defaults for local Postgres (can be overridden via env)
+POSTGRES_HOST ?= localhost
+POSTGRES_PORT ?= 5432
+POSTGRES_DB ?= simpleai
+POSTGRES_USER ?= simpleai
+POSTGRES_PASSWORD ?= simpleai
+
 run-diff-wsl:
 	@echo "Получаем diff из WSL..."
 	ssh work-wsl-linux "git -C $(WSL_PROJECT_CRM) diff origin/dev...\$$(git -C $(WSL_PROJECT_CRM) branch --show-current)" | \
@@ -22,7 +29,7 @@ db-up:
 	docker compose up -d
 
 migrate-up:
-	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" up
+	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" up
 
 migrate-down:
-	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" down
+	goose -dir migrations postgres "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable" down

@@ -89,3 +89,31 @@ goose -dir migrations postgres "postgres://simpleai:simpleai@localhost:5432/simp
 
 ## Seed Categories
 Initial top-level categories are added by `migrations/00002_seed_categories.sql`.
+
+## Ingestion CLI (v1)
+Minimal loader that writes `receipt`, `receipt_item`, and `rag_document` (no embeddings yet):
+
+```bash
+go run cmd/ingest/main.go -file receipt.json
+```
+
+Example payload:
+
+```json
+{
+  "source": "telegram",
+  "source_ref": "msg:123",
+  "purchase_ts": "2026-01-24T12:00:00Z",
+  "currency": "RUB",
+  "total_amount": 1000.00,
+  "raw_text": "Чек: мука 1000гр 1000р",
+  "items": [
+    {
+      "name": "Мука",
+      "quantity": 1.000,
+      "unit_price": 1000.00,
+      "amount": 1000.00
+    }
+  ]
+}
+```
