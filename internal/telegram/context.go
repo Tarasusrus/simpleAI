@@ -15,11 +15,12 @@ type AgentService interface {
 }
 
 type Context struct {
-	Bot     *tgbotapi.BotAPI
-	Update  tgbotapi.Update
-	Logger  *slog.Logger
-	Agent   AgentService
-	Allowed []int64
+	Bot       *tgbotapi.BotAPI
+	Update    tgbotapi.Update
+	Logger    *slog.Logger
+	Agent     AgentService
+	Allowed   []int64
+	RequestID string
 }
 
 func (c *Context) ChatID() (int64, error) {
