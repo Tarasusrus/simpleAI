@@ -160,7 +160,7 @@ func loadLLMConfig() LLMConfig {
 		RetryCount:       parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
 		RetryBase:        parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
 		OllamaBaseURL:    getenvOrDefault("OLLAMA_BASE_URL", "http://localhost:11434"),
-		OllamaModel:      getenvOrDefault("OLLAMA_MODEL", "llama3.2"),
+		OllamaModel:      getenvOrDefault("OLLAMA_MODEL", "gpt-oss:20b"),
 		OllamaEmbedModel: strings.TrimSpace(os.Getenv("OLLAMA_EMBED_MODEL")),
 	}
 }
