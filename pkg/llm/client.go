@@ -46,3 +46,34 @@ func (c *Client) Ask(prompt string) (string, error) {
 
 	return chatCompletion.Choices[0].Message.Content, nil
 }
+
+func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
+	if len(inputs) == 0 {
+		return nil, errors.New("no inputs for embedding")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := c.api.Embeddings.New(reqCtx, openai.EmbeddingNewParams{
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: inputs,
+		},
+		Model: openai.EmbeddingModel(c.cfg.RAG.EmbeddingModel),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	embeddings := make([][]float32, len(inputs))
+	for _, item := range resp.Data {
+		if item.Index < 0 || int(item.Index) >= len(inputs) {
+			continue
+		}
+		vec := make([]float32, len(item.Embedding))
+		for i, v := range item.Embedding {
+			vec[i] = float32(v)
+		}
+		embeddings[item.Index] = vec
+	}
+	return embeddings, nil
+}

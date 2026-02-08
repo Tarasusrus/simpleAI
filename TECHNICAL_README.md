@@ -138,6 +138,7 @@
 ## RAG: эмбеддинги
 - Модель: `text-embedding-3-small`.
 - Размер вектора: 1536 (соответствует `vector(1536)` в схеме).
+- Команда (v1): `go run cmd/embeddings/main.go -limit 100 -batch 20`
 
 ## RAG: шаблоны контента
 - Receipt: `Receipt | store={store} | ts={purchase_ts} | total={total} {currency} | items={item_count}`
