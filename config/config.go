@@ -18,6 +18,7 @@ type Config struct {
 	RAG       RAGConfig `env:",inline"`
 	Mail      MailConfig
 	Telegram  TelegramBotConfig
+	LLM       LLMConfig
 }
 
 type DBConfig struct {
@@ -30,6 +31,10 @@ type DBConfig struct {
 
 type RAGConfig struct {
 	EmbeddingModel string `env:"EMBEDDING_MODEL" default:"text-embedding-3-small"`
+}
+
+type LLMConfig struct {
+	Timeout time.Duration
 }
 
 type MailConfig struct {
@@ -95,6 +100,7 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.Mail = mailCfg
 	cfg.Telegram = loadTelegramBotConfig()
+	cfg.LLM = loadLLMConfig()
 	return cfg, nil
 }
 
@@ -139,6 +145,12 @@ func loadTelegramBotConfig() TelegramBotConfig {
 	}
 }
 
+func loadLLMConfig() LLMConfig {
+	return LLMConfig{
+		Timeout: parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+	}
+}
+
 func parseChatIDs(raw string) []int64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -167,6 +179,14 @@ func parseInt(raw string, def int) int {
 		return v
 	}
 	return def
+}
+
+func parseDurationSeconds(raw string, def int) time.Duration {
+	seconds := parseInt(raw, def)
+	if seconds <= 0 {
+		seconds = def
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func parseDurationMs(raw string) time.Duration {
