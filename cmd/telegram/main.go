@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/google/uuid"
 
 	"simpleAI/config"
 	"simpleAI/internal/agent"
@@ -37,6 +38,8 @@ func main() {
 	router := telegram.NewRouter()
 	router.Use(telegram.RequireAllowedChats(cfg.Telegram.AllowedChats))
 	router.Use(telegram.LogUpdates())
+	router.Use(telegram.LogDuration())
+	router.Use(telegram.RateLimit(cfg.Telegram.RateLimit))
 	router.HandleCommand("start", telegram.HandleStart)
 	router.HandleCommand("help", telegram.HandleHelp)
 	router.HandleDefault(telegram.HandleDefault)
@@ -59,11 +62,12 @@ func main() {
 			defer func() { <-sem }()
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			err := router.HandleUpdate(ctx, &telegram.Context{
-				Bot:     bot,
-				Update:  update,
-				Logger:  logger,
-				Agent:   agentService,
-				Allowed: cfg.Telegram.AllowedChats,
+				Bot:       bot,
+				Update:    update,
+				Logger:    logger,
+				Agent:     agentService,
+				Allowed:   cfg.Telegram.AllowedChats,
+				RequestID: uuid.NewString(),
 			})
 			cancel()
 			if err != nil {

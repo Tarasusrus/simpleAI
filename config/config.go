@@ -60,6 +60,7 @@ type TelegramBotConfig struct {
 	AllowedChats   []int64
 	PollingTimeout time.Duration
 	Workers        int
+	RateLimit      time.Duration
 }
 
 func LoadConfig() (Config, error) {
@@ -127,6 +128,7 @@ func loadTelegramBotConfig() TelegramBotConfig {
 		AllowedChats:   parseChatIDs(os.Getenv("TELEGRAM_ALLOWED_CHATS")),
 		PollingTimeout: 30 * time.Second,
 		Workers:        parseInt(os.Getenv("TELEGRAM_WORKERS"), 4),
+		RateLimit:      parseDurationMs(os.Getenv("TELEGRAM_RATE_LIMIT_MS")),
 	}
 }
 
@@ -158,6 +160,17 @@ func parseInt(raw string, def int) int {
 		return v
 	}
 	return def
+}
+
+func parseDurationMs(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if v, err := strconv.Atoi(raw); err == nil {
+		return time.Duration(v) * time.Millisecond
+	}
+	return 0
 }
 
 func getenvOrDefault(key, def string) string {
