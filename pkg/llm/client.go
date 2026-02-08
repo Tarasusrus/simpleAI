@@ -7,6 +7,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"log/slog"
 	"simpleAI/config"
+	"strings"
 	"time"
 )
 
@@ -38,7 +39,12 @@ func (c *Client) Ask(prompt string) (string, error) {
 		cancel()
 
 		if err == nil && len(chatCompletion.Choices) > 0 {
-			return chatCompletion.Choices[0].Message.Content, nil
+			content := strings.TrimSpace(chatCompletion.Choices[0].Message.Content)
+			if content == "" {
+				err = errors.New("empty chat completion content")
+			} else {
+				return content, nil
+			}
 		}
 		if err == nil {
 			err = errors.New("empty chat completion choices")
