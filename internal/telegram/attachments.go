@@ -91,7 +91,11 @@ func downloadFile(ctx context.Context, client *http.Client, url string, target s
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: status=%d", resp.StatusCode)
@@ -103,7 +107,9 @@ func downloadFile(ctx context.Context, client *http.Client, url string, target s
 		return err
 	}
 	if _, err := io.Copy(out, resp.Body); err != nil {
-		_ = out.Close()
+		if cerr := out.Close(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 	if err := out.Close(); err != nil {

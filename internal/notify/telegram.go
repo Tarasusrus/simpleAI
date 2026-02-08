@@ -47,7 +47,11 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("telegram send failed: status=%d", resp.StatusCode)

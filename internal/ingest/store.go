@@ -32,7 +32,9 @@ func (s *Store) IngestReceipt(ctx context.Context, input ReceiptInput) (uuid.UUI
 		return uuid.Nil, err
 	}
 	defer func() {
-		_ = tx.Rollback(ctx)
+		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			_ = err
+		}
 	}()
 
 	receiptID := uuid.New()

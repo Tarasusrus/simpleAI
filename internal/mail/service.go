@@ -63,7 +63,11 @@ func (r *Runner) runAccount(ctx context.Context, account Account) error {
 		if runErr != nil {
 			status = "failed"
 		}
-		_ = r.store.FinishRun(ctx, runID, status, insertedCount, errorText(runErr))
+		if err := r.store.FinishRun(ctx, runID, status, insertedCount, errorText(runErr)); err != nil {
+			if r.logger != nil {
+				r.logger.Error("mail run finish failed", "email", stored.Email, "err", err)
+			}
+		}
 		r.logger.Info("mail account run finished",
 			"email", stored.Email,
 			"status", status,

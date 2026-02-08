@@ -36,7 +36,11 @@ func (p *IMAPProvider) Fetch(ctx context.Context, account Account, checkpoint Ch
 	if err != nil {
 		return FetchResult{}, err
 	}
-	defer func() { _ = client.Logout() }()
+	defer func() {
+		if err := client.Logout(); err != nil {
+			_ = err
+		}
+	}()
 
 	if err := client.Authenticate(newXOAuth2Client(account.Email, account.AccessToken)); err != nil {
 		return FetchResult{}, fmt.Errorf("imap authenticate failed: %w", err)

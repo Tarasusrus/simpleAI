@@ -24,7 +24,11 @@ func RequireAllowedChats(allowed []int64) Middleware {
 				return err
 			}
 			if _, ok := allowedSet[chatID]; !ok {
-				_ = tctx.Reply(fmt.Sprintf("Этот чат (%d) не разрешен.", chatID))
+				if err := tctx.Reply(fmt.Sprintf("Этот чат (%d) не разрешен.", chatID)); err != nil {
+					if tctx.Logger != nil {
+						tctx.Logger.Error("telegram reply failed", "err", err)
+					}
+				}
 				return nil
 			}
 			return next(ctx, tctx)
@@ -91,7 +95,11 @@ func RateLimit(minInterval time.Duration) Middleware {
 			prev := lastSeen[chatID]
 			if !prev.IsZero() && now.Sub(prev) < minInterval {
 				mu.Unlock()
-				_ = tctx.Reply("Слишком часто. Попробуй чуть позже.")
+				if err := tctx.Reply("Слишком часто. Попробуй чуть позже."); err != nil {
+					if tctx.Logger != nil {
+						tctx.Logger.Error("telegram reply failed", "err", err)
+					}
+				}
 				return nil
 			}
 			lastSeen[chatID] = now

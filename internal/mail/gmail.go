@@ -121,7 +121,11 @@ func (g *GmailProvider) listMessages(ctx context.Context, accessToken string, la
 	if err != nil {
 		return gmailListResponse{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return gmailListResponse{}, fmt.Errorf("gmail list messages failed: status=%d", resp.StatusCode)
@@ -164,7 +168,11 @@ func (g *GmailProvider) getMessageMetadata(ctx context.Context, accessToken, mes
 	if err != nil {
 		return FetchedMessage{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return FetchedMessage{}, fmt.Errorf("gmail get message failed: status=%d", resp.StatusCode)

@@ -65,7 +65,9 @@ type TelegramBotConfig struct {
 }
 
 func LoadConfig() (Config, error) {
-	_ = godotenv.Load(".env")
+	if err := godotenv.Load(".env"); err != nil {
+		_ = err
+	}
 
 	cfg := Config{}
 	cfg.APIKey = os.Getenv("API_KEY")
@@ -96,7 +98,9 @@ func LoadConfig() (Config, error) {
 }
 
 func LoadDBConfig() (DBConfig, error) {
-	_ = godotenv.Load(".env")
+	if err := godotenv.Load(".env"); err != nil {
+		_ = err
+	}
 	return DBConfig{
 		Host: getenvOrDefault("POSTGRES_HOST", "localhost"),
 		Port: getenvOrDefault("POSTGRES_PORT", "5432"),
