@@ -18,6 +18,16 @@
 3) Сгенерировать эмбеддинги: `go run cmd/embeddings/main.go -limit 100 -batch 20`.
 4) Проверить retrieval: `go run cmd/rag-query/main.go -q "сахар в январе" -limit 5`.
 
+## Telegram‑бот: запуск и тест
+1) Заполни `.env` (минимум): `API_KEY`, `SYS_PROMPT`, `TELEGRAM_BOT_TOKEN`.
+2) Опционально: `TELEGRAM_ALLOWED_CHATS`, `TELEGRAM_MEDIA_DIR`, `TELEGRAM_RATE_LIMIT_MS`.
+3) Запуск: `go run cmd/telegram/main.go`.
+4) Тест‑чеклист:
+   - `/start` и `/help` отвечают корректно.
+   - Обычный текст вызывает ответ агента.
+   - Пустое сообщение возвращает подсказку.
+   - Вложения сохраняются в `TELEGRAM_MEDIA_DIR`.
+
 ## Статус
 Фокус сейчас на RAG по тратам и стабильности LLM‑клиента.
 Параллельно идет унификация строк и ошибок в константы.

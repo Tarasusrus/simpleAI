@@ -118,6 +118,17 @@
 - Вход: JSON с сырым текстом и нормализованными позициями.
 - Выход: сохраняет `receipt`, `receipt_item` и `rag_document` (без эмбеддингов).
 
+## Telegram‑бот (polling)
+Минимальный запуск:
+1) `API_KEY`, `SYS_PROMPT`, `TELEGRAM_BOT_TOKEN` в `.env`.
+2) Опционально: `TELEGRAM_ALLOWED_CHATS`, `TELEGRAM_MEDIA_DIR`, `TELEGRAM_RATE_LIMIT_MS`.
+3) Команда: `go run cmd/telegram/main.go`.
+
+Проверка:
+- `/start` и `/help` дают ответы.
+- Текст вызывает LLM‑ответ.
+- Вложения сохраняются в `TELEGRAM_MEDIA_DIR`.
+
 Пример JSON:
 
 ```json
