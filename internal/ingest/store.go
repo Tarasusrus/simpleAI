@@ -29,6 +29,12 @@ func (s *Store) IngestReceipt(ctx context.Context, input ReceiptInput) (uuid.UUI
 		return uuid.Nil, err
 	}
 
+	if existingID, err := s.findReceiptID(ctx, input.Source, input.SourceRef); err == nil {
+		return existingID, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, err
+	}
+
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return uuid.Nil, err
@@ -53,6 +59,12 @@ func (s *Store) IngestReceipt(ctx context.Context, input ReceiptInput) (uuid.UUI
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, receiptID, input.Source, input.SourceRef, input.PurchaseTS, emptyToNull(input.Currency), input.TotalAmount, input.RawText, storeID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			existingID, lookupErr := s.findReceiptID(ctx, input.Source, input.SourceRef)
+			if lookupErr == nil {
+				return existingID, nil
+			}
+		}
 		return uuid.Nil, mapPgError(err)
 	}
 
@@ -230,6 +242,25 @@ func emptyToNull(value string) *string {
 func hashContent(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
+}
+
+func (s *Store) findReceiptID(ctx context.Context, source string, sourceRef string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.pool.QueryRow(ctx, `
+		SELECT id FROM receipt WHERE source = $1 AND source_ref = $2
+	`, source, sourceRef).Scan(&id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }
 
 func mapPgError(err error) error {

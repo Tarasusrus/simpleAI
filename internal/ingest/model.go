@@ -36,9 +36,21 @@ func (r ReceiptInput) Validate() error {
 	if strings.TrimSpace(r.RawText) == "" {
 		return errors.New("raw_text is required")
 	}
+	if r.TotalAmount != nil && *r.TotalAmount < 0 {
+		return errors.New("total_amount must be non-negative")
+	}
 	for i, item := range r.Items {
 		if strings.TrimSpace(item.Name) == "" {
 			return errors.New("items[" + itoa(i) + "].name is required")
+		}
+		if item.Quantity != nil && *item.Quantity < 0 {
+			return errors.New("items[" + itoa(i) + "].quantity must be non-negative")
+		}
+		if item.UnitPrice != nil && *item.UnitPrice < 0 {
+			return errors.New("items[" + itoa(i) + "].unit_price must be non-negative")
+		}
+		if item.Amount != nil && *item.Amount < 0 {
+			return errors.New("items[" + itoa(i) + "].amount must be non-negative")
 		}
 	}
 	return nil
