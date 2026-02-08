@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,10 +104,11 @@ func insertRagDocument(ctx context.Context, tx pgx.Tx, sourceType string, source
 	if err != nil {
 		return err
 	}
+	contentHash := hashContent(content)
 	_, err = tx.Exec(ctx, `
-		INSERT INTO rag_document (id, source_type, source_id, content, metadata)
-		VALUES ($1, $2, $3, $4, $5)
-	`, uuid.New(), sourceType, sourceID, content, payload)
+		INSERT INTO rag_document (id, source_type, source_id, content, metadata, content_hash, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, uuid.New(), sourceType, sourceID, content, payload, contentHash, time.Now().UTC())
 	return err
 }
 
@@ -222,6 +225,11 @@ func emptyToNull(value string) *string {
 	}
 	v := value
 	return &v
+}
+
+func hashContent(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 func mapPgError(err error) error {

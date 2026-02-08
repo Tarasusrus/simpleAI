@@ -49,6 +49,12 @@ Chunking rules:
 - Keep documents small enough for embedding (<= 1-2k chars).
 - Prefer per-item documents for precise retrieval.
 
+## Reindex Policy (v1)
+- Each `rag_document` stores `content_hash` and `updated_at`.
+- Reindex when:
+  - `embedding` is NULL, or
+  - `content_hash` differs from the current content hash.
+
 ## RAG Pipeline (high level)
 1) Ingestion:
    - Receive raw receipt text.

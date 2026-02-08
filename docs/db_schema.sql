@@ -41,8 +41,11 @@ CREATE TABLE rag_document (
     source_id UUID NOT NULL,
     content TEXT NOT NULL,
     embedding vector(1536),
+    content_hash TEXT,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    embedding_updated_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX idx_receipt_source ON receipt (source, source_ref);
@@ -50,3 +53,4 @@ CREATE UNIQUE INDEX idx_store_name ON store (name);
 CREATE INDEX idx_receipt_store_id ON receipt (store_id);
 CREATE INDEX idx_rag_document_source ON rag_document (source_type, source_id);
 CREATE INDEX idx_rag_document_embedding ON rag_document USING hnsw (embedding vector_l2_ops);
+CREATE INDEX idx_rag_document_content_hash ON rag_document (content_hash);
