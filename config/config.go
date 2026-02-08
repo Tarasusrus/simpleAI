@@ -33,7 +33,9 @@ type RAGConfig struct {
 }
 
 type LLMConfig struct {
-	Timeout time.Duration
+	Timeout    time.Duration
+	RetryCount int
+	RetryBase  time.Duration
 }
 
 type MailConfig struct {
@@ -146,7 +148,9 @@ func loadTelegramBotConfig() TelegramBotConfig {
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Timeout: parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		Timeout:    parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
+		RetryBase:  parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
 	}
 }
 
