@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"simpleAI/internal/core"
 )
 
 type Incoming struct {
@@ -14,65 +14,21 @@ type Incoming struct {
 	UserName    string
 	DisplayName string
 	Text        string
-	Attachments []Attachment
+	Attachments []core.Attachment
 }
 
-type Attachment struct {
-	Type     string
-	FileID   string
-	FileName string
-	MimeType string
-	Size     int
-}
-
-func FromUpdate(update tgbotapi.Update) (Incoming, bool) {
-	if update.Message == nil {
+func FromUpdate(update core.Update) (Incoming, bool) {
+	if update.ChatID == 0 {
 		return Incoming{}, false
 	}
-	msg := update.Message
-	in := Incoming{
-		ChatID:      msg.Chat.ID,
-		UserID:      msg.From.ID,
-		UserName:    msg.From.UserName,
-		DisplayName: strings.TrimSpace(strings.Join([]string{msg.From.FirstName, msg.From.LastName}, " ")),
-		Text:        strings.TrimSpace(msg.Text),
-	}
-
-	if msg.Document != nil {
-		in.Attachments = append(in.Attachments, Attachment{
-			Type:     "document",
-			FileID:   msg.Document.FileID,
-			FileName: msg.Document.FileName,
-			MimeType: msg.Document.MimeType,
-			Size:     msg.Document.FileSize,
-		})
-	}
-	if len(msg.Photo) > 0 {
-		photo := msg.Photo[len(msg.Photo)-1]
-		in.Attachments = append(in.Attachments, Attachment{
-			Type:   "photo",
-			FileID: photo.FileID,
-			Size:   photo.FileSize,
-		})
-	}
-	if msg.Voice != nil {
-		in.Attachments = append(in.Attachments, Attachment{
-			Type:     "voice",
-			FileID:   msg.Voice.FileID,
-			MimeType: msg.Voice.MimeType,
-			Size:     msg.Voice.FileSize,
-		})
-	}
-	if msg.Audio != nil {
-		in.Attachments = append(in.Attachments, Attachment{
-			Type:     "audio",
-			FileID:   msg.Audio.FileID,
-			FileName: msg.Audio.FileName,
-			MimeType: msg.Audio.MimeType,
-			Size:     msg.Audio.FileSize,
-		})
-	}
-	return in, true
+	return Incoming{
+		ChatID:      update.ChatID,
+		UserID:      update.UserID,
+		UserName:    update.UserName,
+		DisplayName: update.DisplayName,
+		Text:        strings.TrimSpace(update.Text),
+		Attachments: update.Attachments,
+	}, true
 }
 
 func (i Incoming) AttachmentSummary() string {
@@ -81,9 +37,9 @@ func (i Incoming) AttachmentSummary() string {
 	}
 	parts := make([]string, 0, len(i.Attachments))
 	for _, a := range i.Attachments {
-		label := a.Type
-		if a.FileName != "" {
-			label = fmt.Sprintf("%s:%s", a.Type, a.FileName)
+		label := a.Kind
+		if a.Name != "" {
+			label = fmt.Sprintf("%s:%s", a.Kind, a.Name)
 		}
 		parts = append(parts, label)
 	}

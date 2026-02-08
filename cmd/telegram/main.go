@@ -7,12 +7,13 @@ import (
 	"os"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/google/uuid"
 
 	"simpleAI/config"
 	llmfactory "simpleAI/internal/adapters/llm"
+	telegramadapter "simpleAI/internal/adapters/telegram"
 	"simpleAI/internal/agent"
+	"simpleAI/internal/core"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
 )
@@ -35,7 +36,7 @@ func main() {
 		}
 	}
 
-	bot, err := tgbotapi.NewBotAPI(cfg.Telegram.Token)
+	adapter, err := telegramadapter.NewAdapter(cfg.Telegram.Token, cfg.Telegram.PollingTimeout)
 	if err != nil {
 		log.Fatal("Err while init telegram bot: ", err)
 	}
@@ -56,10 +57,10 @@ func main() {
 	router.HandleCommand("help", telegram.HandleHelp)
 	router.HandleDefault(telegram.HandleDefault)
 
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = int(cfg.Telegram.PollingTimeout / time.Second)
-
-	updates := bot.GetUpdatesChan(u)
+	updates, err := adapter.Updates(context.Background())
+	if err != nil {
+		log.Fatal("Err while init telegram updates: ", err)
+	}
 	logger.Info("telegram bot started")
 
 	workers := cfg.Telegram.Workers
@@ -70,14 +71,15 @@ func main() {
 
 	for update := range updates {
 		sem <- struct{}{}
-		go func(update tgbotapi.Update) {
+		go func(update core.Update) {
 			defer func() { <-sem }()
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			err := router.HandleUpdate(ctx, &telegram.Context{
-				Bot:       bot,
+				Bot:       adapter,
 				Update:    update,
 				Logger:    logger,
 				Agent:     agentService,
+				Fetcher:   adapter,
 				Allowed:   cfg.Telegram.AllowedChats,
 				RequestID: uuid.NewString(),
 				MediaDir:  cfg.Telegram.MediaDir,

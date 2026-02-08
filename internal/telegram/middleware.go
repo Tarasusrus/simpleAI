@@ -40,12 +40,12 @@ func RequireAllowedChats(allowed []int64) Middleware {
 func LogUpdates() Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
-			if tctx.Logger != nil && tctx.Update.Message != nil {
+			if tctx.Logger != nil && tctx.Update.ChatID != 0 {
 				tctx.Logger.Info("telegram update",
 					"request_id", tctx.RequestID,
-					"chat_id", tctx.Update.Message.Chat.ID,
-					"from", tctx.Update.Message.From.UserName,
-					"command", tctx.Update.Message.Command(),
+					"chat_id", tctx.Update.ChatID,
+					"from", tctx.Update.UserName,
+					"command", commandForLog(tctx.Update.Text),
 				)
 			}
 			return next(ctx, tctx)
@@ -58,10 +58,10 @@ func LogDuration() Middleware {
 		return func(ctx context.Context, tctx *Context) error {
 			start := time.Now()
 			err := next(ctx, tctx)
-			if tctx.Logger != nil && tctx.Update.Message != nil {
+			if tctx.Logger != nil && tctx.Update.ChatID != 0 {
 				tctx.Logger.Info("telegram update processed",
 					"request_id", tctx.RequestID,
-					"chat_id", tctx.Update.Message.Chat.ID,
+					"chat_id", tctx.Update.ChatID,
 					"duration_ms", time.Since(start).Milliseconds(),
 					"error", err,
 				)
@@ -69,6 +69,14 @@ func LogDuration() Middleware {
 			return err
 		}
 	}
+}
+
+func commandForLog(text string) string {
+	cmd, ok := parseCommand(text)
+	if !ok {
+		return ""
+	}
+	return "/" + cmd
 }
 
 func RateLimit(minInterval time.Duration) Middleware {
@@ -122,7 +130,7 @@ func DeduplicateUpdates(maxEntries int) Middleware {
 
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
-			updateID := tctx.Update.UpdateID
+			updateID := tctx.Update.ID
 			mu.Lock()
 			if _, ok := seen[updateID]; ok {
 				mu.Unlock()
