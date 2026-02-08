@@ -30,6 +30,9 @@ func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
 		return nil, fmt.Errorf("API key not found in .env")
 	}
 	client := openai.NewClient(option.WithAPIKey(cfg.APIKey))
+	if logger != nil {
+		logger.Debug("openai client initialized", "model", cfg.LLM.ChatModel)
+	}
 	return &Client{api: client, l: logger, cfg: cfg}, nil
 }
 

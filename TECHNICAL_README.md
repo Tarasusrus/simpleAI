@@ -23,6 +23,7 @@
 - LLM провайдер выбирается через `LLM_PROVIDER` (openai/ollama).
 - При ошибке тестового LLM‑запроса выполняется fallback на Ollama.
 - Telegram меню команд настраивается при запуске (/start, /help).
+- Подробное LLM‑логирование включается через `LOG_LEVEL=debug`.
 - Telegram адаптер вынесен в `internal/adapters/telegram` (tgbotapi из core удален).
 
 ## Ближайшие цели

@@ -61,11 +61,17 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 	retries := c.retryCount()
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
+		if c.logger != nil {
+			c.logger.Debug("ollama request", "model", c.model, "attempt", attempt+1, "max_attempts", retries+1)
+		}
 		text, err := c.askWithModel(ctx, prompt, c.model)
 		if err == nil {
 			return text, nil
 		}
 		if attempt == 0 && c.shouldFallback(err) {
+			if c.logger != nil {
+				c.logger.Warn("ollama fallback triggered", "from_model", c.model, "to_model", c.fallback, "err", err)
+			}
 			if text, fbErr := c.askWithModel(ctx, prompt, c.fallback); fbErr == nil {
 				return text, nil
 			} else {

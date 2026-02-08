@@ -20,6 +20,9 @@ func NewClient(cfg config.Config, logger *slog.Logger) (core.LLMClient, error) {
 	if provider == "" {
 		provider = "openai"
 	}
+	if logger != nil {
+		logger.Debug("llm provider selected", "provider", provider)
+	}
 
 	switch provider {
 	case "openai":
@@ -30,9 +33,19 @@ func NewClient(cfg config.Config, logger *slog.Logger) (core.LLMClient, error) {
 		if err := testLLM(client); err != nil {
 			return fallbackToOllama(cfg, logger, err)
 		}
+		if logger != nil {
+			logger.Debug("llm provider active", "provider", "openai", "model", cfg.LLM.ChatModel)
+		}
 		return client, nil
 	case "ollama":
-		return ollamaadapter.NewClient(cfg, logger)
+		client, err := ollamaadapter.NewClient(cfg, logger)
+		if err != nil {
+			return nil, err
+		}
+		if logger != nil {
+			logger.Debug("llm provider active", "provider", "ollama", "model", cfg.LLM.OllamaModel)
+		}
+		return client, nil
 	default:
 		return nil, fmt.Errorf("unknown LLM provider: %s", provider)
 	}
@@ -49,5 +62,12 @@ func fallbackToOllama(cfg config.Config, logger *slog.Logger, cause error) (core
 	if logger != nil && cause != nil {
 		logger.Warn("LLM provider failed, falling back to Ollama", "err", cause)
 	}
-	return ollamaadapter.NewClient(cfg, logger)
+	client, err := ollamaadapter.NewClient(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	if logger != nil {
+		logger.Debug("llm provider active", "provider", "ollama", "model", cfg.LLM.OllamaModel)
+	}
+	return client, nil
 }

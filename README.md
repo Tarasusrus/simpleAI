@@ -26,6 +26,7 @@
    - Если `LLM_PROVIDER=ollama`, `API_KEY` не нужен.
 2) Если LLM недоступен (ошибка тестового запроса), будет автопереход на Ollama.
 3) Меню команд бота добавляется автоматически (/start, /help).
+4) Для расширенного логирования установи `LOG_LEVEL=debug`.
 2) Опционально: `TELEGRAM_ALLOWED_CHATS`, `TELEGRAM_MEDIA_DIR`, `TELEGRAM_RATE_LIMIT_MS`.
 3) Запуск: `go run cmd/telegram/main.go`.
 4) Тест‑чеклист:
