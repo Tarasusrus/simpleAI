@@ -21,6 +21,7 @@ type Context struct {
 	Agent     AgentService
 	Allowed   []int64
 	RequestID string
+	MediaDir  string
 }
 
 func (c *Context) ChatID() (int64, error) {

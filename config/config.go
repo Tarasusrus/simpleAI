@@ -61,6 +61,7 @@ type TelegramBotConfig struct {
 	PollingTimeout time.Duration
 	Workers        int
 	RateLimit      time.Duration
+	MediaDir       string
 }
 
 func LoadConfig() (Config, error) {
@@ -129,6 +130,7 @@ func loadTelegramBotConfig() TelegramBotConfig {
 		PollingTimeout: 30 * time.Second,
 		Workers:        parseInt(os.Getenv("TELEGRAM_WORKERS"), 4),
 		RateLimit:      parseDurationMs(os.Getenv("TELEGRAM_RATE_LIMIT_MS")),
+		MediaDir:       getenvOrDefault("TELEGRAM_MEDIA_DIR", "data/telegram"),
 	}
 }
 
