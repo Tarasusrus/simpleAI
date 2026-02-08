@@ -1,3 +1,4 @@
+// Package notify содержит код пакета notify и его задачи.
 package notify
 
 import (

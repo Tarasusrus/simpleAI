@@ -1,3 +1,4 @@
+// Package llm реализует клиент к LLM (чат и эмбеддинги).
 package llm
 
 import (
@@ -7,6 +8,8 @@ import (
 	"github.com/openai/openai-go/option"
 	"log/slog"
 	"simpleAI/config"
+	"simpleAI/internal/apperr"
+	"strings"
 	"time"
 )
 
@@ -41,8 +44,11 @@ func (c *Client) Ask(prompt string) (string, error) {
 	}
 
 	if len(chatCompletion.Choices) == 0 {
-		return "", errors.New("empty chat completion choices")
+		return "", apperr.New("LLM_EMPTY_CHOICES", "empty chat completion choices", nil)
 	}
-
-	return chatCompletion.Choices[0].Message.Content, nil
+	content := strings.TrimSpace(chatCompletion.Choices[0].Message.Content)
+	if content == "" {
+		return "", apperr.New("LLM_EMPTY_CONTENT", "empty chat completion content", nil)
+	}
+	return content, nil
 }

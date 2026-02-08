@@ -1,3 +1,4 @@
+// Package config содержит код пакета config и его задачи.
 package config
 
 import (

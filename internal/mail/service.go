@@ -1,3 +1,4 @@
+// Package mail содержит код пакета mail и его задачи.
 package mail
 
 import (

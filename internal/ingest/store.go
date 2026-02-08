@@ -1,3 +1,4 @@
+// Package ingest содержит код пакета ingest и его задачи.
 package ingest
 
 import (
