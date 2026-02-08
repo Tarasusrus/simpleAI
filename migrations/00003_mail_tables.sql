@@ -8,6 +8,9 @@ CREATE TABLE mail_account (
     refresh_token TEXT,
     client_id TEXT,
     client_secret TEXT,
+    host TEXT,
+    port INTEGER,
+    use_tls BOOLEAN,
     labels TEXT[],
     folders TEXT[],
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()

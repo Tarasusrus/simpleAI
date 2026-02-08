@@ -41,11 +41,12 @@ func (s *Store) UpsertAccount(ctx context.Context, account Account) (Account, er
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO mail_account (
 				id, provider, email, access_token, refresh_token, client_id, client_secret,
-				labels, folders, created_at
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+				host, port, use_tls, labels, folders, created_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		`, id, account.Provider, account.Email,
 			emptyToNull(account.AccessToken), emptyToNull(account.RefreshToken),
 			emptyToNull(account.ClientID), emptyToNull(account.ClientSecret),
+			emptyToNull(account.Host), intToNull(account.Port), account.UseTLS,
 			account.Labels, account.Folders, createdAt,
 		)
 		if err != nil {
@@ -58,11 +59,15 @@ func (s *Store) UpsertAccount(ctx context.Context, account Account) (Account, er
 			    refresh_token = $2,
 			    client_id = $3,
 			    client_secret = $4,
-			    labels = $5,
-			    folders = $6
-			WHERE id = $7
+			    host = $5,
+			    port = $6,
+			    use_tls = $7,
+			    labels = $8,
+			    folders = $9
+			WHERE id = $10
 		`, emptyToNull(account.AccessToken), emptyToNull(account.RefreshToken),
 			emptyToNull(account.ClientID), emptyToNull(account.ClientSecret),
+			emptyToNull(account.Host), intToNull(account.Port), account.UseTLS,
 			account.Labels, account.Folders, id,
 		)
 		if err != nil {
@@ -187,6 +192,14 @@ func (s *Store) InsertMessages(ctx context.Context, accountID string, messages [
 
 func emptyToNull(value string) *string {
 	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	v := value
+	return &v
+}
+
+func intToNull(value int) *int {
+	if value == 0 {
 		return nil
 	}
 	v := value
