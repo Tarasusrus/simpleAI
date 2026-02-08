@@ -34,14 +34,15 @@ type RAGConfig struct {
 }
 
 type LLMConfig struct {
-	Provider         string
-	ChatModel        string
-	Timeout          time.Duration
-	RetryCount       int
-	RetryBase        time.Duration
-	OllamaBaseURL    string
-	OllamaModel      string
-	OllamaEmbedModel string
+	Provider            string
+	ChatModel           string
+	Timeout             time.Duration
+	RetryCount          int
+	RetryBase           time.Duration
+	OllamaBaseURL       string
+	OllamaModel         string
+	OllamaEmbedModel    string
+	OllamaFallbackModel string
 }
 
 type MailConfig struct {
@@ -154,14 +155,15 @@ func loadTelegramBotConfig() TelegramBotConfig {
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Provider:         getenvOrDefault("LLM_PROVIDER", "openai"),
-		ChatModel:        getenvOrDefault("LLM_CHAT_MODEL", "gpt-4.1-mini"),
-		Timeout:          parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
-		RetryCount:       parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
-		RetryBase:        parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
-		OllamaBaseURL:    getenvOrDefault("OLLAMA_BASE_URL", "http://localhost:11434"),
-		OllamaModel:      getenvOrDefault("OLLAMA_MODEL", "gpt-oss:20b"),
-		OllamaEmbedModel: strings.TrimSpace(os.Getenv("OLLAMA_EMBED_MODEL")),
+		Provider:            getenvOrDefault("LLM_PROVIDER", "openai"),
+		ChatModel:           getenvOrDefault("LLM_CHAT_MODEL", "gpt-4.1-mini"),
+		Timeout:             parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		RetryCount:          parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
+		RetryBase:           parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		OllamaBaseURL:       getenvOrDefault("OLLAMA_BASE_URL", "http://localhost:11434"),
+		OllamaModel:         getenvOrDefault("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M"),
+		OllamaEmbedModel:    strings.TrimSpace(os.Getenv("OLLAMA_EMBED_MODEL")),
+		OllamaFallbackModel: strings.TrimSpace(os.Getenv("OLLAMA_FALLBACK_MODEL")),
 	}
 }
 

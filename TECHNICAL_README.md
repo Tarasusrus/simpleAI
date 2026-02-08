@@ -22,6 +22,7 @@
 - Core: интерфейсы LLM/Bot вынесены в `internal/core` для dependency inversion.
 - LLM провайдер выбирается через `LLM_PROVIDER` (openai/ollama).
 - При ошибке тестового LLM‑запроса выполняется fallback на Ollama.
+- Telegram меню команд настраивается при запуске (/start, /help).
 - Telegram адаптер вынесен в `internal/adapters/telegram` (tgbotapi из core удален).
 
 ## Ближайшие цели

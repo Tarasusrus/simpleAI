@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +22,7 @@ type Client struct {
 	baseURL    string
 	model      string
 	embedModel string
+	fallback   string
 	sysPrompt  string
 	httpClient *http.Client
 	logger     *slog.Logger
@@ -44,6 +46,7 @@ func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		model:      model,
 		embedModel: embedModel,
+		fallback:   strings.TrimSpace(cfg.LLM.OllamaFallbackModel),
 		sysPrompt:  cfg.SysPrompt,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		logger:     logger,
@@ -58,27 +61,15 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 	retries := c.retryCount()
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
-		reqBody := map[string]any{
-			"model":  c.model,
-			"prompt": prompt,
-			"stream": false,
-		}
-		if strings.TrimSpace(c.sysPrompt) != "" {
-			reqBody["system"] = c.sysPrompt
-		}
-		resp, err := c.postJSON(ctx, "/api/generate", reqBody)
+		text, err := c.askWithModel(ctx, prompt, c.model)
 		if err == nil {
-			var payload struct {
-				Response string `json:"response"`
-			}
-			if unmarshalErr := json.Unmarshal(resp, &payload); unmarshalErr != nil {
-				err = fmt.Errorf("ollama parse response: %w", unmarshalErr)
+			return text, nil
+		}
+		if attempt == 0 && c.shouldFallback(err) {
+			if text, fbErr := c.askWithModel(ctx, prompt, c.fallback); fbErr == nil {
+				return text, nil
 			} else {
-				text := strings.TrimSpace(payload.Response)
-				if text != "" {
-					return text, nil
-				}
-				err = apperr.New(constants.ErrCodeLLMEmptyContent, constants.ErrMsgLLMEmptyContent, nil)
+				err = fbErr
 			}
 		}
 		lastErr = err
@@ -87,6 +78,50 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 		}
 	}
 	return "", lastErr
+}
+
+func (c *Client) askWithModel(ctx context.Context, prompt string, model string) (string, error) {
+	if strings.TrimSpace(model) == "" {
+		return "", fmt.Errorf("ollama model is empty")
+	}
+	reqBody := map[string]any{
+		"model":  model,
+		"prompt": prompt,
+		"stream": false,
+	}
+	if strings.TrimSpace(c.sysPrompt) != "" {
+		reqBody["system"] = c.sysPrompt
+	}
+	resp, err := c.postJSON(ctx, "/api/generate", reqBody)
+	if err == nil {
+		var payload struct {
+			Response string `json:"response"`
+		}
+		if unmarshalErr := json.Unmarshal(resp, &payload); unmarshalErr != nil {
+			err = fmt.Errorf("ollama parse response: %w", unmarshalErr)
+		} else {
+			text := strings.TrimSpace(payload.Response)
+			if text != "" {
+				return text, nil
+			}
+			err = apperr.New(constants.ErrCodeLLMEmptyContent, constants.ErrMsgLLMEmptyContent, nil)
+		}
+	}
+	return "", err
+}
+
+func (c *Client) shouldFallback(err error) bool {
+	if c.fallback == "" || c.fallback == c.model {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "status 404") || strings.Contains(msg, "not found") {
+		return true
+	}
+	return false
 }
 
 func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
