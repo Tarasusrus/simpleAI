@@ -3,19 +3,26 @@ package agent
 import (
 	"fmt"
 	"log/slog"
+	"simpleAI/internal/plugin"
 	"simpleAI/pkg/llm"
 )
 
 type Agent struct {
 	llm.Client
 	*slog.Logger
+	Registry *plugin.Registry
 	// cache for session store
 }
 
 func NewAgent(c llm.Client, l *slog.Logger) *Agent {
+	return NewAgentWithRegistry(c, l, nil)
+}
+
+func NewAgentWithRegistry(c llm.Client, l *slog.Logger, registry *plugin.Registry) *Agent {
 	return &Agent{
-		Client: c,
-		Logger: l,
+		Client:   c,
+		Logger:   l,
+		Registry: registry,
 	}
 }
 
