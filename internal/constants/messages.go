@@ -17,4 +17,6 @@ const (
 	MsgTelegramAttachmentsPending = "Вложения получены. Обработка будет добавлена скоро."
 	MsgTelegramRateLimit          = "Слишком часто. Попробуй чуть позже."
 	MsgTelegramChatNotAllowed     = "Этот чат (%d) не разрешен."
+	MsgTelegramAgentError         = "Ошибка агента: %v"
+	MsgTelegramNoReply            = "Нет ответа от агента."
 )

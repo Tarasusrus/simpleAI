@@ -5,21 +5,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"simpleAI/internal/constants"
 )
 
 func HandleStart(ctx context.Context, tctx *Context) error {
-	return tctx.Reply("Привет! Я фасад для агентов. Напиши сообщение, и я отвечу.")
+	return tctx.Reply(constants.MsgTelegramStart)
 }
 
 func HandleHelp(ctx context.Context, tctx *Context) error {
-	help := strings.Join([]string{
-		"Доступные команды:",
-		"/start - приветствие",
-		"/help - справка",
-		"",
-		"Поддержка файлов и фото будет добавлена отдельно.",
-	}, "\n")
-	return tctx.Reply(help)
+	return tctx.Reply(constants.MsgTelegramHelp)
 }
 
 func HandleDefault(ctx context.Context, tctx *Context) error {
@@ -40,13 +35,13 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		}
 		if incoming.Text == "" {
 			if len(paths) == 0 {
-				return tctx.Reply("Вложения получены. Обработка будет добавлена скоро.")
+				return tctx.Reply(constants.MsgTelegramAttachmentsPending)
 			}
-			return tctx.Reply(fmt.Sprintf("Вложения сохранены: %s", strings.Join(paths, ", ")))
+			return tctx.Reply(fmt.Sprintf(constants.MsgTelegramAttachmentsSaved, strings.Join(paths, ", ")))
 		}
 	}
 	if strings.TrimSpace(incoming.Text) == "" {
-		return tctx.Reply("Пустое сообщение. Напиши запрос.")
+		return tctx.Reply(constants.MsgTelegramEmpty)
 	}
 	if _, err := SaveIngestPayload(ctx, tctx.MediaDir, incoming, nil); err != nil {
 		if tctx.Logger != nil {
@@ -54,7 +49,7 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		}
 	}
 	if tctx.Agent == nil {
-		return tctx.Reply("Агент не настроен.")
+		return tctx.Reply(constants.MsgTelegramNoAgent)
 	}
 
 	prompt := incoming.Text
@@ -64,10 +59,10 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 
 	reply, err := tctx.Agent.Ask(ctx, prompt)
 	if err != nil {
-		return tctx.Reply(fmt.Sprintf("Ошибка агента: %v", err))
+		return tctx.Reply(fmt.Sprintf(constants.MsgTelegramAgentError, err))
 	}
 	if strings.TrimSpace(reply) == "" {
-		reply = "Нет ответа от агента."
+		reply = constants.MsgTelegramNoReply
 	}
 	return tctx.Reply(reply)
 }

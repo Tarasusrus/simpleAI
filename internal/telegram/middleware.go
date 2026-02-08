@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"simpleAI/internal/constants"
 )
 
 func RequireAllowedChats(allowed []int64) Middleware {
@@ -25,7 +27,7 @@ func RequireAllowedChats(allowed []int64) Middleware {
 				return err
 			}
 			if _, ok := allowedSet[chatID]; !ok {
-				if err := tctx.Reply(fmt.Sprintf("Этот чат (%d) не разрешен.", chatID)); err != nil {
+				if err := tctx.Reply(fmt.Sprintf(constants.MsgTelegramChatNotAllowed, chatID)); err != nil {
 					if tctx.Logger != nil {
 						tctx.Logger.Error("telegram reply failed", "err", err)
 					}
@@ -96,7 +98,7 @@ func RateLimit(minInterval time.Duration) Middleware {
 			prev := lastSeen[chatID]
 			if !prev.IsZero() && now.Sub(prev) < minInterval {
 				mu.Unlock()
-				if err := tctx.Reply("Слишком часто. Попробуй чуть позже."); err != nil {
+				if err := tctx.Reply(constants.MsgTelegramRateLimit); err != nil {
 					if tctx.Logger != nil {
 						tctx.Logger.Error("telegram reply failed", "err", err)
 					}
