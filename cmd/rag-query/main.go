@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"simpleAI/config"
+	llmfactory "simpleAI/internal/adapters/llm"
 	"simpleAI/internal/db"
 	"simpleAI/internal/rag"
 	"simpleAI/internal/tools"
-	"simpleAI/pkg/llm"
 )
 
 func main() {
@@ -45,7 +45,10 @@ func run() error {
 	}
 	defer pool.Close()
 
-	client := llm.NewClient(cfg.APIKey, logger, cfg)
+	client, err := llmfactory.NewClient(cfg, logger)
+	if err != nil {
+		return fmt.Errorf("init llm client: %w", err)
+	}
 	embeddings, err := client.Embed(ctx, []string{*query})
 	if err != nil {
 		return fmt.Errorf("embed query: %w", err)

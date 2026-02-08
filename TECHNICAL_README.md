@@ -20,6 +20,7 @@
 - Telegram ingestion: сохраняет входной payload в `TELEGRAM_MEDIA_DIR`.
 - Константы: базовые коды ошибок и UI‑сообщения вынесены в `internal/constants`.
 - Core: интерфейсы LLM/Bot вынесены в `internal/core` для dependency inversion.
+- LLM провайдер выбирается через `LLM_PROVIDER` (openai/ollama).
 
 ## Ближайшие цели
 - Усилить LLM‑клиент (таймауты, ретраи, обработка пустых ответов).
@@ -94,7 +95,7 @@
 ## Архитектура (сейчас)
 - `cmd/agent`: CLI‑точка входа.
 - `internal/agent`: ядро агента.
-- `pkg/llm`: LLM‑клиент.
+- `internal/adapters/llm`: LLM‑адаптеры (OpenAI, Ollama) и фабрика выбора.
 - `config`: загрузка конфигурации.
 - `migrations`: SQL‑миграции (goose).
 - `docker-compose.yml`: локальный Postgres + pgvector.

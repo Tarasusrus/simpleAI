@@ -8,9 +8,9 @@ import (
 	"os"
 
 	"simpleAI/config"
+	llmfactory "simpleAI/internal/adapters/llm"
 	"simpleAI/internal/agent"
 	"simpleAI/internal/tools"
-	"simpleAI/pkg/llm"
 )
 
 func main() {
@@ -21,8 +21,11 @@ func main() {
 	}
 
 	l := tools.NewLogger()
-	c := llm.NewClient(cfg.APIKey, l, cfg)
-	a := agent.NewAgent(c, l)
+	llmClient, err := llmfactory.NewClient(cfg, l)
+	if err != nil {
+		log.Fatal("Err while init llm client: ", err)
+	}
+	a := agent.NewAgent(llmClient, l)
 
 	// diff читаем из stdin
 	diff, err := readStdin()

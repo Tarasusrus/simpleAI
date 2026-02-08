@@ -34,9 +34,14 @@ type RAGConfig struct {
 }
 
 type LLMConfig struct {
-	Timeout    time.Duration
-	RetryCount int
-	RetryBase  time.Duration
+	Provider         string
+	ChatModel        string
+	Timeout          time.Duration
+	RetryCount       int
+	RetryBase        time.Duration
+	OllamaBaseURL    string
+	OllamaModel      string
+	OllamaEmbedModel string
 }
 
 type MailConfig struct {
@@ -78,13 +83,14 @@ func LoadConfig() (Config, error) {
 	}
 
 	cfg := Config{}
+	cfg.LLM = loadLLMConfig()
 	cfg.APIKey = os.Getenv("API_KEY")
-	if cfg.APIKey == "" {
-		return Config{}, fmt.Errorf("API key not found in .env")
-	}
 	cfg.SysPrompt = os.Getenv("SYS_PROMPT")
 	if cfg.SysPrompt == "" {
 		return Config{}, fmt.Errorf("SysPrompt not found in .env")
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.LLM.Provider)) != "ollama" && cfg.APIKey == "" {
+		return Config{}, fmt.Errorf("API key not found in .env")
 	}
 	cfg.DB = DBConfig{
 		Host: getenvOrDefault("POSTGRES_HOST", "localhost"),
@@ -102,7 +108,6 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.Mail = mailCfg
 	cfg.Telegram = loadTelegramBotConfig()
-	cfg.LLM = loadLLMConfig()
 	return cfg, nil
 }
 
@@ -149,9 +154,14 @@ func loadTelegramBotConfig() TelegramBotConfig {
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Timeout:    parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
-		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
-		RetryBase:  parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		Provider:         getenvOrDefault("LLM_PROVIDER", "openai"),
+		ChatModel:        getenvOrDefault("LLM_CHAT_MODEL", "gpt-4.1-mini"),
+		Timeout:          parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		RetryCount:       parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
+		RetryBase:        parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		OllamaBaseURL:    getenvOrDefault("OLLAMA_BASE_URL", "http://localhost:11434"),
+		OllamaModel:      getenvOrDefault("OLLAMA_MODEL", "llama3.2"),
+		OllamaEmbedModel: strings.TrimSpace(os.Getenv("OLLAMA_EMBED_MODEL")),
 	}
 }
 

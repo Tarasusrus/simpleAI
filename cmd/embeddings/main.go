@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"simpleAI/config"
+	llmfactory "simpleAI/internal/adapters/llm"
 	"simpleAI/internal/db"
 	"simpleAI/internal/rag"
 	"simpleAI/internal/tools"
-	"simpleAI/pkg/llm"
 )
 
 func main() {
@@ -53,7 +53,10 @@ func run() error {
 		return nil
 	}
 
-	client := llm.NewClient(cfg.APIKey, logger, cfg)
+	client, err := llmfactory.NewClient(cfg, logger)
+	if err != nil {
+		return fmt.Errorf("init llm client: %w", err)
+	}
 
 	for i := 0; i < len(docs); i += *batch {
 		end := i + *batch

@@ -12,7 +12,8 @@
 - `internal/notify/telegram.go`: `telegram token/chat_id is not configured`.
 
 ## Ошибки LLM
-- `pkg/llm/client.go`: `LLM_EMPTY_CHOICES`, `LLM_EMPTY_CONTENT`, `LLM_EMBED_EMPTY_INPUT`.
+- `internal/adapters/llm/openai/client.go`: `LLM_EMPTY_CHOICES`, `LLM_EMPTY_CONTENT`, `LLM_EMBED_EMPTY_INPUT`.
+- `internal/adapters/llm/ollama/client.go`: `LLM_EMPTY_CONTENT`, `LLM_EMBED_EMPTY_INPUT`.
 
 ## Ошибки ingestion/RAG
 - `internal/ingest/model.go`: validation messages (`source is required`, `raw_text is required`, ...).
