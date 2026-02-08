@@ -114,33 +114,33 @@ func (a *Adapter) Reply(ctx context.Context, chatID int64, replyTo int, text str
 	return err
 }
 
-func (a *Adapter) FetchAttachment(ctx context.Context, attachment core.Attachment) (io.ReadCloser, error) {
+func (a *Adapter) FetchAttachment(ctx context.Context, attachment core.Attachment) (io.ReadCloser, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if strings.TrimSpace(attachment.ID) == "" {
-		return nil, fmt.Errorf("attachment id is empty")
+		return nil, "", fmt.Errorf("attachment id is empty")
 	}
 	file, err := a.bot.GetFile(tgbotapi.FileConfig{FileID: attachment.ID})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	url := file.Link(a.bot.Token)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if err := resp.Body.Close(); err != nil {
 			_ = err
 		}
-		return nil, fmt.Errorf("telegram download status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("telegram download status %d", resp.StatusCode)
 	}
-	return resp.Body, nil
+	return resp.Body, file.FilePath, nil
 }
 
 func toCoreUpdate(update tgbotapi.Update) core.Update {
