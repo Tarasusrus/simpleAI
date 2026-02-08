@@ -30,12 +30,14 @@ func run() error {
 		return fmt.Errorf("query is required")
 	}
 
+	logger := tools.NewLogger()
+	logger.Info("rag query started", "limit", *limit)
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := tools.NewLogger()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -56,12 +58,14 @@ func run() error {
 	if len(embeddings) == 0 || embeddings[0] == nil {
 		return fmt.Errorf("empty embedding result")
 	}
+	logger.Info("rag query embedded")
 
 	retriever := rag.NewRetriever(pool)
 	results, err := retriever.Search(ctx, embeddings[0], *limit, rag.SearchFilter{})
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
 	}
+	logger.Info("rag query results", "count", len(results))
 
 	prompt := rag.BuildPrompt(*query, results)
 	fmt.Println(prompt)

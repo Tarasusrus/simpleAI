@@ -28,12 +28,14 @@ func run() error {
 	batch := flag.Int("batch", 20, "batch size for embeddings")
 	flag.Parse()
 
+	logger := tools.NewLogger()
+	logger.Info("rag embeddings run started", "limit", *limit, "batch", *batch)
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := tools.NewLogger()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -48,6 +50,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("list pending documents: %w", err)
 	}
+	logger.Info("rag documents pending", "count", len(docs))
 	if len(docs) == 0 {
 		logger.Info("no pending rag documents")
 		return nil
@@ -64,6 +67,7 @@ func run() error {
 			end = len(docs)
 		}
 		batchDocs := docs[i:end]
+		logger.Info("rag embeddings batch started", "offset", i, "count", len(batchDocs))
 		inputs := make([]string, 0, len(batchDocs))
 		hashes := make([]string, 0, len(batchDocs))
 		for _, doc := range batchDocs {
@@ -84,6 +88,7 @@ func run() error {
 				return fmt.Errorf("update embedding: %w", err)
 			}
 		}
+		logger.Info("rag embeddings batch completed", "offset", i, "count", len(batchDocs))
 	}
 
 	logger.Info("embeddings updated", "count", len(docs))

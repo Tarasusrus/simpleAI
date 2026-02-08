@@ -14,6 +14,7 @@ import (
 	"simpleAI/config"
 	"simpleAI/internal/db"
 	"simpleAI/internal/ingest"
+	"simpleAI/internal/tools"
 )
 
 func main() {
@@ -23,19 +24,23 @@ func main() {
 }
 
 func run() error {
+	logger := tools.NewLogger()
 	var filePath string
 	flag.StringVar(&filePath, "file", "", "path to receipt JSON (defaults to stdin)")
 	flag.Parse()
 
+	logger.Info("ingest run started", "file", filePath)
 	payload, err := readPayload(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read payload: %w", err)
 	}
+	logger.Info("ingest payload loaded", "bytes", len(payload))
 
 	var input ingest.ReceiptInput
 	if err := json.Unmarshal(payload, &input); err != nil {
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
+	logger.Info("ingest payload parsed", "source", input.Source, "source_ref", input.SourceRef, "items", len(input.Items))
 
 	cfg, err := config.LoadDBConfig()
 	if err != nil {
@@ -50,6 +55,7 @@ func run() error {
 		return fmt.Errorf("failed to connect db: %w", err)
 	}
 	defer pool.Close()
+	logger.Info("ingest db connected")
 
 	store := ingest.NewStore(pool)
 	id, err := store.IngestReceipt(ctx, input)
@@ -57,6 +63,7 @@ func run() error {
 		return fmt.Errorf("ingest failed: %w", err)
 	}
 
+	logger.Info("ingest run completed", "receipt_id", id.String())
 	fmt.Println(id.String())
 	return nil
 }
