@@ -1,3 +1,4 @@
+// Package telegram содержит код пакета telegram и его задачи.
 package telegram
 
 import (

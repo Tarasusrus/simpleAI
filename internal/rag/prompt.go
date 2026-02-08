@@ -1,3 +1,4 @@
+// Package rag содержит код пакета rag и его задачи.
 package rag
 
 import "strings"

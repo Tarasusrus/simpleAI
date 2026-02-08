@@ -1,0 +1,19 @@
+# SimpleAI
+
+Простой агент с базовой инфраструктурой для чеков, RAG и каналов ввода.
+
+## Что есть сейчас
+- CLI‑агент, который отвечает через LLM.
+- База Postgres + pgvector и миграции.
+- Ingestion чеков (receipt + items + rag_document).
+- RAG‑пайплайн: генерация эмбеддингов и поиск по векторам.
+- Черновой Telegram‑фасад (текст + сохранение вложений).
+
+## Как пользоваться (кратко)
+1) Поднять базу: `docker compose up -d`, `make migrate-up`.
+2) Загрузить чек: `go run cmd/ingest/main.go -file receipt.json`.
+3) Сгенерировать эмбеддинги: `go run cmd/embeddings/main.go -limit 100 -batch 20`.
+4) Проверить retrieval: `go run cmd/rag-query/main.go -q "сахар в январе" -limit 5`.
+
+## Статус
+Фокус сейчас на RAG по тратам и стабильности LLM‑клиента.

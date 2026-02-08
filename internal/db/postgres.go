@@ -1,3 +1,4 @@
+// Package db содержит код пакета db и его задачи.
 package db
 
 import (

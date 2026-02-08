@@ -1,3 +1,4 @@
+// Package tools содержит код пакета tools и его задачи.
 package tools
 
 import (

@@ -1,3 +1,4 @@
+// Package main содержит код пакета main и его задачи.
 package main
 
 import (

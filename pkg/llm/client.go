@@ -1,3 +1,4 @@
+// Package llm содержит код пакета llm и его задачи.
 package llm
 
 import (

@@ -1,3 +1,4 @@
+// Package agent содержит код пакета agent и его задачи.
 package agent
 
 import (
