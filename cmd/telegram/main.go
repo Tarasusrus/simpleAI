@@ -43,6 +43,7 @@ func main() {
 	agentService := agent.NewService(llmClient)
 
 	router := telegram.NewRouter()
+	router.Use(telegram.DeduplicateUpdates(1000))
 	router.Use(telegram.RequireAllowedChats(cfg.Telegram.AllowedChats))
 	router.Use(telegram.LogUpdates())
 	router.Use(telegram.LogDuration())

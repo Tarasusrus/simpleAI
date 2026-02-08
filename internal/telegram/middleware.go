@@ -100,3 +100,34 @@ func RateLimit(minInterval time.Duration) Middleware {
 		}
 	}
 }
+
+func DeduplicateUpdates(maxEntries int) Middleware {
+	if maxEntries <= 0 {
+		maxEntries = 1000
+	}
+	var (
+		mu    sync.Mutex
+		order []int
+		seen  = map[int]struct{}{}
+	)
+
+	return func(next Handler) Handler {
+		return func(ctx context.Context, tctx *Context) error {
+			updateID := tctx.Update.UpdateID
+			mu.Lock()
+			if _, ok := seen[updateID]; ok {
+				mu.Unlock()
+				return nil
+			}
+			seen[updateID] = struct{}{}
+			order = append(order, updateID)
+			if len(order) > maxEntries {
+				old := order[0]
+				order = order[1:]
+				delete(seen, old)
+			}
+			mu.Unlock()
+			return next(ctx, tctx)
+		}
+	}
+}

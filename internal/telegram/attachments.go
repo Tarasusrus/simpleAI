@@ -43,14 +43,43 @@ func SaveAttachments(ctx context.Context, bot *tgbotapi.BotAPI, attachments []At
 }
 
 func fileNameForAttachment(att Attachment, filePath string) string {
+	base := ""
 	if att.FileName != "" {
-		return filepath.Base(att.FileName)
+		base = filepath.Base(att.FileName)
 	}
-	if filePath != "" {
-		return filepath.Base(filePath)
+	if base == "" && filePath != "" {
+		base = filepath.Base(filePath)
 	}
-	ts := time.Now().UTC().Format("20060102T150405")
-	return fmt.Sprintf("%s_%s", att.Type, ts)
+	ext := filepath.Ext(base)
+	if ext == "" {
+		ext = ".bin"
+	}
+	id := sanitizeName(att.FileID)
+	if id == "" {
+		id = time.Now().UTC().Format("20060102T150405")
+	}
+	return fmt.Sprintf("%s_%s%s", att.Type, id, ext)
+}
+
+func sanitizeName(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, raw)
+	return strings.Trim(clean, "_")
 }
 
 func downloadFile(ctx context.Context, client *http.Client, url string, target string) error {
