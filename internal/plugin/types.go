@@ -10,8 +10,10 @@ type Skill interface {
 
 // Manifest describes a skill for registry and discovery.
 type Manifest struct {
-	ID          string
-	Name        string
-	Description string
-	Version     string
+	ID           string
+	Name         string
+	Description  string
+	Version      string
+	InputSchema  *Schema
+	OutputSchema *Schema
 }
