@@ -21,6 +21,7 @@
 - Константы: базовые коды ошибок и UI‑сообщения вынесены в `internal/constants`.
 - Core: интерфейсы LLM/Bot вынесены в `internal/core` для dependency inversion.
 - LLM провайдер выбирается через `LLM_PROVIDER` (openai/ollama).
+- При ошибке тестового LLM‑запроса выполняется fallback на Ollama.
 - Telegram адаптер вынесен в `internal/adapters/telegram` (tgbotapi из core удален).
 
 ## Ближайшие цели
