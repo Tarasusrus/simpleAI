@@ -9,7 +9,7 @@ import (
 type Agent struct {
 	llm.Client
 	*slog.Logger
-	//cache for session store
+	// cache for session store
 }
 
 func NewAgent(c llm.Client, l *slog.Logger) *Agent {

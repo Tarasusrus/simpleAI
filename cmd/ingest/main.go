@@ -16,23 +16,29 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	var filePath string
 	flag.StringVar(&filePath, "file", "", "path to receipt JSON (defaults to stdin)")
 	flag.Parse()
 
 	payload, err := readPayload(filePath)
 	if err != nil {
-		log.Fatal("failed to read payload: ", err)
+		return fmt.Errorf("failed to read payload: %w", err)
 	}
 
 	var input ingest.ReceiptInput
 	if err := json.Unmarshal(payload, &input); err != nil {
-		log.Fatal("failed to parse JSON: ", err)
+		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	cfg, err := config.LoadDBConfig()
 	if err != nil {
-		log.Fatal("failed to load db config: ", err)
+		return fmt.Errorf("failed to load db config: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -40,17 +46,18 @@ func main() {
 
 	pool, err := db.NewPool(ctx, cfg)
 	if err != nil {
-		log.Fatal("failed to connect db: ", err)
+		return fmt.Errorf("failed to connect db: %w", err)
 	}
 	defer pool.Close()
 
 	store := ingest.NewStore(pool)
 	id, err := store.IngestReceipt(ctx, input)
 	if err != nil {
-		log.Fatal("ingest failed: ", err)
+		return fmt.Errorf("ingest failed: %w", err)
 	}
 
 	fmt.Println(id.String())
+	return nil
 }
 
 func readPayload(filePath string) ([]byte, error) {
