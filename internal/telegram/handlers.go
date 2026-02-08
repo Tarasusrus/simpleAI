@@ -33,6 +33,11 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		if err != nil && tctx.Logger != nil {
 			tctx.Logger.Error("failed to save attachments", "err", err)
 		}
+		if _, err := SaveIngestPayload(ctx, tctx.MediaDir, incoming, paths); err != nil {
+			if tctx.Logger != nil {
+				tctx.Logger.Error("failed to save ingest payload", "err", err)
+			}
+		}
 		if incoming.Text == "" {
 			if len(paths) == 0 {
 				return tctx.Reply("Вложения получены. Обработка будет добавлена скоро.")
@@ -42,6 +47,11 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 	}
 	if strings.TrimSpace(incoming.Text) == "" {
 		return tctx.Reply("Пустое сообщение. Напиши запрос.")
+	}
+	if _, err := SaveIngestPayload(ctx, tctx.MediaDir, incoming, nil); err != nil {
+		if tctx.Logger != nil {
+			tctx.Logger.Error("failed to save ingest payload", "err", err)
+		}
 	}
 	if tctx.Agent == nil {
 		return tctx.Reply("Агент не настроен.")
