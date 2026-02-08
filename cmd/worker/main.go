@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"simpleAI/config"
+	llmfactory "simpleAI/internal/adapters/llm"
 	"simpleAI/internal/db"
 	"simpleAI/internal/mail"
 	"simpleAI/internal/notify"
 	"simpleAI/internal/tools"
-	"simpleAI/pkg/llm"
 )
 
 func main() {
@@ -33,7 +33,11 @@ func main() {
 	gmailProvider := mail.NewGmailProvider(&http.Client{Timeout: 15 * time.Second})
 	imapProvider := mail.NewIMAPProvider()
 	telegram := notify.NewTelegram(cfg.Mail.Telegram.Token, cfg.Mail.Telegram.ChatID)
-	llmClient := llm.NewClient(cfg.APIKey, logger, cfg)
+	llmClient, err := llmfactory.NewClient(cfg, logger)
+	if err != nil {
+		logger.Error("failed to init llm client", "err", err)
+		return
+	}
 
 	runner := mail.NewRunner(store, gmailProvider, imapProvider, telegram, llmClient, logger)
 

@@ -1,17 +1,20 @@
-// Package llm содержит код пакета llm и его задачи.
-package llm
+// Package openai реализует LLM-адаптер для провайдера OpenAI.
+package openai
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"log/slog"
+
 	"simpleAI/config"
 	"simpleAI/internal/apperr"
 	"simpleAI/internal/constants"
-	"strings"
-	"time"
 )
 
 var ErrChatCompletion = errors.New("Completions.New.Err")
@@ -22,9 +25,12 @@ type Client struct {
 	cfg config.Config
 }
 
-func NewClient(key string, l *slog.Logger, c config.Config) *Client {
-	client := openai.NewClient(option.WithAPIKey(key))
-	return &Client{api: client, l: l, cfg: c}
+func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return nil, fmt.Errorf("API key not found in .env")
+	}
+	client := openai.NewClient(option.WithAPIKey(cfg.APIKey))
+	return &Client{api: client, l: logger, cfg: cfg}, nil
 }
 
 func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
@@ -40,7 +46,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 				openai.SystemMessage(c.cfg.SysPrompt),
 				openai.UserMessage(prompt),
 			},
-			Model: openai.ChatModelGPT4_1Mini,
+			Model: c.chatModel(),
 		})
 		cancel()
 
@@ -61,7 +67,9 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 		}
 	}
 
-	c.l.Error("Failed to create chat", "err", lastErr, "code", ErrChatCompletion.Error())
+	if c.l != nil {
+		c.l.Error("Failed to create chat", "err", lastErr, "code", ErrChatCompletion.Error())
+	}
 	return "", lastErr
 }
 
@@ -107,6 +115,14 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 		}
 	}
 	return nil, lastErr
+}
+
+func (c *Client) chatModel() openai.ChatModel {
+	model := strings.TrimSpace(c.cfg.LLM.ChatModel)
+	if model == "" {
+		return openai.ChatModelGPT4_1Mini
+	}
+	return openai.ChatModel(model)
 }
 
 func (c *Client) timeout() time.Duration {

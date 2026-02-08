@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 
 	"simpleAI/config"
+	llmfactory "simpleAI/internal/adapters/llm"
 	"simpleAI/internal/agent"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
-	"simpleAI/pkg/llm"
 )
 
 func main() {
@@ -40,7 +40,10 @@ func main() {
 		log.Fatal("Err while init telegram bot: ", err)
 	}
 
-	llmClient := llm.NewClient(cfg.APIKey, logger, cfg)
+	llmClient, err := llmfactory.NewClient(cfg, logger)
+	if err != nil {
+		log.Fatal("Err while init llm client: ", err)
+	}
 	agentService := agent.NewService(llmClient)
 
 	router := telegram.NewRouter()

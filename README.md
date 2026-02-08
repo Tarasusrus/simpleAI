@@ -20,7 +20,9 @@
 4) Проверить retrieval: `go run cmd/rag-query/main.go -q "сахар в январе" -limit 5`.
 
 ## Telegram‑бот: запуск и тест
-1) Заполни `.env` (минимум): `API_KEY`, `SYS_PROMPT`, `TELEGRAM_BOT_TOKEN`.
+1) Заполни `.env` (минимум): `SYS_PROMPT`, `TELEGRAM_BOT_TOKEN`.
+   - Если `LLM_PROVIDER=openai`, нужен `API_KEY`.
+   - Если `LLM_PROVIDER=ollama`, `API_KEY` не нужен.
 2) Опционально: `TELEGRAM_ALLOWED_CHATS`, `TELEGRAM_MEDIA_DIR`, `TELEGRAM_RATE_LIMIT_MS`.
 3) Запуск: `go run cmd/telegram/main.go`.
 4) Тест‑чеклист:
