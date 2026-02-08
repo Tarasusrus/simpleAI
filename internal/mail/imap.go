@@ -36,9 +36,9 @@ func (p *IMAPProvider) Fetch(ctx context.Context, account Account, checkpoint Ch
 	if err != nil {
 		return FetchResult{}, err
 	}
-	defer client.Logout()
+	defer func() { _ = client.Logout() }()
 
-	if err := client.Authenticate(sasl.NewXoauth2(account.Email, account.AccessToken)); err != nil {
+	if err := client.Authenticate(newXOAuth2Client(account.Email, account.AccessToken)); err != nil {
 		return FetchResult{}, fmt.Errorf("imap authenticate failed: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (p *IMAPProvider) Fetch(ctx context.Context, account Account, checkpoint Ch
 		seqset.AddNum(uids...)
 		section := &imap.BodySectionName{
 			Peek:    true,
-			Partial: []int64{0, imapPreviewSize},
+			Partial: []int{0, imapPreviewSize},
 		}
 		items := []imap.FetchItem{
 			imap.FetchEnvelope,
@@ -159,14 +159,14 @@ func dialIMAP(ctx context.Context, host string, port int, useTLS bool) (*imapcli
 		if err != nil {
 			return nil, err
 		}
-		return imapclient.New(conn), nil
+		return imapclient.New(conn)
 	}
 
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, err
 	}
-	return imapclient.New(conn), nil
+	return imapclient.New(conn)
 }
 
 func searchUIDs(client *imapclient.Client, lastSeen *time.Time) ([]uint32, error) {
@@ -209,8 +209,12 @@ func mapIMAPMessage(msg *imap.Message, section *imap.BodySectionName, folder str
 		from = formatIMAPAddress(envelope.From[0])
 	}
 	received := envelope.Date
-	if received == nil {
+	if received.IsZero() {
 		received = msg.InternalDate
+	}
+	var receivedPtr *time.Time
+	if !received.IsZero() {
+		receivedPtr = &received
 	}
 
 	preview := ""
@@ -231,7 +235,7 @@ func mapIMAPMessage(msg *imap.Message, section *imap.BodySectionName, folder str
 		ProviderUID: providerUID,
 		FromEmail:   from,
 		Subject:     envelope.Subject,
-		ReceivedAt:  received,
+		ReceivedAt:  receivedPtr,
 		Preview:     preview,
 		Metadata:    meta,
 	}
@@ -246,4 +250,30 @@ func formatIMAPAddress(addr *imap.Address) string {
 		return email
 	}
 	return fmt.Sprintf("%s <%s>", addr.PersonalName, email)
+}
+
+type xoauth2Client struct {
+	username string
+	token    string
+	started  bool
+}
+
+func newXOAuth2Client(username, token string) sasl.Client {
+	return &xoauth2Client{username: username, token: token}
+}
+
+func (c *xoauth2Client) Start() (string, []byte, error) {
+	if c.started {
+		return "", nil, sasl.ErrUnexpectedClientResponse
+	}
+	c.started = true
+	resp := fmt.Sprintf("user=%s\x01auth=Bearer %s\x01\x01", c.username, c.token)
+	return "XOAUTH2", []byte(resp), nil
+}
+
+func (c *xoauth2Client) Next(challenge []byte) ([]byte, error) {
+	if len(challenge) > 0 {
+		return nil, sasl.ErrUnexpectedServerChallenge
+	}
+	return nil, nil
 }

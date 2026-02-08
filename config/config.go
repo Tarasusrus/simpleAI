@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"github.com/joho/godotenv"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type Config struct {
@@ -13,6 +16,7 @@ type Config struct {
 	DB        DBConfig  `env:",inline"`
 	RAG       RAGConfig `env:",inline"`
 	Mail      MailConfig
+	Telegram  TelegramBotConfig
 }
 
 type DBConfig struct {
@@ -51,6 +55,13 @@ type TelegramConfig struct {
 	ChatID string `env:"TELEGRAM_CHAT_ID"`
 }
 
+type TelegramBotConfig struct {
+	Token          string
+	AllowedChats   []int64
+	PollingTimeout time.Duration
+	Workers        int
+}
+
 func LoadConfig() (Config, error) {
 	_ = godotenv.Load(".env")
 
@@ -78,6 +89,7 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Mail = mailCfg
+	cfg.Telegram = loadTelegramBotConfig()
 	return cfg, nil
 }
 
@@ -107,6 +119,45 @@ func loadMailConfig() (MailConfig, error) {
 			ChatID: os.Getenv("TELEGRAM_CHAT_ID"),
 		},
 	}, nil
+}
+
+func loadTelegramBotConfig() TelegramBotConfig {
+	return TelegramBotConfig{
+		Token:          os.Getenv("TELEGRAM_BOT_TOKEN"),
+		AllowedChats:   parseChatIDs(os.Getenv("TELEGRAM_ALLOWED_CHATS")),
+		PollingTimeout: 30 * time.Second,
+		Workers:        parseInt(os.Getenv("TELEGRAM_WORKERS"), 4),
+	}
+}
+
+func parseChatIDs(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func parseInt(raw string, def int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	if v, err := strconv.Atoi(raw); err == nil {
+		return v
+	}
+	return def
 }
 
 func getenvOrDefault(key, def string) string {
