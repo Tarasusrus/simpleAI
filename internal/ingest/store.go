@@ -68,8 +68,9 @@ func (s *Store) IngestReceipt(ctx context.Context, input ReceiptInput) (uuid.UUI
 		return uuid.Nil, mapPgError(err)
 	}
 
-	itemCount := len(input.Items)
-	for _, item := range input.Items {
+	normalizedItems := normalizeItems(input.Items)
+	itemCount := len(normalizedItems)
+	for _, item := range normalizedItems {
 		itemID := uuid.New()
 		var categoryID *uuid.UUID
 		if strings.TrimSpace(item.CategoryID) != "" {
@@ -242,6 +243,30 @@ func emptyToNull(value string) *string {
 func hashContent(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
+}
+
+func normalizeItems(items []ReceiptItemInput) []ReceiptItemInput {
+	out := make([]ReceiptItemInput, len(items))
+	for i, item := range items {
+		out[i] = normalizeItem(item)
+	}
+	return out
+}
+
+func normalizeItem(item ReceiptItemInput) ReceiptItemInput {
+	if item.Quantity != nil && item.UnitPrice != nil && item.Amount == nil {
+		amount := *item.Quantity * *item.UnitPrice
+		item.Amount = &amount
+	}
+	if item.Quantity != nil && item.Amount != nil && item.UnitPrice == nil && *item.Quantity > 0 {
+		unit := *item.Amount / *item.Quantity
+		item.UnitPrice = &unit
+	}
+	if item.UnitPrice != nil && item.Amount != nil && item.Quantity == nil && *item.UnitPrice > 0 {
+		qty := *item.Amount / *item.UnitPrice
+		item.Quantity = &qty
+	}
+	return item
 }
 
 func (s *Store) findReceiptID(ctx context.Context, source string, sourceRef string) (uuid.UUID, error) {
