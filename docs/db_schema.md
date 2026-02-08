@@ -6,6 +6,7 @@ Goal: minimal schema to store receipts/expenses and RAG documents.
 - receipt: a single shopping receipt (metadata + raw text).
 - receipt_item: line items linked to a receipt.
 - store: normalized store names for receipts.
+- receipt_artifact: ссылки на файлы/вложения (фото/сканы).
 - category: category tree for analytics and filtering.
 - rag_document: text chunks used for retrieval with embeddings.
 
@@ -13,6 +14,7 @@ Goal: minimal schema to store receipts/expenses and RAG documents.
 - Store raw receipt text for future re-processing.
 - Keep items normalized for analytics and connect to categories.
 - Store names are normalized via `store` and referenced by `receipt.store_id`.
+- Артефакты (фото/сканы) храним во внешнем хранилище, в БД — ссылки.
 - RAG documents reference receipts/items via metadata.
 - `metadata` is indexed with GIN for filtering.
 - Numeric amounts are non-negative via CHECK constraints.

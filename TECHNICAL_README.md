@@ -143,6 +143,10 @@
 - Размер вектора: 1536 (соответствует `vector(1536)` в схеме).
 - Команда (v1): `go run cmd/embeddings/main.go -limit 100 -batch 20`
 
+## Хранение сырого текста и артефактов
+- `receipt.raw_text` хранит полный текст чека.
+- Вложения (фото/сканы) храним вне БД, в БД сохраняем ссылки в `receipt_artifact`.
+
 ## RAG: шаблоны контента
 - Receipt: `Receipt | store={store} | ts={purchase_ts} | total={total} {currency} | items={item_count}`
 - Item: `Item | name={name} | qty={qty} | unit={unit_price} | amount={amount} {currency} | category={category_name}`
