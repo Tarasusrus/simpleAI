@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -25,6 +26,12 @@ func main() {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty")
 		return
+	}
+	if cfg.Telegram.MediaDir != "" {
+		if err := os.MkdirAll(cfg.Telegram.MediaDir, 0o755); err != nil {
+			logger.Error("failed to create media dir", "err", err, "dir", cfg.Telegram.MediaDir)
+			return
+		}
 	}
 
 	bot, err := tgbotapi.NewBotAPI(cfg.Telegram.Token)
@@ -68,6 +75,7 @@ func main() {
 				Agent:     agentService,
 				Allowed:   cfg.Telegram.AllowedChats,
 				RequestID: uuid.NewString(),
+				MediaDir:  cfg.Telegram.MediaDir,
 			})
 			cancel()
 			if err != nil {
