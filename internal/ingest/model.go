@@ -3,9 +3,12 @@ package ingest
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"simpleAI/internal/constants"
 )
 
 type ReceiptInput struct {
@@ -29,29 +32,29 @@ type ReceiptItemInput struct {
 
 func (r ReceiptInput) Validate() error {
 	if strings.TrimSpace(r.Source) == "" {
-		return errors.New("source is required")
+		return errors.New(constants.ErrMsgIngestSourceRequired)
 	}
 	if strings.TrimSpace(r.SourceRef) == "" {
-		return errors.New("source_ref is required")
+		return errors.New(constants.ErrMsgIngestSourceRefRequired)
 	}
 	if strings.TrimSpace(r.RawText) == "" {
-		return errors.New("raw_text is required")
+		return errors.New(constants.ErrMsgIngestRawTextRequired)
 	}
 	if r.TotalAmount != nil && *r.TotalAmount < 0 {
-		return errors.New("total_amount must be non-negative")
+		return errors.New(constants.ErrMsgIngestTotalNonNegative)
 	}
 	for i, item := range r.Items {
 		if strings.TrimSpace(item.Name) == "" {
-			return errors.New("items[" + itoa(i) + "].name is required")
+			return fmt.Errorf(constants.ErrMsgIngestItemNameRequired, itoa(i))
 		}
 		if item.Quantity != nil && *item.Quantity < 0 {
-			return errors.New("items[" + itoa(i) + "].quantity must be non-negative")
+			return fmt.Errorf(constants.ErrMsgIngestItemQtyNonNegative, itoa(i))
 		}
 		if item.UnitPrice != nil && *item.UnitPrice < 0 {
-			return errors.New("items[" + itoa(i) + "].unit_price must be non-negative")
+			return fmt.Errorf(constants.ErrMsgIngestItemUnitNonNeg, itoa(i))
 		}
 		if item.Amount != nil && *item.Amount < 0 {
-			return errors.New("items[" + itoa(i) + "].amount must be non-negative")
+			return fmt.Errorf(constants.ErrMsgIngestItemAmtNonNegative, itoa(i))
 		}
 	}
 	return nil

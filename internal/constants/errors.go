@@ -16,3 +16,16 @@ const (
 	ErrCodeLLMEmbedEmptyInput = "LLM_EMBED_EMPTY_INPUT"
 	ErrMsgLLMEmbedEmptyInput  = "no inputs for embedding"
 )
+
+// Ingestion validation errors.
+const (
+	ErrMsgIngestSourceRequired     = "source is required"
+	ErrMsgIngestSourceRefRequired  = "source_ref is required"
+	ErrMsgIngestRawTextRequired    = "raw_text is required"
+	ErrMsgIngestTotalNonNegative   = "total_amount must be non-negative"
+	ErrMsgIngestItemNameRequired   = "items[%s].name is required"
+	ErrMsgIngestItemQtyNonNegative = "items[%s].quantity must be non-negative"
+	ErrMsgIngestItemUnitNonNeg     = "items[%s].unit_price must be non-negative"
+	ErrMsgIngestItemAmtNonNegative = "items[%s].amount must be non-negative"
+	ErrMsgIngestReceiptExists      = "receipt already exists"
+)

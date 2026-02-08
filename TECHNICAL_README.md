@@ -20,6 +20,7 @@
 - Telegram ingestion: сохраняет входной payload в `TELEGRAM_MEDIA_DIR`.
 - Константы: базовые коды ошибок и UI‑сообщения вынесены в `internal/constants`.
 - Telegram‑ответы теперь используют константы из `internal/constants`.
+- Валидационные ошибки ingestion используют константы из `internal/constants`.
 
 ## Ближайшие цели
 - Усилить LLM‑клиент (таймауты, ретраи, обработка пустых ответов).

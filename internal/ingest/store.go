@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"simpleAI/internal/constants"
 )
 
 type Store struct {
@@ -293,7 +294,7 @@ func mapPgError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {
-			return fmt.Errorf("receipt already exists: %w", err)
+			return fmt.Errorf("%s: %w", constants.ErrMsgIngestReceiptExists, err)
 		}
 	}
 	return err
