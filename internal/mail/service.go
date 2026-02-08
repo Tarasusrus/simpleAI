@@ -32,11 +32,13 @@ func NewRunner(store *Store, gmail Provider, imap Provider, notifier Notifier, l
 }
 
 func (r *Runner) RunOnce(ctx context.Context, accounts []Account) error {
+	r.logger.Info("mail runner started", "accounts", len(accounts))
 	for _, account := range accounts {
 		if err := r.runAccount(ctx, account); err != nil {
 			r.logger.Error("mail account run failed", "email", account.Email, "err", err)
 		}
 	}
+	r.logger.Info("mail runner finished")
 	return nil
 }
 
@@ -55,13 +57,21 @@ func (r *Runner) runAccount(ctx context.Context, account Account) error {
 	}
 
 	var runErr error
+	insertedCount := 0
 	defer func() {
 		status := "success"
 		if runErr != nil {
 			status = "failed"
 		}
-		_ = r.store.FinishRun(ctx, runID, status, 0, errorText(runErr))
+		_ = r.store.FinishRun(ctx, runID, status, insertedCount, errorText(runErr))
+		r.logger.Info("mail account run finished",
+			"email", stored.Email,
+			"status", status,
+			"messages", insertedCount,
+		)
 	}()
+
+	r.logger.Info("mail account run started", "email", stored.Email)
 
 	checkpoint, err := r.store.GetCheckpoint(ctx, stored.ID)
 	if err != nil {
@@ -80,6 +90,7 @@ func (r *Runner) runAccount(ctx context.Context, account Account) error {
 		runErr = err
 		return err
 	}
+	r.logger.Info("mail fetch complete", "email", stored.Email, "fetched", len(result.Messages))
 
 	digestResult, digestErr := BuildDigest(ctx, r.llmClient, stored, result.Messages)
 	if digestErr != nil {
@@ -91,6 +102,7 @@ func (r *Runner) runAccount(ctx context.Context, account Account) error {
 		runErr = err
 		return err
 	}
+	insertedCount = inserted
 
 	lastUID := maxProviderUID(digestResult.Messages)
 	if err := r.store.UpdateCheckpoint(ctx, stored.ID, result.Cursor, lastUID, result.LastSeen); err != nil {
@@ -102,10 +114,6 @@ func (r *Runner) runAccount(ctx context.Context, account Account) error {
 		if err := r.notifier.Send(ctx, formatTelegramDigest(stored, digestResult.Digest)); err != nil {
 			r.logger.Error("telegram send failed", "email", stored.Email, "err", err)
 		}
-	}
-
-	if err := r.store.FinishRun(ctx, runID, "success", inserted, ""); err != nil {
-		return err
 	}
 	runErr = nil
 	return nil
