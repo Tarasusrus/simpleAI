@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"simpleAI/config"
 	"simpleAI/internal/apperr"
+	"simpleAI/internal/constants"
 	"strings"
 	"time"
 )
@@ -43,13 +44,13 @@ func (c *Client) Ask(prompt string) (string, error) {
 		if err == nil && len(chatCompletion.Choices) > 0 {
 			content := strings.TrimSpace(chatCompletion.Choices[0].Message.Content)
 			if content == "" {
-				err = apperr.New("LLM_EMPTY_CONTENT", "empty chat completion content", nil)
+				err = apperr.New(constants.ErrCodeLLMEmptyContent, constants.ErrMsgLLMEmptyContent, nil)
 			} else {
 				return content, nil
 			}
 		}
 		if err == nil {
-			err = apperr.New("LLM_EMPTY_CHOICES", "empty chat completion choices", nil)
+			err = apperr.New(constants.ErrCodeLLMEmptyChoices, constants.ErrMsgLLMEmptyChoices, nil)
 		}
 		lastErr = err
 		if attempt < retries {
@@ -63,7 +64,7 @@ func (c *Client) Ask(prompt string) (string, error) {
 
 func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
 	if len(inputs) == 0 {
-		return nil, apperr.New("LLM_EMBED_EMPTY_INPUT", "no inputs for embedding", nil)
+		return nil, apperr.New(constants.ErrCodeLLMEmbedEmptyInput, constants.ErrMsgLLMEmbedEmptyInput, nil)
 	}
 	retries := c.retryCount()
 	var lastErr error
