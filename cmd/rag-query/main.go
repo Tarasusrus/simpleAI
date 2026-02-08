@@ -1,4 +1,5 @@
-// Package main содержит код пакета main и его задачи.
+// Package main — CLI для RAG-поиска и построения промпта по запросу.
+// Используется для проверки retrieval.
 package main
 
 import (

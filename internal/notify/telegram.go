@@ -1,4 +1,5 @@
-// Package notify содержит код пакета notify и его задачи.
+// Package notify отправляет сервисные уведомления во внешние каналы (пока Telegram).
+// Используется воркерами и пайплайнами для алертов; точки входа NewTelegram и Telegram.Send.
 package notify
 
 import (

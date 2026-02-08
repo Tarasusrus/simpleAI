@@ -1,3 +1,6 @@
 .idea/
 .env
 TECHNICAL_README.md
+.DS_Store
+data/
+win.txt

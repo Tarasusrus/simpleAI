@@ -1,4 +1,5 @@
-// Package main содержит код пакета main и его задачи.
+// Package main — CLI для загрузки одного чека из файла или stdin в ingest pipeline.
+// Используется для ручного прогона и тестов ingestion.
 package main
 
 import (

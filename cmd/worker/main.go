@@ -1,4 +1,5 @@
-// Package main содержит код пакета main и его задачи.
+// Package main запускает почтовый воркер, который периодически собирает письма и отправляет дайджест.
+// Использует internal/mail и internal/notify.
 package main
 
 import (

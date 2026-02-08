@@ -1,4 +1,5 @@
-// Package rag содержит код пакета rag и его задачи.
+// Package rag отвечает за хранение и поиск RAG-документов и сборку промпта.
+// Точки входа: Store.ListPending/UpdateEmbedding, Retriever.Search и BuildPrompt.
 package rag
 
 import "strings"

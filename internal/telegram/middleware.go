@@ -1,4 +1,5 @@
-// Package telegram содержит код пакета telegram и его задачи.
+// Package telegram реализует прикладной слой Telegram-бота: роутер, middleware, контекст и обработку вложений.
+// Пакет также сохраняет raw-ingest payload для дальнейшей обработки; точка входа Router.HandleUpdate.
 package telegram
 
 import (

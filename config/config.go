@@ -1,4 +1,5 @@
-// Package config содержит код пакета config и его задачи.
+// Package config отвечает за загрузку и валидацию конфигурации из .env и переменных окружения.
+// Здесь определены все структуры настроек (БД, LLM, RAG, Telegram, почта) и точки входа LoadConfig/LoadDBConfig.
 package config
 
 import (

@@ -1,4 +1,5 @@
-// Package main содержит код пакета main и его задачи.
+// Package main запускает CLI-агента для обработки diff из stdin и вывода ответа LLM.
+// Это утилита для ручного запуска без Telegram.
 package main
 
 import (

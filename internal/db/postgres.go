@@ -1,4 +1,5 @@
-// Package db содержит код пакета db и его задачи.
+// Package db инкапсулирует подключение к Postgres и создание пула pgx.
+// Точка входа NewPool.
 package db
 
 import (
