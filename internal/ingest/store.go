@@ -38,10 +38,18 @@ func (s *Store) IngestReceipt(ctx context.Context, input ReceiptInput) (uuid.UUI
 	}()
 
 	receiptID := uuid.New()
+	var storeID *uuid.UUID
+	if strings.TrimSpace(input.StoreName) != "" {
+		id, err := upsertStore(ctx, tx, input.StoreName)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		storeID = &id
+	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO receipt (id, source, source_ref, purchase_ts, currency, total_amount, raw_text)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, receiptID, input.Source, input.SourceRef, input.PurchaseTS, emptyToNull(input.Currency), input.TotalAmount, input.RawText)
+		INSERT INTO receipt (id, source, source_ref, purchase_ts, currency, total_amount, raw_text, store_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, receiptID, input.Source, input.SourceRef, input.PurchaseTS, emptyToNull(input.Currency), input.TotalAmount, input.RawText, storeID)
 	if err != nil {
 		return uuid.Nil, mapPgError(err)
 	}
@@ -99,6 +107,20 @@ func insertRagDocument(ctx context.Context, tx pgx.Tx, sourceType string, source
 		VALUES ($1, $2, $3, $4, $5)
 	`, uuid.New(), sourceType, sourceID, content, payload)
 	return err
+}
+
+func upsertStore(ctx context.Context, tx pgx.Tx, name string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `
+		INSERT INTO store (id, name)
+		VALUES ($1, $2)
+		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id
+	`, uuid.New(), strings.TrimSpace(name)).Scan(&id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }
 
 func buildReceiptContent(input ReceiptInput, itemCount int) string {

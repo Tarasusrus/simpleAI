@@ -13,6 +13,7 @@ type ReceiptInput struct {
 	PurchaseTS  *time.Time         `json:"purchase_ts"`
 	Currency    string             `json:"currency"`
 	TotalAmount *float64           `json:"total_amount"`
+	StoreName   string             `json:"store_name"`
 	RawText     string             `json:"raw_text"`
 	Items       []ReceiptItemInput `json:"items"`
 }
