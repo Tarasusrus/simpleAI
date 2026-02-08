@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
-)
 
-type LLMClient interface {
-	Ask(prompt string) (string, error)
-}
+	"simpleAI/internal/core"
+)
 
 type DigestResult struct {
 	Digest   string
@@ -30,13 +28,12 @@ type digestAnnotation struct {
 	Summary     string `json:"summary"`
 }
 
-func BuildDigest(ctx context.Context, client LLMClient, account Account, messages []FetchedMessage) (DigestResult, error) {
-	_ = ctx
+func BuildDigest(ctx context.Context, client core.LLM, account Account, messages []FetchedMessage) (DigestResult, error) {
 	if len(messages) == 0 {
 		return DigestResult{Digest: "Новых писем нет."}, nil
 	}
 	prompt := buildDigestPrompt(account, messages)
-	response, err := client.Ask(prompt)
+	response, err := client.Ask(ctx, prompt)
 	if err != nil {
 		return fallbackDigest(messages), err
 	}

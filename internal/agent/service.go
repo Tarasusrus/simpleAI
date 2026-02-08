@@ -4,18 +4,17 @@ package agent
 import (
 	"context"
 
-	"simpleAI/pkg/llm"
+	"simpleAI/internal/core"
 )
 
 type Service struct {
-	client llm.Client
+	client core.LLM
 }
 
-func NewService(client llm.Client) *Service {
+func NewService(client core.LLM) *Service {
 	return &Service{client: client}
 }
 
 func (s *Service) Ask(ctx context.Context, input string) (string, error) {
-	_ = ctx
-	return s.client.Ask(input)
+	return s.client.Ask(ctx, input)
 }

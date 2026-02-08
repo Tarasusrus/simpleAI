@@ -22,17 +22,20 @@ type Client struct {
 	cfg config.Config
 }
 
-func NewClient(key string, l *slog.Logger, c config.Config) Client {
+func NewClient(key string, l *slog.Logger, c config.Config) *Client {
 	client := openai.NewClient(option.WithAPIKey(key))
-	return Client{api: client, l: l, cfg: c}
+	return &Client{api: client, l: l, cfg: c}
 }
 
-func (c *Client) Ask(prompt string) (string, error) {
+func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	retries := c.retryCount()
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), c.timeout())
-		chatCompletion, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		reqCtx, cancel := context.WithTimeout(ctx, c.timeout())
+		chatCompletion, err := c.api.Chat.Completions.New(reqCtx, openai.ChatCompletionNewParams{
 			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.SystemMessage(c.cfg.SysPrompt),
 				openai.UserMessage(prompt),

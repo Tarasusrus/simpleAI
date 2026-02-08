@@ -35,7 +35,7 @@ func main() {
 	telegram := notify.NewTelegram(cfg.Mail.Telegram.Token, cfg.Mail.Telegram.ChatID)
 	llmClient := llm.NewClient(cfg.APIKey, logger, cfg)
 
-	runner := mail.NewRunner(store, gmailProvider, imapProvider, telegram, &llmClient, logger)
+	runner := mail.NewRunner(store, gmailProvider, imapProvider, telegram, llmClient, logger)
 
 	if len(cfg.Mail.Accounts) == 0 {
 		logger.Warn("no mail accounts configured")

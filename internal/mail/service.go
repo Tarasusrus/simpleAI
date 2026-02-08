@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"simpleAI/internal/core"
 )
 
 type Notifier interface {
@@ -17,11 +19,11 @@ type Runner struct {
 	gmail     Provider
 	imap      Provider
 	notifier  Notifier
-	llmClient LLMClient
+	llmClient core.LLM
 	logger    *slog.Logger
 }
 
-func NewRunner(store *Store, gmail Provider, imap Provider, notifier Notifier, llmClient LLMClient, logger *slog.Logger) *Runner {
+func NewRunner(store *Store, gmail Provider, imap Provider, notifier Notifier, llmClient core.LLM, logger *slog.Logger) *Runner {
 	return &Runner{
 		store:     store,
 		gmail:     gmail,
