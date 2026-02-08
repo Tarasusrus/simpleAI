@@ -40,6 +40,12 @@ func main() {
 	if err != nil {
 		log.Fatal("Err while init telegram bot: ", err)
 	}
+	if err := adapter.SetCommands(context.Background(), []telegramadapter.Command{
+		{Command: "start", Description: "Приветствие и краткая справка"},
+		{Command: "help", Description: "Список доступных команд"},
+	}); err != nil {
+		logger.Warn("failed to set telegram commands", "err", err)
+	}
 
 	llmClient, err := llmfactory.NewClient(cfg, logger)
 	if err != nil {

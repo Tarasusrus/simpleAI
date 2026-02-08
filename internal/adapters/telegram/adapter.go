@@ -20,6 +20,11 @@ type Adapter struct {
 	httpClient     *http.Client
 }
 
+type Command struct {
+	Command     string
+	Description string
+}
+
 func NewAdapter(token string, pollingTimeout time.Duration) (*Adapter, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("telegram bot token is empty")
@@ -36,6 +41,30 @@ func NewAdapter(token string, pollingTimeout time.Duration) (*Adapter, error) {
 		pollingTimeout: pollingTimeout,
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 	}, nil
+}
+
+func (a *Adapter) SetCommands(ctx context.Context, commands []Command) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	items := make([]tgbotapi.BotCommand, 0, len(commands))
+	for _, cmd := range commands {
+		if strings.TrimSpace(cmd.Command) == "" {
+			continue
+		}
+		items = append(items, tgbotapi.BotCommand{
+			Command:     cmd.Command,
+			Description: cmd.Description,
+		})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	_, err := a.bot.Request(tgbotapi.NewSetMyCommands(items...))
+	return err
 }
 
 func (a *Adapter) Updates(ctx context.Context) (<-chan core.Update, error) {
