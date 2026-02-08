@@ -29,7 +29,7 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 	}
 
 	if len(incoming.Attachments) > 0 {
-		paths, err := SaveAttachments(ctx, tctx.Bot, incoming.Attachments, tctx.MediaDir)
+		paths, err := SaveAttachments(ctx, tctx.Fetcher, incoming.Attachments, tctx.MediaDir)
 		if err != nil && tctx.Logger != nil {
 			tctx.Logger.Error("failed to save attachments", "err", err)
 		}

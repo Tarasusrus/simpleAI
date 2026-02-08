@@ -18,7 +18,9 @@ type Attachment struct {
 type Update struct {
 	ID          int
 	ChatID      int64
+	UserID      int64
 	UserName    string
+	DisplayName string
 	Text        string
 	MessageID   int
 	Attachments []Attachment

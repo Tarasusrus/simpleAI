@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"simpleAI/internal/core"
 )
 
 type AgentService interface {
@@ -17,20 +17,21 @@ type AgentService interface {
 }
 
 type Context struct {
-	Bot       *tgbotapi.BotAPI
-	Update    tgbotapi.Update
+	Bot       core.Bot
+	Update    core.Update
 	Logger    *slog.Logger
 	Agent     AgentService
+	Fetcher   AttachmentFetcher
 	Allowed   []int64
 	RequestID string
 	MediaDir  string
 }
 
 func (c *Context) ChatID() (int64, error) {
-	if c.Update.Message == nil {
+	if c.Update.ChatID == 0 {
 		return 0, errors.New("no message in update")
 	}
-	return c.Update.Message.Chat.ID, nil
+	return c.Update.ChatID, nil
 }
 
 func (c *Context) Reply(text string) error {
@@ -38,8 +39,7 @@ func (c *Context) Reply(text string) error {
 	if err != nil {
 		return err
 	}
-	msg := tgbotapi.NewMessage(chatID, text)
-	return sendWithRetry(c, msg)
+	return sendWithRetry(c, chatID, text)
 }
 
 func (c *Context) Replyf(format string, args ...any) error {
@@ -47,19 +47,25 @@ func (c *Context) Replyf(format string, args ...any) error {
 }
 
 func (c *Context) Text() string {
-	if c.Update.Message == nil {
-		return ""
-	}
-	return strings.TrimSpace(c.Update.Message.Text)
+	return strings.TrimSpace(c.Update.Text)
 }
 
-func sendWithRetry(c *Context, msg tgbotapi.MessageConfig) error {
+func sendWithRetry(c *Context, chatID int64, text string) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
-		if _, err := c.Bot.Send(msg); err != nil {
+		if c.Bot == nil {
+			return errors.New("bot adapter is nil")
+		}
+		var err error
+		if c.Update.MessageID > 0 {
+			err = c.Bot.Reply(context.Background(), chatID, c.Update.MessageID, text)
+		} else {
+			err = c.Bot.Send(context.Background(), chatID, text)
+		}
+		if err != nil {
 			lastErr = err
 			continue
 		}

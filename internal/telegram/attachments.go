@@ -5,16 +5,20 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"simpleAI/internal/core"
 )
 
-func SaveAttachments(ctx context.Context, bot *tgbotapi.BotAPI, attachments []Attachment, dir string) ([]string, error) {
+// AttachmentFetcher получает содержимое вложения по идентификатору.
+type AttachmentFetcher interface {
+	FetchAttachment(ctx context.Context, attachment core.Attachment) (io.ReadCloser, error)
+}
+
+func SaveAttachments(ctx context.Context, fetcher AttachmentFetcher, attachments []core.Attachment, dir string) ([]string, error) {
 	if len(attachments) == 0 {
 		return nil, nil
 	}
@@ -25,41 +29,49 @@ func SaveAttachments(ctx context.Context, bot *tgbotapi.BotAPI, attachments []At
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
 	paths := make([]string, 0, len(attachments))
 	for _, att := range attachments {
-		file, err := bot.GetFile(tgbotapi.FileConfig{FileID: att.FileID})
-		if err != nil {
-			return paths, err
-		}
-		url := file.Link(bot.Token)
-		name := fileNameForAttachment(att, file.FilePath)
+		name := fileNameForAttachment(att)
 		target := filepath.Join(dir, name)
-		if err := downloadFile(ctx, client, url, target); err != nil {
-			return paths, err
+		if att.Path != "" {
+			if err := copyFile(att.Path, target); err != nil {
+				return paths, err
+			}
+		} else {
+			if fetcher == nil {
+				return paths, fmt.Errorf("attachment fetcher is nil")
+			}
+			reader, err := fetcher.FetchAttachment(ctx, att)
+			if err != nil {
+				return paths, err
+			}
+			if err := writeFromReader(target, reader); err != nil {
+				return paths, err
+			}
 		}
 		paths = append(paths, target)
 	}
 	return paths, nil
 }
 
-func fileNameForAttachment(att Attachment, filePath string) string {
+func fileNameForAttachment(att core.Attachment) string {
 	base := ""
-	if att.FileName != "" {
-		base = filepath.Base(att.FileName)
-	}
-	if base == "" && filePath != "" {
-		base = filepath.Base(filePath)
+	if att.Name != "" {
+		base = filepath.Base(att.Name)
 	}
 	ext := filepath.Ext(base)
 	if ext == "" {
 		ext = ".bin"
 	}
-	id := sanitizeName(att.FileID)
+	id := sanitizeName(att.ID)
 	if id == "" {
 		id = time.Now().UTC().Format("20060102T150405")
 	}
-	return fmt.Sprintf("%s_%s%s", att.Type, id, ext)
+	kind := strings.TrimSpace(att.Kind)
+	if kind == "" {
+		kind = "file"
+	}
+	return fmt.Sprintf("%s_%s%s", kind, id, ext)
 }
 
 func sanitizeName(raw string) string {
@@ -83,31 +95,18 @@ func sanitizeName(raw string) string {
 	return strings.Trim(clean, "_")
 }
 
-func downloadFile(ctx context.Context, client *http.Client, url string, target string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
+func writeFromReader(target string, reader io.ReadCloser) error {
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
+		if err := reader.Close(); err != nil {
 			_ = err
 		}
 	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: status=%d", resp.StatusCode)
-	}
-
 	tmp := target + ".tmp"
 	out, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := io.Copy(out, reader); err != nil {
 		if cerr := out.Close(); cerr != nil {
 			return cerr
 		}
@@ -117,4 +116,17 @@ func downloadFile(ctx context.Context, client *http.Client, url string, target s
 		return err
 	}
 	return os.Rename(tmp, target)
+}
+
+func copyFile(src, target string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := in.Close(); err != nil {
+			_ = err
+		}
+	}()
+	return writeFromReader(target, in)
 }

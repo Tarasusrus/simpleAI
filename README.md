@@ -12,6 +12,7 @@
 - Telegram‑вход сохраняет сырой payload в `TELEGRAM_MEDIA_DIR` для последующей обработки.
 - Централизация текстовых сообщений и кодов ошибок в `internal/constants` (в процессе).
 - Базовые интерфейсы LLM/Bot вынесены в `internal/core` для устранения vendor lock‑in.
+- Telegram‑адаптер вынесен в `internal/adapters/telegram`.
 
 ## Как пользоваться (кратко)
 1) Поднять базу: `docker compose up -d`, `make migrate-up`.

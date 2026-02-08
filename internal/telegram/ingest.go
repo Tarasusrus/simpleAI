@@ -9,18 +9,20 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"simpleAI/internal/core"
 )
 
 // IngestPayload сохраняет вход Telegram как сырой артефакт для дальнейшей обработки.
 type IngestPayload struct {
-	ReceivedAt  time.Time    `json:"received_at"`
-	ChatID      int64        `json:"chat_id"`
-	UserID      int64        `json:"user_id"`
-	UserName    string       `json:"user_name"`
-	DisplayName string       `json:"display_name"`
-	Text        string       `json:"text"`
-	Attachments []Attachment `json:"attachments"`
-	Paths       []string     `json:"paths"`
+	ReceivedAt  time.Time         `json:"received_at"`
+	ChatID      int64             `json:"chat_id"`
+	UserID      int64             `json:"user_id"`
+	UserName    string            `json:"user_name"`
+	DisplayName string            `json:"display_name"`
+	Text        string            `json:"text"`
+	Attachments []core.Attachment `json:"attachments"`
+	Paths       []string          `json:"paths"`
 }
 
 func SaveIngestPayload(ctx context.Context, dir string, incoming Incoming, paths []string) (string, error) {

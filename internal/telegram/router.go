@@ -36,14 +36,13 @@ func (r *Router) HandleDefault(handler Handler) {
 }
 
 func (r *Router) HandleUpdate(ctx context.Context, tctx *Context) error {
-	if tctx.Update.Message == nil {
+	if tctx.Update.ChatID == 0 {
 		return nil
 	}
 
 	handler := r.defaultHandler
-	if tctx.Update.Message.IsCommand() {
-		cmd := strings.TrimPrefix(tctx.Update.Message.Command(), "/")
-		if h, ok := r.commands[cmd]; ok {
+	if cmd, ok := parseCommand(tctx.Update.Text); ok {
+		if h, exists := r.commands[cmd]; exists {
 			handler = h
 		} else {
 			handler = r.defaultHandler
@@ -58,4 +57,23 @@ func (r *Router) HandleUpdate(ctx context.Context, tctx *Context) error {
 		finalHandler = r.middlewares[i](finalHandler)
 	}
 	return finalHandler(ctx, tctx)
+}
+
+func parseCommand(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return "", false
+	}
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return "", false
+	}
+	cmd := strings.TrimPrefix(parts[0], "/")
+	if idx := strings.Index(cmd, "@"); idx >= 0 {
+		cmd = cmd[:idx]
+	}
+	if cmd == "" {
+		return "", false
+	}
+	return cmd, true
 }
