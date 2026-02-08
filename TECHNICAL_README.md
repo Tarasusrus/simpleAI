@@ -19,6 +19,7 @@
 - Telegram‑бот: текст + сохранение вложений, базовые ограничения.
 - Telegram ingestion: сохраняет входной payload в `TELEGRAM_MEDIA_DIR`.
 - Константы: базовые коды ошибок и UI‑сообщения вынесены в `internal/constants`.
+- Core: интерфейсы LLM/Bot вынесены в `internal/core` для dependency inversion.
 
 ## Ближайшие цели
 - Усилить LLM‑клиент (таймауты, ретраи, обработка пустых ответов).
