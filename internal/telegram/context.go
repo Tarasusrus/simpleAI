@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -37,8 +38,7 @@ func (c *Context) Reply(text string) error {
 		return err
 	}
 	msg := tgbotapi.NewMessage(chatID, text)
-	_, err = c.Bot.Send(msg)
-	return err
+	return sendWithRetry(c, msg)
 }
 
 func (c *Context) Replyf(format string, args ...any) error {
@@ -50,4 +50,19 @@ func (c *Context) Text() string {
 		return ""
 	}
 	return strings.TrimSpace(c.Update.Message.Text)
+}
+
+func sendWithRetry(c *Context, msg tgbotapi.MessageConfig) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		if _, err := c.Bot.Send(msg); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
