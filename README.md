@@ -147,19 +147,29 @@ docker compose up -d   # Postgres + pgvector
 make migrate-up        # применить миграции
 ```
 
-### 2. Telegram-бот
+### 2. Запуск всего одной командой (рекомендуется)
 
 ```bash
-go run cmd/telegram/main.go
+make run-all
+# или: go run ./cmd/app
 ```
 
-Бот при старте:
-- подключается к БД и регистрирует `rag_search` skill
-- если БД недоступна — продолжает работу без RAG (только LLM)
-- команды `/start`, `/help` — встроены
-- любое сообщение — проходит через tool calling loop
+Поднимает в одном процессе:
+- Telegram-бот
+- MCP SSE-сервер на `:8080`
+- Mail worker (если настроены аккаунты в `MAIL_ACCOUNTS_JSON`)
 
-### 3. MCP-сервер (для Claude Code и внешних агентов)
+Graceful shutdown по `Ctrl+C` / `SIGTERM`.
+
+### 3. Запуск отдельных компонентов
+
+```bash
+go run cmd/telegram/main.go   # только бот
+make run-mcp                  # только MCP сервер
+go run cmd/worker/main.go     # только mail worker
+```
+
+### 4. MCP-сервер (для Claude Code и внешних агентов)
 
 ```bash
 make run-mcp
@@ -244,9 +254,10 @@ Telegram: отправить ответ пользователю
 
 | Команда | Что делает |
 |---------|-----------|
+| `make run-all` | **Запустить всё** — telegram + MCP + worker |
 | `make db-up` | Поднять Postgres в Docker |
 | `make migrate-up` | Применить SQL-миграции |
 | `make migrate-down` | Откатить последнюю миграцию |
-| `make run-mcp` | Запустить MCP SSE-сервер на :8080 |
+| `make run-mcp` | Только MCP SSE-сервер на :8080 |
 | `make run-diff` | Git diff текущего проекта → code review агент |
 | `make lint` | Запустить golangci-lint |

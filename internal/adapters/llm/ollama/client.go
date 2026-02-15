@@ -55,6 +55,22 @@ func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
 }
 
 func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
+	return c.askWithSystem(ctx, prompt, c.sysPrompt)
+}
+
+func (c *Client) AskWithSystem(ctx context.Context, systemAddition, userPrompt string) (string, error) {
+	system := c.sysPrompt
+	if strings.TrimSpace(systemAddition) != "" {
+		if system != "" {
+			system += "\n\n" + systemAddition
+		} else {
+			system = systemAddition
+		}
+	}
+	return c.askWithSystem(ctx, userPrompt, system)
+}
+
+func (c *Client) askWithSystem(ctx context.Context, prompt, system string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -64,7 +80,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 		if c.logger != nil {
 			c.logger.Debug("ollama request", "model", c.model, "attempt", attempt+1, "max_attempts", retries+1)
 		}
-		text, err := c.askWithModel(ctx, prompt, c.model)
+		text, err := c.askWithModelAndSystem(ctx, prompt, c.model, system)
 		if err == nil {
 			return text, nil
 		}
@@ -72,7 +88,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 			if c.logger != nil {
 				c.logger.Warn("ollama fallback triggered", "from_model", c.model, "to_model", c.fallback, "err", err)
 			}
-			if text, fbErr := c.askWithModel(ctx, prompt, c.fallback); fbErr == nil {
+			if text, fbErr := c.askWithModelAndSystem(ctx, prompt, c.fallback, system); fbErr == nil {
 				return text, nil
 			} else {
 				err = fbErr
@@ -86,7 +102,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 	return "", lastErr
 }
 
-func (c *Client) askWithModel(ctx context.Context, prompt string, model string) (string, error) {
+func (c *Client) askWithModelAndSystem(ctx context.Context, prompt, model, system string) (string, error) {
 	if strings.TrimSpace(model) == "" {
 		return "", fmt.Errorf("ollama model is empty")
 	}
@@ -95,8 +111,8 @@ func (c *Client) askWithModel(ctx context.Context, prompt string, model string) 
 		"prompt": prompt,
 		"stream": false,
 	}
-	if strings.TrimSpace(c.sysPrompt) != "" {
-		reqBody["system"] = c.sysPrompt
+	if strings.TrimSpace(system) != "" {
+		reqBody["system"] = system
 	}
 	resp, err := c.postJSON(ctx, "/api/generate", reqBody)
 	if err == nil {

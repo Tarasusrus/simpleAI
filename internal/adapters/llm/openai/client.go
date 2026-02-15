@@ -37,6 +37,22 @@ func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
 }
 
 func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
+	return c.askWithCustomSystem(ctx, c.cfg.SysPrompt, prompt)
+}
+
+func (c *Client) AskWithSystem(ctx context.Context, systemAddition, userPrompt string) (string, error) {
+	system := c.cfg.SysPrompt
+	if strings.TrimSpace(systemAddition) != "" {
+		if system != "" {
+			system += "\n\n" + systemAddition
+		} else {
+			system = systemAddition
+		}
+	}
+	return c.askWithCustomSystem(ctx, system, userPrompt)
+}
+
+func (c *Client) askWithCustomSystem(ctx context.Context, system, prompt string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -46,7 +62,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 		reqCtx, cancel := context.WithTimeout(ctx, c.timeout())
 		chatCompletion, err := c.api.Chat.Completions.New(reqCtx, openai.ChatCompletionNewParams{
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage(c.cfg.SysPrompt),
+				openai.SystemMessage(system),
 				openai.UserMessage(prompt),
 			},
 			Model: c.chatModel(),

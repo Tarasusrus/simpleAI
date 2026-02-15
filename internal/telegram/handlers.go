@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"simpleAI/internal/plugin"
 )
 
 func HandleStart(ctx context.Context, tctx *Context) error {
@@ -12,14 +14,36 @@ func HandleStart(ctx context.Context, tctx *Context) error {
 }
 
 func HandleHelp(ctx context.Context, tctx *Context) error {
-	help := strings.Join([]string{
-		"Доступные команды:",
-		"/start - приветствие",
-		"/help - справка",
-		"",
-		"Поддержка файлов и фото будет добавлена отдельно.",
-	}, "\n")
-	return tctx.Reply(help)
+	var sb strings.Builder
+	sb.WriteString("Я AI-ассистент с доступом к базе знаний.\n\n")
+	sb.WriteString("Команды:\n")
+	sb.WriteString("/start — приветствие\n")
+	sb.WriteString("/help — эта справка\n\n")
+	sb.WriteString("Просто напиши вопрос — я отвечу.\n")
+	sb.WriteString("Если вопрос требует поиска данных — автоматически найду в базе знаний.\n")
+
+	if tctx.Registry != nil {
+		if skills := tctx.Registry.List(); len(skills) > 0 {
+			sb.WriteString("\nДоступные возможности:\n")
+			for _, s := range skills {
+				sb.WriteString(fmt.Sprintf("• %s — %s\n", s.Name, s.Description))
+			}
+		}
+	}
+
+	return tctx.Reply(sb.String())
+}
+
+// buildSkillsHelp формирует строку с описанием skills (используется внутри пакета).
+func buildSkillsHelp(manifests []plugin.Manifest) string {
+	if len(manifests) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, m := range manifests {
+		sb.WriteString(fmt.Sprintf("• %s — %s\n", m.Name, m.Description))
+	}
+	return sb.String()
 }
 
 func HandleDefault(ctx context.Context, tctx *Context) error {

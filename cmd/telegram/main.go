@@ -96,6 +96,7 @@ func main() {
 				Allowed:   cfg.Telegram.AllowedChats,
 				RequestID: uuid.NewString(),
 				MediaDir:  cfg.Telegram.MediaDir,
+				Registry:  registry,
 			})
 			cancel()
 			if err != nil {

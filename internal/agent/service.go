@@ -25,22 +25,22 @@ func NewServiceWithRegistry(client core.LLM, registry *plugin.Registry) *Service
 	return &Service{client: client, registry: registry}
 }
 
-// Ask answers the query, optionally routing through a skill if the registry
-// has registered skills and the LLM decides to invoke one.
+// Ask отвечает на запрос пользователя. Если registry содержит skills,
+// LLM получает инструкции по tool calling в system message (через AskWithSystem).
+// При обнаружении tool call — выполняет skill и возвращает финальный ответ LLM.
 func (s *Service) Ask(ctx context.Context, input string) (string, error) {
 	if s.registry == nil || len(s.registry.List()) == 0 {
 		return s.client.Ask(ctx, input)
 	}
 
-	// Build prompt that lists available tools and instructs LLM on format.
-	fullPrompt := buildToolsPrompt(s.registry.List()) + "\n\nUser: " + input
-
-	resp, err := s.client.Ask(ctx, fullPrompt)
+	// Tool calling инструкции идут в system message, а не в user message.
+	toolSystemPrompt := buildToolsSystemPrompt(s.registry.List())
+	resp, err := s.client.AskWithSystem(ctx, toolSystemPrompt, input)
 	if err != nil {
 		return "", err
 	}
 
-	// Try to detect a tool call in the response.
+	// Пытаемся извлечь tool call JSON из ответа.
 	call, ok := parseToolCall(resp)
 	if !ok {
 		return resp, nil
@@ -61,7 +61,7 @@ func (s *Service) Ask(ctx context.Context, input string) (string, error) {
 		return "", fmt.Errorf("skill %s: %w", call.Skill, err)
 	}
 
-	// Feed the skill result back to the LLM to produce a natural language answer.
+	// Финальный ответ: LLM синтезирует ответ из результата skill.
 	return s.client.Ask(ctx, result)
 }
 
@@ -70,29 +70,63 @@ type toolCall struct {
 	Input map[string]any `json:"input"`
 }
 
+// parseToolCall пытается извлечь JSON tool call из ответа LLM.
+// Поддерживает: чистый JSON, JSON в markdown ```json``` блоке, JSON внутри текста.
 func parseToolCall(resp string) (toolCall, bool) {
-	trimmed := strings.TrimSpace(resp)
-	var call toolCall
-	if err := json.Unmarshal([]byte(trimmed), &call); err != nil {
-		return toolCall{}, false
+	for _, candidate := range extractJSONCandidates(resp) {
+		var call toolCall
+		if err := json.Unmarshal([]byte(candidate), &call); err == nil && call.Skill != "" {
+			return call, true
+		}
 	}
-	return call, call.Skill != ""
+	return toolCall{}, false
 }
 
-func buildToolsPrompt(manifests []plugin.Manifest) string {
+// extractJSONCandidates возвращает потенциальные JSON-строки из ответа LLM.
+func extractJSONCandidates(resp string) []string {
+	trimmed := strings.TrimSpace(resp)
+	candidates := []string{trimmed}
+
+	// Извлечь из markdown code block: ```json ... ``` или ``` ... ```
+	for _, fence := range []string{"```json", "```"} {
+		start := strings.Index(trimmed, fence)
+		if start == -1 {
+			continue
+		}
+		inner := trimmed[start+len(fence):]
+		end := strings.Index(inner, "```")
+		if end == -1 {
+			continue
+		}
+		candidates = append(candidates, strings.TrimSpace(inner[:end]))
+	}
+
+	// Найти первый JSON-объект в тексте по { ... }
+	start := strings.Index(trimmed, "{")
+	if start != -1 {
+		end := strings.LastIndex(trimmed, "}")
+		if end > start {
+			candidates = append(candidates, trimmed[start:end+1])
+		}
+	}
+
+	return candidates
+}
+
+// buildToolsSystemPrompt формирует дополнение к system prompt с описанием доступных tools.
+func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	var sb strings.Builder
-	sb.WriteString("You have access to the following tools. If the user's request requires")
-	sb.WriteString(" information retrieval or data lookup, respond ONLY with a JSON tool call")
-	sb.WriteString(" in this exact format (no other text):\n")
-	sb.WriteString(`{"skill": "<tool_id>", "input": {<tool_input>}}`)
-	sb.WriteString("\n\nAvailable tools:\n")
+	sb.WriteString("У тебя есть доступ к следующим инструментам для поиска информации.\n")
+	sb.WriteString("Если запрос пользователя требует поиска данных — ответь ТОЛЬКО валидным JSON (без markdown, без пояснений):\n")
+	sb.WriteString(`{"skill": "<id>", "input": {<параметры>}}`)
+	sb.WriteString("\n\nДоступные инструменты:\n")
 	for _, m := range manifests {
 		sb.WriteString(fmt.Sprintf("- %s: %s\n", m.ID, m.Description))
 		if m.InputSchema != nil {
-			schemaBytes, _ := json.Marshal(m.InputSchema.JSON)
-			sb.WriteString(fmt.Sprintf("  Input schema: %s\n", string(schemaBytes)))
+			b, _ := json.Marshal(m.InputSchema.JSON)
+			sb.WriteString(fmt.Sprintf("  Параметры: %s\n", string(b)))
 		}
 	}
-	sb.WriteString("\nIf you can answer directly without a tool, respond normally.")
+	sb.WriteString("\nЕсли инструмент не нужен — отвечай обычным текстом.")
 	return sb.String()
 }

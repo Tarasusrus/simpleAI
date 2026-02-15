@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"simpleAI/internal/core"
+	"simpleAI/internal/plugin"
 )
 
 type AgentService interface {
@@ -25,6 +26,7 @@ type Context struct {
 	Allowed   []int64
 	RequestID string
 	MediaDir  string
+	Registry  *plugin.Registry
 }
 
 func (c *Context) ChatID() (int64, error) {
