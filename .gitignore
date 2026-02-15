@@ -1,3 +1,18 @@
 .idea/
 .env
 TECHNICAL_README.md
+.DS_Store
+win.txt
+
+# Скомпилированные бинари в корне
+/app
+/mcp
+/telegram
+/worker
+
+# Данные и медиафайлы
+data/
+
+# Beads lock-файлы
+.beads/*.lock
+.beads/.migration-hint-ts
