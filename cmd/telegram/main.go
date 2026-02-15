@@ -1,9 +1,10 @@
-// Package main содержит код пакета main и его задачи.
+// Package main contains code for main package and its tasks.
 package main
 
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 	telegramadapter "simpleAI/internal/adapters/telegram"
 	"simpleAI/internal/agent"
 	"simpleAI/internal/core"
+	"simpleAI/internal/db"
+	"simpleAI/internal/plugin"
+	"simpleAI/internal/rag"
+	"simpleAI/internal/skills"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
 )
@@ -51,7 +56,9 @@ func main() {
 	if err != nil {
 		log.Fatal("Err while init llm client: ", err)
 	}
-	agentService := agent.NewService(llmClient)
+
+	registry := buildRegistry(cfg, llmClient, logger)
+	agentService := agent.NewServiceWithRegistry(llmClient, registry)
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))
@@ -96,4 +103,27 @@ func main() {
 			}
 		}(update)
 	}
+}
+
+// buildRegistry creates a plugin.Registry with all available skills.
+// If the database is unavailable the registry is returned empty so the bot
+// continues to work without RAG.
+func buildRegistry(cfg config.Config, llmClient core.LLMClient, logger *slog.Logger) *plugin.Registry {
+	registry := plugin.NewRegistry()
+
+	pool, err := db.NewPool(context.Background(), cfg.DB)
+	if err != nil {
+		logger.Error("failed to connect to db, RAG skill disabled", "err", err)
+		return registry
+	}
+
+	retriever := rag.NewRetriever(pool)
+	ragSkill := skills.NewRAGSearchSkill(retriever, llmClient)
+	if err := registry.Register(ragSkill); err != nil {
+		logger.Error("failed to register rag_search skill", "err", err)
+		return registry
+	}
+
+	logger.Info("registry ready", "skills", len(registry.List()))
+	return registry
 }
