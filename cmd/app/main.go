@@ -46,10 +46,10 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to connect to db: ", err)
 	}
-	defer pool.Close()
 
 	llmClient, err := llmfactory.NewClient(cfg, logger)
 	if err != nil {
+		pool.Close()
 		log.Fatal("failed to init llm client: ", err)
 	}
 
@@ -93,6 +93,7 @@ func main() {
 
 	logger.Info("all services started")
 	wg.Wait()
+	pool.Close()
 	logger.Info("shutdown complete")
 }
 
