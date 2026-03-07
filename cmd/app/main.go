@@ -50,6 +50,7 @@ func main() {
 
 	llmClient, err := llmfactory.NewClient(cfg, logger)
 	if err != nil {
+		pool.Close()
 		log.Fatal("failed to init llm client: ", err)
 	}
 

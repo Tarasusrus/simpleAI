@@ -123,8 +123,10 @@ func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	for _, m := range manifests {
 		sb.WriteString(fmt.Sprintf("- %s: %s\n", m.ID, m.Description))
 		if m.InputSchema != nil {
-			b, _ := json.Marshal(m.InputSchema.JSON)
-			sb.WriteString(fmt.Sprintf("  Параметры: %s\n", string(b)))
+			b, err := json.Marshal(m.InputSchema.JSON)
+			if err == nil {
+				sb.WriteString(fmt.Sprintf("  Параметры: %s\n", string(b)))
+			}
 		}
 	}
 	sb.WriteString("\nЕсли инструмент не нужен — отвечай обычным текстом.")

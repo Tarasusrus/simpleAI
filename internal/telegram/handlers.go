@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"simpleAI/internal/plugin"
 )
 
 func HandleStart(ctx context.Context, tctx *Context) error {
@@ -32,18 +30,6 @@ func HandleHelp(ctx context.Context, tctx *Context) error {
 	}
 
 	return tctx.Reply(sb.String())
-}
-
-// buildSkillsHelp формирует строку с описанием skills (используется внутри пакета).
-func buildSkillsHelp(manifests []plugin.Manifest) string {
-	if len(manifests) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for _, m := range manifests {
-		sb.WriteString(fmt.Sprintf("• %s — %s\n", m.Name, m.Description))
-	}
-	return sb.String()
 }
 
 func HandleDefault(ctx context.Context, tctx *Context) error {
