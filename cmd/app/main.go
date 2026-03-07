@@ -22,6 +22,7 @@ import (
 	llmfactory "simpleAI/internal/adapters/llm"
 	telegramadapter "simpleAI/internal/adapters/telegram"
 	"simpleAI/internal/agent"
+	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 	"simpleAI/internal/db"
 	"simpleAI/internal/mail"
@@ -226,7 +227,12 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	ragSkill := skills.NewRAGSearchSkill(retriever, llmClient)
 	if err := registry.Register(ragSkill); err != nil {
 		logger.Error("failed to register rag_search skill", "err", err)
-		return registry
+	}
+
+	budgetStore := budget.NewStore(pool)
+	budgetSkill := skills.NewBudgetSkill(budgetStore)
+	if err := registry.Register(budgetSkill); err != nil {
+		logger.Error("failed to register budget skill", "err", err)
 	}
 
 	logger.Info("registry ready", "skills", len(registry.List()))
