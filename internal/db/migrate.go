@@ -17,11 +17,7 @@ var migrationsFS embed.FS
 
 // Migrate применяет все pending миграции.
 func Migrate(ctx context.Context, cfg config.DBConfig) (retErr error) {
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.User, cfg.Pass, cfg.Host, cfg.Port, cfg.Name,
-	)
-	db, err := sql.Open("pgx", dsn)
+	db, err := sql.Open("pgx", DSN(cfg))
 	if err != nil {
 		return fmt.Errorf("migrate: open db: %w", err)
 	}
@@ -30,10 +26,6 @@ func Migrate(ctx context.Context, cfg config.DBConfig) (retErr error) {
 			retErr = fmt.Errorf("migrate: close db: %w", err)
 		}
 	}()
-
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("migrate: ping db: %w", err)
-	}
 
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.SetDialect("postgres"); err != nil {

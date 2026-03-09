@@ -10,14 +10,13 @@ import (
 	"simpleAI/config"
 )
 
-func NewPool(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
-	dsn := fmt.Sprintf(
+func DSN(cfg config.DBConfig) string {
+	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.User,
-		cfg.Pass,
-		cfg.Host,
-		cfg.Port,
-		cfg.Name,
+		cfg.User, cfg.Pass, cfg.Host, cfg.Port, cfg.Name,
 	)
-	return pgxpool.New(ctx, dsn)
+}
+
+func NewPool(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
+	return pgxpool.New(ctx, DSN(cfg))
 }
