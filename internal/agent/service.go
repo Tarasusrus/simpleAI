@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -230,6 +231,11 @@ func unmarshalCalls(s string) ([]toolCall, bool) {
 // buildToolsSystemPrompt формирует дополнение к system prompt с описанием доступных tools.
 func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	var sb strings.Builder
+	now := time.Now()
+	fmt.Fprintf(&sb,
+		"Сегодня: %s (год %d, месяц %d). При указании месяца без года: если этот месяц уже прошёл или идёт сейчас — используй %d; если месяц ещё не наступил в этом году (например декабрь когда сейчас март) — используй %d.\n\n",
+		now.Format("02.01.2006"), now.Year(), int(now.Month()), now.Year(), now.Year()-1,
+	)
 	sb.WriteString("У тебя есть доступ к инструментам. Если нужно вызвать инструмент — ответь ТОЛЬКО валидным JSON без markdown и пояснений.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
 	sb.WriteString("Несколько вызовов за раз: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
