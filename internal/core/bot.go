@@ -31,4 +31,5 @@ type Bot interface {
 	Updates(ctx context.Context) (<-chan Update, error)
 	Send(ctx context.Context, chatID int64, text string) error
 	Reply(ctx context.Context, chatID int64, replyTo int, text string) error
+	SendTyping(ctx context.Context, chatID int64) error
 }

@@ -52,6 +52,35 @@ func (c *Context) Text() string {
 	return strings.TrimSpace(c.Update.Text)
 }
 
+// Typing отправляет «печатает…» и обновляет его каждые 4 секунды.
+// Возвращает функцию-отмену — вызови defer cancel() сразу после.
+func (c *Context) Typing(ctx context.Context) context.CancelFunc {
+	chatID, err := c.ChatID()
+	if err != nil || c.Bot == nil {
+		return func() {}
+	}
+	tickCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		// Typing indicator is best-effort — errors are intentionally ignored.
+		if err := c.Bot.SendTyping(tickCtx, chatID); err != nil {
+			return
+		}
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-tickCtx.Done():
+				return
+			case <-ticker.C:
+				if err := c.Bot.SendTyping(tickCtx, chatID); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
 func sendWithRetry(c *Context, chatID int64, text string) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {

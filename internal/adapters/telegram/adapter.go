@@ -104,6 +104,14 @@ func (a *Adapter) Send(ctx context.Context, chatID int64, text string) error {
 	return err
 }
 
+func (a *Adapter) SendTyping(ctx context.Context, chatID int64) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	_, err := a.bot.Request(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+	return err
+}
+
 func (a *Adapter) Reply(ctx context.Context, chatID int64, replyTo int, text string) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
