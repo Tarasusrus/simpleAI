@@ -67,6 +67,7 @@ jobs:
 
             cd ~/simpleAI
             git pull origin main
+            docker compose up -d
             CGO_ENABLED=0 /usr/local/go/bin/go build -o bin/app ./cmd/app
             sudo systemctl restart simpleai
             systemctl is-active --quiet simpleai && echo "✓ simpleai is running"

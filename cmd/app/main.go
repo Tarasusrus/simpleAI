@@ -43,6 +43,10 @@ func main() {
 
 	logger := tools.NewLogger()
 
+	if err := db.Migrate(context.Background(), cfg.DB); err != nil {
+		log.Fatal("failed to run migrations: ", err)
+	}
+
 	pool, err := db.NewPool(context.Background(), cfg.DB)
 	if err != nil {
 		log.Fatal("failed to connect to db: ", err)
