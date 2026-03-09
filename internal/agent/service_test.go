@@ -126,6 +126,24 @@ func TestParseToolCalls_JSONWithoutSkill(t *testing.T) {
 	}
 }
 
+func TestParseToolCalls_MultipleObjectsScatteredInText(t *testing.T) {
+	// Реальный кейс: LLM пишет текст + несколько отдельных JSON объектов
+	resp := "Я поищу по ключевым словам:\n" +
+		`{"skill":"budget","input":{"action":"list_transactions","keyword":"Soybean"}}` + "\n\n" +
+		`{"skill":"budget","input":{"action":"list_transactions","keyword":"Muji"}}` + "\n\n" +
+		`{"skill":"budget","input":{"action":"list_transactions","keyword":"одежда"}}`
+	calls := parseToolCalls(resp)
+	if len(calls) != 3 {
+		t.Fatalf("want 3 calls, got %d", len(calls))
+	}
+	if calls[0].Input["keyword"] != "Soybean" {
+		t.Errorf("first call keyword: want Soybean, got %v", calls[0].Input["keyword"])
+	}
+	if calls[2].Input["keyword"] != "одежда" {
+		t.Errorf("third call keyword: want одежда, got %v", calls[2].Input["keyword"])
+	}
+}
+
 func TestParseToolCalls_JSONEmbeddedInText(t *testing.T) {
 	resp := `Нужно вызвать инструмент: {"skill":"budget","input":{"action":"summary"}} — сделано.`
 	calls := parseToolCalls(resp)

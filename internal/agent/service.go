@@ -94,7 +94,8 @@ type toolCall struct {
 }
 
 // parseToolCalls извлекает все tool calls из ответа LLM.
-// Поддерживает: одиночный JSON-объект, JSON-массив объектов, JSON внутри markdown.
+// Поддерживает: одиночный JSON-объект, JSON-массив, markdown блок,
+// а также несколько JSON-объектов разбросанных по тексту.
 func parseToolCalls(resp string) []toolCall {
 	trimmed := strings.TrimSpace(resp)
 
@@ -119,27 +120,45 @@ func parseToolCalls(resp string) []toolCall {
 		return calls
 	}
 
-	// Найти первый JSON-объект/массив в тексте.
-	for _, start := range []string{"[", "{"} {
-		idx := strings.Index(trimmed, start)
-		if idx == -1 {
-			continue
-		}
-		var endChar string
-		if start == "[" {
-			endChar = "]"
-		} else {
-			endChar = "}"
-		}
-		end := strings.LastIndex(trimmed, endChar)
-		if end > idx {
-			if calls, ok := unmarshalCalls(trimmed[idx : end+1]); ok {
-				return calls
+	// Сканировать все JSON-объекты в тексте (LLM иногда пишет несколько объектов
+	// с текстом между ними вместо массива).
+	if objects := scanJSONObjects(trimmed); len(objects) > 0 {
+		var calls []toolCall
+		for _, obj := range objects {
+			if c, ok := unmarshalCalls(obj); ok {
+				calls = append(calls, c...)
 			}
+		}
+		if len(calls) > 0 {
+			return calls
 		}
 	}
 
 	return nil
+}
+
+// scanJSONObjects находит все JSON-объекты верхнего уровня в строке
+// используя подсчёт скобок.
+func scanJSONObjects(s string) []string {
+	var objects []string
+	depth := 0
+	start := -1
+	for i := range len(s) {
+		switch s[i] {
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			depth--
+			if depth == 0 && start >= 0 {
+				objects = append(objects, s[start:i+1])
+				start = -1
+			}
+		}
+	}
+	return objects
 }
 
 // unmarshalCalls пробует распарсить s как []toolCall или одиночный toolCall.
@@ -170,9 +189,11 @@ func unmarshalCalls(s string) ([]toolCall, bool) {
 // buildToolsSystemPrompt формирует дополнение к system prompt с описанием доступных tools.
 func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	var sb strings.Builder
-	sb.WriteString("У тебя есть доступ к инструментам. Если нужно вызвать инструмент — ответь ТОЛЬКО валидным JSON без markdown и пояснений.\n")
+	sb.WriteString("У тебя есть доступ к инструментам.\n")
+	sb.WriteString("КРИТИЧЕСКИ ВАЖНО: когда вызываешь инструмент — ответь ТОЛЬКО валидным JSON. Никакого текста до или после JSON. Никаких объяснений. Только JSON.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
-	sb.WriteString("Несколько вызовов за раз: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
+	sb.WriteString("Несколько вызовов: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
+	sb.WriteString("Запрещено: писать текст до JSON, после JSON, вместо JSON. Только чистый JSON.\n")
 	sb.WriteString("\nДоступные инструменты:\n")
 	for _, m := range manifests {
 		fmt.Fprintf(&sb, "- %s: %s\n", m.ID, m.Description)
