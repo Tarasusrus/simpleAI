@@ -90,6 +90,13 @@ jobs:
                 GRANT ALL ON SCHEMA public TO simpleai;
               END
               \$\$;"
+            # Явно применяем pending миграции схемы (страховка если goose в бинаре не успел)
+            docker exec simpleai-postgres psql -U simpleai -d simpleai -c "
+              ALTER TABLE budget_transaction ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB';"
+
+            # Форсируем пересборку (go build берёт кеш если Go-файлы не менялись,
+            # но embedded SQL файлы при этом могут быть устаревшими)
+            /usr/local/go/bin/go clean -cache
             CGO_ENABLED=0 /usr/local/go/bin/go build -o bin/app ./cmd/app
             sudo systemctl restart simpleai
             systemctl is-active --quiet simpleai && echo "✓ simpleai is running"
