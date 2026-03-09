@@ -1,0 +1,15 @@
+[Unit]
+Description=SimpleAI — Telegram bot + MCP + mail worker
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+User=deploy
+WorkingDirectory=/home/deploy/simpleAI
+ExecStart=/home/deploy/simpleAI/bin/app
+Restart=on-failure
+RestartSec=5s
+EnvironmentFile=/home/deploy/simpleAI/.env
+
+[Install]
+WantedBy=multi-user.target
