@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"simpleAI/internal/core"
@@ -15,6 +16,11 @@ import (
 
 type AgentService interface {
 	Ask(ctx context.Context, input string) (string, error)
+}
+
+// TypingSender — опциональный интерфейс для отправки индикатора набора.
+type TypingSender interface {
+	SendTyping(ctx context.Context, chatID int64) error
 }
 
 type Context struct {
@@ -50,6 +56,45 @@ func (c *Context) Replyf(format string, args ...any) error {
 
 func (c *Context) Text() string {
 	return strings.TrimSpace(c.Update.Text)
+}
+
+// StartTyping отправляет typing action и обновляет его каждые 4 секунды.
+// Возвращает функцию stop — вызови её когда ответ готов.
+// Если Bot не реализует TypingSender — ничего не делает.
+func (c *Context) StartTyping(ctx context.Context) (stop func()) {
+	ts, ok := c.Bot.(TypingSender)
+	if !ok {
+		return func() {}
+	}
+	chatID, err := c.ChatID()
+	if err != nil {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	if err := ts.SendTyping(ctx, chatID); err != nil {
+		slog.Default().DebugContext(ctx, "typing action failed", "err", err)
+	}
+
+	go func() {
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := ts.SendTyping(ctx, chatID); err != nil {
+					slog.Default().DebugContext(ctx, "typing action failed", "err", err)
+				}
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }
 
 func sendWithRetry(c *Context, chatID int64, text string) error {
