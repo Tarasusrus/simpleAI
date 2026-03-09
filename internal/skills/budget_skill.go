@@ -38,7 +38,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status",
+						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, delete_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -155,6 +155,8 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.listTransactions(ctx, req)
 	case "edit_transaction":
 		return s.editTransaction(ctx, req)
+	case "delete_transaction":
+		return s.deleteTransaction(ctx, req)
 	case "add_goal":
 		return s.addGoal(ctx, req)
 	case "update_goal":
@@ -516,6 +518,33 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 		icon, updated.Amount, currencySymbol(updated.Currency),
 		cat, updated.Date.Format("02.01.2006"),
 		updated.ID.String()[:8],
+	), nil
+}
+
+func (s *BudgetSkill) deleteTransaction(ctx context.Context, req budgetInput) (string, error) {
+	if req.TransactionID == "" {
+		return "", fmt.Errorf("transaction_id is required for delete_transaction")
+	}
+
+	tx, err := s.store.GetTransactionByPrefix(ctx, req.TransactionID)
+	if err != nil {
+		return "", fmt.Errorf("find transaction: %w", err)
+	}
+
+	if err := s.store.DeleteTransaction(ctx, tx.ID); err != nil {
+		return "", fmt.Errorf("delete transaction: %w", err)
+	}
+
+	cat := tx.CategoryName
+	if cat == "" {
+		cat = "без категории"
+	}
+	icon := "🔴"
+	if tx.Type == "income" {
+		icon = "🟢"
+	}
+	return fmt.Sprintf("🗑 Удалено: %s %.0f %s | %s | %s",
+		icon, tx.Amount, currencySymbol(tx.Currency), cat, tx.Date.Format("02.01.2006"),
 	), nil
 }
 

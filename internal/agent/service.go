@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"simpleAI/internal/core"
 	"simpleAI/internal/plugin"
@@ -189,6 +190,8 @@ func unmarshalCalls(s string) ([]toolCall, bool) {
 // buildToolsSystemPrompt формирует дополнение к system prompt с описанием доступных tools.
 func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	var sb strings.Builder
+	fmt.Fprintf(&sb, "Текущая дата и время: %s (UTC).\n", time.Now().UTC().Format("2006-01-02 15:04 Mon"))
+	sb.WriteString("Используй эту дату для вычисления относительных дат: «вчера», «в прошлый вторник», «на прошлой неделе».\n\n")
 	sb.WriteString("У тебя есть доступ к инструментам.\n")
 	sb.WriteString("КРИТИЧЕСКИ ВАЖНО: когда вызываешь инструмент — ответь ТОЛЬКО валидным JSON. Никакого текста до или после JSON. Никаких объяснений. Только JSON.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
