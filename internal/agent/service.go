@@ -239,6 +239,7 @@ func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	sb.WriteString("У тебя есть доступ к инструментам. Если нужно вызвать инструмент — ответь ТОЛЬКО валидным JSON без markdown и пояснений.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
 	sb.WriteString("Несколько вызовов за раз: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
+	sb.WriteString("ВАЖНО: если пользователь описал несколько действий — вызывай ВСЕ инструменты ОДНИМ массивом за один ответ. Не обрабатывай действия по одному.\n")
 	sb.WriteString("\nДоступные инструменты:\n")
 	for _, m := range manifests {
 		fmt.Fprintf(&sb, "- %s: %s\n", m.ID, m.Description)
