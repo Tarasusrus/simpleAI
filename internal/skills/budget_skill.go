@@ -534,7 +534,7 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 	}
 
 	cur := currencySymbol(t.Currency)
-	result := fmt.Sprintf("%s %s записан: %.0f %s → %s", icon, label, t.Amount, cur, cat)
+	result := fmt.Sprintf("%s %s записан: %.0f %s → %s | %s", icon, label, t.Amount, cur, cat, t.Date.Format("02.01.2006"))
 	if t.Description != "" {
 		result += fmt.Sprintf(" (%s)", t.Description)
 	}
