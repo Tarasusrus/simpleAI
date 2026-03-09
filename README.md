@@ -13,9 +13,10 @@
     │        ↓
     │    Telegram Bot (cmd/telegram)
     │        ↓
-    │    agent.Service  ←── plugin.Registry ──── RAGSearchSkill
-    │        ↓                                        ↓
-    │    LLM (OpenAI/Ollama)              rag.Retriever → pgvector
+    │    agent.Service  ←── plugin.Registry ──┬── RAGSearchSkill
+    │        ↓                                └── BudgetSkill
+    │    LLM (OpenAI/Ollama)                        ↓
+    │                                          budget.Store → PostgreSQL
     │
     └─── Claude Code / внешний агент
              ↓ HTTP/SSE :8080
@@ -68,6 +69,10 @@ internal/
     prompt.go   — BuildPrompt: контекст + вопрос → строка для LLM
   skills/
     rag_search.go — RAGSearchSkill: embed → search → BuildPrompt
+    budget_skill.go — BudgetSkill: учёт финансов (10 actions)
+  budget/
+    model.go    — Модели: Transaction, Category, Goal, Debt, Summary
+    store.go    — CRUD-операции над бюджетными данными (pgxpool)
   telegram/     — Роутер, хендлеры, middleware, контекст
   tools/        — NewLogger (slog)
 
@@ -92,8 +97,18 @@ migrations/     — SQL-миграции (goose)
 Реестр skills. Ключевые методы: `Register(Skill)`, `Get(id)`, `List() []Manifest`.
 
 ### RAGSearchSkill (internal/skills/rag_search.go)
-Единственный активный skill. Input: `{"query": "...", "limit": 5}`.
+Поиск по базе знаний. Input: `{"query": "...", "limit": 5}`.
 Поток: embed query → pgvector search → BuildPrompt.
+
+### BudgetSkill (internal/skills/budget_skill.go)
+Управление личными финансами. 10 actions:
+- `add_expense` / `add_income` — записать расход/доход с категорией
+- `summary` — сводка за период с разбивкой по категориям
+- `list_transactions` — список операций за период
+- `add_goal` / `update_goal` / `goal_status` — цели накоплений
+- `add_debt` / `pay_debt` / `debt_status` — долги и кредиты
+
+Пример: `{"skill": "budget", "input": {"action": "add_expense", "amount": 1500, "category": "еда"}}`
 
 ### MCP Server (internal/mcp/server.go + cmd/mcp/main.go)
 Превращает registry в MCP-инструменты над HTTP/SSE. Claude Code и другие MCP-клиенты подключаются к `:8080/sse`.
@@ -221,31 +236,33 @@ make run-diff
    func (s *MySkill) Manifest() plugin.Manifest { ... }
    func (s *MySkill) Run(ctx context.Context, input string) (string, error) { ... }
    ```
-2. Зарегистрировать в `cmd/telegram/main.go` → `buildRegistry()` и в `cmd/mcp/main.go`.
+2. Зарегистрировать в `cmd/app/main.go` → `buildRegistry()`.
 3. Обновить README.
+
+Примеры: `rag_search.go` (простой), `budget_skill.go` (action-based с store).
 
 ---
 
 ## Поток запроса через Telegram
 
+### RAG-поиск
 ```
 Пользователь: "найди чеки за январь"
     ↓
-telegram.HandleDefault
+agent.Service.Ask → LLM → {"skill":"rag_search","input":{"query":"чеки за январь"}}
     ↓
-agent.Service.Ask(ctx, "найди чеки за январь")
-    ↓  (registry не пуст)
-LLM ← system prompt с описанием skills + запрос пользователя
+RAGSearchSkill.Run → embed → pgvector search → BuildPrompt → LLM → ответ
+```
+
+### Бюджет-трекер
+```
+Пользователь: "потратил 1500 на продукты"
     ↓
-LLM → {"skill":"rag_search","input":{"query":"чеки за январь"}}
+agent.Service.Ask → LLM → {"skill":"budget","input":{"action":"add_expense","amount":1500,"category":"еда"}}
     ↓
-RAGSearchSkill.Run → embed → pgvector search → BuildPrompt
+BudgetSkill.Run → FindCategory("еда") → AddTransaction → GetSummary → ответ
     ↓
-LLM ← BuildPrompt (контекст из БД + вопрос)
-    ↓
-LLM → финальный ответ на русском
-    ↓
-Telegram: отправить ответ пользователю
+"🔴 Расход записан: 1500 ₽ → Еда. Баланс месяца: +12 300 ₽"
 ```
 
 ---

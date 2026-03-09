@@ -9,6 +9,10 @@ Goal: minimal schema to store receipts/expenses and RAG documents.
 - receipt_artifact: ссылки на файлы/вложения (фото/сканы).
 - category: category tree for analytics and filtering.
 - rag_document: text chunks used for retrieval with embeddings.
+- budget_category: категории доходов/расходов для бюджет-трекера.
+- budget_transaction: операции доходов и расходов.
+- budget_goal: цели накоплений с прогрессом.
+- budget_debt: долги и кредиты с платежами.
 
 ## Notes
 - Store raw receipt text for future re-processing.
