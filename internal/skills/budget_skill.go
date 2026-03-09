@@ -38,7 +38,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Действие: add_expense, add_income, summary, list_transactions, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status",
+						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -96,6 +96,18 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 						"type":        "string",
 						"description": "Валюта операции: RUB (по умолчанию), USD, EUR, THB, и т.д. (ISO 4217)",
 					},
+					"transaction_id": map[string]any{
+						"type":        "string",
+						"description": "Короткий ID транзакции (первые 8 символов из списка) для edit_transaction. ВАЖНО: перед вызовом edit_transaction всегда покажи найденную транзакцию и изменения пользователю, дождись подтверждения.",
+					},
+					"keyword": map[string]any{
+						"type":        "string",
+						"description": "Ключевое слово для поиска транзакций по описанию (для list_transactions)",
+					},
+					"date": map[string]any{
+						"type":        "string",
+						"description": "Дата транзакции YYYY-MM-DD (для edit_transaction)",
+					},
 				},
 				"required": []string{"action"},
 			},
@@ -118,8 +130,11 @@ type budgetInput struct {
 	Total        float64 `json:"total,omitempty"`
 	Monthly      float64 `json:"monthly,omitempty"`
 	Counterparty string  `json:"counterparty,omitempty"`
-	Direction    string  `json:"direction,omitempty"`
-	Currency     string  `json:"currency,omitempty"`
+	Direction     string  `json:"direction,omitempty"`
+	Currency      string  `json:"currency,omitempty"`
+	TransactionID string  `json:"transaction_id,omitempty"`
+	Keyword       string  `json:"keyword,omitempty"`
+	Date          string  `json:"date,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -138,6 +153,8 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.summary(ctx, req)
 	case "list_transactions":
 		return s.listTransactions(ctx, req)
+	case "edit_transaction":
+		return s.editTransaction(ctx, req)
 	case "add_goal":
 		return s.addGoal(ctx, req)
 	case "update_goal":
@@ -212,8 +229,9 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
 	p := parsePeriod(req.Period)
 	f := budget.TransactionFilter{
-		Period: &p,
-		Limit:  20,
+		Period:  &p,
+		Keyword: req.Keyword,
+		Limit:   20,
 	}
 
 	txs, err := s.store.ListTransactions(ctx, f)
@@ -242,8 +260,8 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 		if desc != "" {
 			desc = " — " + desc
 		}
-		fmt.Fprintf(&sb, "%s %s%.0f %s | %s%s | %s\n",
-			icon, sign, t.Amount, currencySymbol(t.Currency), cat, desc, t.Date.Format("02.01"))
+		fmt.Fprintf(&sb, "[%s] %s %s%.0f %s | %s%s | %s\n",
+			t.ID.String()[:8], icon, sign, t.Amount, currencySymbol(t.Currency), cat, desc, t.Date.Format("02.01"))
 	}
 	return sb.String(), nil
 }
@@ -428,6 +446,67 @@ func (s *BudgetSkill) debtStatus(ctx context.Context) (string, error) {
 			d.Name, status, remaining, d.TotalAmount, pct, dir)
 	}
 	return sb.String(), nil
+}
+
+// --- Редактирование транзакций ---
+
+func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (string, error) {
+	if req.TransactionID == "" {
+		return "", fmt.Errorf("transaction_id is required")
+	}
+
+	tx, err := s.store.GetTransactionByPrefix(ctx, req.TransactionID)
+	if err != nil {
+		return "", fmt.Errorf("find transaction: %w", err)
+	}
+
+	patch := budget.TransactionPatch{}
+
+	if req.Amount > 0 {
+		patch.Amount = req.Amount
+	}
+	if req.Currency != "" {
+		patch.Currency = strings.ToUpper(req.Currency)
+	}
+	if req.Category != "" {
+		cat, err := s.store.FindCategoryByName(ctx, req.Category, tx.Type)
+		if err != nil {
+			cat, err = s.store.AddCategory(ctx, req.Category, tx.Type)
+			if err != nil {
+				return "", fmt.Errorf("resolve category: %w", err)
+			}
+		}
+		patch.CategoryID = &cat.ID
+	}
+	if req.Description != "" {
+		patch.Description = &req.Description
+	}
+	if req.Date != "" {
+		d, err := time.Parse("2006-01-02", req.Date)
+		if err != nil {
+			return "", fmt.Errorf("invalid date format, use YYYY-MM-DD: %w", err)
+		}
+		patch.Date = &d
+	}
+
+	updated, err := s.store.PatchTransaction(ctx, tx.ID, patch)
+	if err != nil {
+		return "", fmt.Errorf("edit transaction: %w", err)
+	}
+
+	cat := updated.CategoryName
+	if cat == "" {
+		cat = "без категории"
+	}
+	icon := "🔴"
+	if updated.Type == "income" {
+		icon = "🟢"
+	}
+	return fmt.Sprintf("✏️ Транзакция обновлена:\n%s %.0f %s | %s | %s\n(ID: %s)",
+		icon, updated.Amount, currencySymbol(updated.Currency),
+		cat, updated.Date.Format("02.01.2006"),
+		updated.ID.String()[:8],
+	), nil
 }
 
 // --- Форматирование ---

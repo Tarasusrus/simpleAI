@@ -84,5 +84,16 @@ type TransactionFilter struct {
 	Period     *Period
 	CategoryID *uuid.UUID
 	Type       string // "" | "income" | "expense"
+	Keyword    string // поиск по description (ILIKE)
 	Limit      int
+}
+
+// TransactionPatch — поля для частичного обновления транзакции.
+// Нулевое значение означает «не менять».
+type TransactionPatch struct {
+	Amount      float64
+	Currency    string
+	CategoryID  *uuid.UUID // uuid.Nil = очистить категорию
+	Description *string    // pointer: nil = не трогать, "" = очистить
+	Date        *time.Time
 }

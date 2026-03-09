@@ -117,6 +117,11 @@ func (s *Store) ListTransactions(ctx context.Context, f TransactionFilter) ([]Tr
 		args = append(args, f.Type)
 		argN++
 	}
+	if f.Keyword != "" {
+		conditions = append(conditions, fmt.Sprintf("t.description ILIKE $%d", argN))
+		args = append(args, "%"+f.Keyword+"%")
+		argN++
+	}
 
 	where := ""
 	if len(conditions) > 0 {
@@ -325,4 +330,78 @@ func (s *Store) ListDebts(ctx context.Context) ([]Debt, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// --- Редактирование транзакций ---
+
+// GetTransactionByPrefix находит транзакцию по первым символам UUID.
+func (s *Store) GetTransactionByPrefix(ctx context.Context, prefix string) (*Transaction, error) {
+	var t Transaction
+	err := s.pool.QueryRow(ctx, `
+		SELECT t.id, t.type, t.amount, t.currency, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
+		FROM budget_transaction t
+		LEFT JOIN budget_category c ON c.id = t.category_id
+		WHERE CAST(t.id AS TEXT) LIKE $1
+		LIMIT 1
+	`, prefix+"%").Scan(&t.ID, &t.Type, &t.Amount, &t.Currency, &t.CategoryID, &t.CategoryName, &t.Description, &t.Date, &t.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("find transaction by prefix %q: %w", prefix, err)
+	}
+	return &t, nil
+}
+
+// PatchTransaction обновляет только переданные поля транзакции и возвращает обновлённую запись.
+func (s *Store) PatchTransaction(ctx context.Context, id uuid.UUID, p TransactionPatch) (*Transaction, error) {
+	var setClauses []string
+	var args []any
+	argN := 1
+
+	if p.Amount > 0 {
+		setClauses = append(setClauses, fmt.Sprintf("amount = $%d", argN))
+		args = append(args, p.Amount)
+		argN++
+	}
+	if p.Currency != "" {
+		setClauses = append(setClauses, fmt.Sprintf("currency = $%d", argN))
+		args = append(args, p.Currency)
+		argN++
+	}
+	if p.CategoryID != nil {
+		if *p.CategoryID == uuid.Nil {
+			setClauses = append(setClauses, "category_id = NULL")
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("category_id = $%d", argN))
+			args = append(args, *p.CategoryID)
+			argN++
+		}
+	}
+	if p.Description != nil {
+		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argN))
+		args = append(args, *p.Description)
+		argN++
+	}
+	if p.Date != nil {
+		setClauses = append(setClauses, fmt.Sprintf("transaction_date = $%d", argN))
+		args = append(args, *p.Date)
+		argN++
+	}
+
+	if len(setClauses) == 0 {
+		return nil, fmt.Errorf("patch transaction: no fields to update")
+	}
+
+	args = append(args, id)
+	query := fmt.Sprintf(
+		`UPDATE budget_transaction SET %s WHERE id = $%d`,
+		strings.Join(setClauses, ", "), argN,
+	)
+	tag, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("patch transaction: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, fmt.Errorf("transaction %s not found", id)
+	}
+
+	return s.GetTransactionByPrefix(ctx, id.String()[:8])
 }
