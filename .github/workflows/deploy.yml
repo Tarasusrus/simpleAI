@@ -21,6 +21,6 @@ jobs:
             set -e
             cd ~/simpleAI
             git pull origin main
-            /usr/local/go/bin/go build -o bin/app ./cmd/app
+            CGO_ENABLED=0 /usr/local/go/bin/go build -o bin/app ./cmd/app
             sudo systemctl restart simpleai
             sudo systemctl is-active --quiet simpleai && echo "✓ simpleai is running"

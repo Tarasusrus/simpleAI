@@ -10,7 +10,7 @@ APP_DIR="$HOME/simpleAI"
 mkdir -p "$APP_DIR/bin"
 
 # Первый билд
-/usr/local/go/bin/go build -o "$APP_DIR/bin/app" "$APP_DIR/cmd/app"
+CGO_ENABLED=0 /usr/local/go/bin/go build -o "$APP_DIR/bin/app" "$APP_DIR/cmd/app"
 echo "✓ binary built"
 
 # Установить systemd unit
