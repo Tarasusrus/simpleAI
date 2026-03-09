@@ -5,31 +5,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"simpleAI/internal/constants"
 )
 
 func HandleStart(ctx context.Context, tctx *Context) error {
-	return tctx.Reply("Привет! Я фасад для агентов. Напиши сообщение, и я отвечу.")
+	return tctx.Reply(constants.MsgTelegramStart)
 }
 
 func HandleHelp(ctx context.Context, tctx *Context) error {
-	var sb strings.Builder
-	sb.WriteString("Я AI-ассистент с доступом к базе знаний.\n\n")
-	sb.WriteString("Команды:\n")
-	sb.WriteString("/start — приветствие\n")
-	sb.WriteString("/help — эта справка\n\n")
-	sb.WriteString("Просто напиши вопрос — я отвечу.\n")
-	sb.WriteString("Если вопрос требует поиска данных — автоматически найду в базе знаний.\n")
-
-	if tctx.Registry != nil {
-		if skills := tctx.Registry.List(); len(skills) > 0 {
-			sb.WriteString("\nДоступные возможности:\n")
-			for _, s := range skills {
-				fmt.Fprintf(&sb, "• %s — %s\n", s.Name, s.Description)
-			}
-		}
-	}
-
-	return tctx.Reply(sb.String())
+	return tctx.Reply(constants.MsgTelegramHelp)
 }
 
 func HandleDefault(ctx context.Context, tctx *Context) error {
