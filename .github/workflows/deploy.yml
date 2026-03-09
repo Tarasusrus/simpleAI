@@ -30,10 +30,12 @@ jobs:
             set -e
 
             # Генерируем .env из GitHub Secrets
+            # SYS_PROMPT может содержать переносы строк — схлопываем в одну строку
+            SAFE_PROMPT=$(printf '%s' "$SYS_PROMPT" | tr '\n' ' ')
             {
               echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
               echo "GEMINI_API_KEY=$GEMINI_API_KEY"
-              echo "SYS_PROMPT=$SYS_PROMPT"
+              echo "SYS_PROMPT=$SAFE_PROMPT"
               echo ""
               echo "LLM_PROVIDER=openai"
               echo "LLM_BASE_URL=https://api.deepseek.com/v1"
