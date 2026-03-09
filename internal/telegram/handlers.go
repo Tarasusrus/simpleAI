@@ -57,7 +57,9 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		prompt = fmt.Sprintf("%s\n\n[Вложения: %s]", prompt, summary)
 	}
 
+	stopTyping := tctx.StartTyping(ctx)
 	reply, err := tctx.Agent.Ask(ctx, prompt)
+	stopTyping()
 	if err != nil {
 		return tctx.Reply(fmt.Sprintf("Ошибка агента: %v", err))
 	}

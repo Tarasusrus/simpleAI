@@ -46,7 +46,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"category": map[string]any{
 						"type":        "string",
-						"description": "Категория (еда, транспорт, жильё, здоровье, развлечения, подписки, одежда, переводы, зарплата, фриланс, прочее)",
+						"description": "Категория расхода или дохода. Стандартные: еда, транспорт, жильё, здоровье, красота, развлечения, подписки, одежда, переводы, зарплата, фриланс, прочее. Если пользователь назвал категорию явно — передавай её как есть, не заменяй на 'прочее'. Система создаст категорию автоматически если не найдёт совпадения.",
 					},
 					"description": map[string]any{
 						"type":        "string",
@@ -534,7 +534,7 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 	}
 
 	cur := currencySymbol(t.Currency)
-	result := fmt.Sprintf("%s %s записан: %.0f %s → %s", icon, label, t.Amount, cur, cat)
+	result := fmt.Sprintf("%s %s записан: %.0f %s → %s | %s", icon, label, t.Amount, cur, cat, t.Date.Format("02.01.2006"))
 	if t.Description != "" {
 		result += fmt.Sprintf(" (%s)", t.Description)
 	}
