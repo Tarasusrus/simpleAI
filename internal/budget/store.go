@@ -198,45 +198,65 @@ func (s *Store) DeleteTransaction(ctx context.Context, id uuid.UUID) error {
 
 // --- Сводка ---
 
-// GetSummary возвращает агрегированную сводку за период.
+// GetSummary возвращает агрегированную сводку за период, сгруппированную по валютам.
 func (s *Store) GetSummary(ctx context.Context, p Period) (*Summary, error) {
 	summary := &Summary{Period: p}
 
-	// Общие суммы.
-	err := s.pool.QueryRow(ctx, `
+	// Общие суммы по валютам.
+	totalsRows, err := s.pool.Query(ctx, `
 		SELECT
-			COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0),
+			currency,
+			COALESCE(SUM(CASE WHEN type = 'income'  THEN amount ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0)
 		FROM budget_transaction
 		WHERE transaction_date >= $1 AND transaction_date <= $2
-	`, p.From, p.To).Scan(&summary.TotalIncome, &summary.TotalExpense)
+		GROUP BY currency
+		ORDER BY currency
+	`, p.From, p.To)
 	if err != nil {
 		return nil, fmt.Errorf("get summary totals: %w", err)
 	}
-	summary.Balance = summary.TotalIncome - summary.TotalExpense
+	defer totalsRows.Close()
 
-	// По категориям (только расходы).
-	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.name, c.icon, COALESCE(SUM(t.amount), 0)
+	currencyIndex := map[string]int{}
+	for totalsRows.Next() {
+		var cg CurrencyGroup
+		if err := totalsRows.Scan(&cg.Currency, &cg.TotalIncome, &cg.TotalExpense); err != nil {
+			return nil, fmt.Errorf("scan summary totals: %w", err)
+		}
+		cg.Balance = cg.TotalIncome - cg.TotalExpense
+		currencyIndex[cg.Currency] = len(summary.Currencies)
+		summary.Currencies = append(summary.Currencies, cg)
+	}
+	if err := totalsRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// По категориям (только расходы), с разбивкой по валюте.
+	catRows, err := s.pool.Query(ctx, `
+		SELECT t.currency, c.id, c.name, c.icon, COALESCE(SUM(t.amount), 0)
 		FROM budget_transaction t
 		JOIN budget_category c ON c.id = t.category_id
 		WHERE t.type = 'expense' AND t.transaction_date >= $1 AND t.transaction_date <= $2
-		GROUP BY c.id, c.name, c.icon
-		ORDER BY SUM(t.amount) DESC
+		GROUP BY t.currency, c.id, c.name, c.icon
+		ORDER BY t.currency, SUM(t.amount) DESC
 	`, p.From, p.To)
 	if err != nil {
 		return nil, fmt.Errorf("get summary by category: %w", err)
 	}
-	defer rows.Close()
+	defer catRows.Close()
 
-	for rows.Next() {
+	for catRows.Next() {
+		var currency string
 		var ct CategoryTotal
-		if err := rows.Scan(&ct.CategoryID, &ct.CategoryName, &ct.Icon, &ct.Total); err != nil {
+		if err := catRows.Scan(&currency, &ct.CategoryID, &ct.CategoryName, &ct.Icon, &ct.Total); err != nil {
 			return nil, fmt.Errorf("scan category total: %w", err)
 		}
-		summary.ByCategory = append(summary.ByCategory, ct)
+		if idx, ok := currencyIndex[currency]; ok {
+			summary.Currencies[idx].ByCategory = append(summary.Currencies[idx].ByCategory, ct)
+		}
 	}
-	return summary, rows.Err()
+	return summary, catRows.Err()
 }
 
 // --- Цели ---
