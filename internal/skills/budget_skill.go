@@ -92,6 +92,10 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 						"type":        "string",
 						"description": "owe (я должен) или owed (мне должны)",
 					},
+					"currency": map[string]any{
+						"type":        "string",
+						"description": "Валюта операции: RUB (по умолчанию), USD, EUR, THB, и т.д. (ISO 4217)",
+					},
 				},
 				"required": []string{"action"},
 			},
@@ -115,6 +119,7 @@ type budgetInput struct {
 	Monthly      float64 `json:"monthly,omitempty"`
 	Counterparty string  `json:"counterparty,omitempty"`
 	Direction    string  `json:"direction,omitempty"`
+	Currency     string  `json:"currency,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -161,6 +166,7 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 		ID:          uuid.New(),
 		Type:        typ,
 		Amount:      req.Amount,
+		Currency:    req.Currency,
 		Description: req.Description,
 		Date:        time.Now(),
 	}
@@ -236,8 +242,8 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 		if desc != "" {
 			desc = " — " + desc
 		}
-		fmt.Fprintf(&sb, "%s %s%.0f ₽ | %s%s | %s\n",
-			icon, sign, t.Amount, cat, desc, t.Date.Format("02.01"))
+		fmt.Fprintf(&sb, "%s %s%.0f %s | %s%s | %s\n",
+			icon, sign, t.Amount, currencySymbol(t.Currency), cat, desc, t.Date.Format("02.01"))
 	}
 	return sb.String(), nil
 }
@@ -438,7 +444,8 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 		cat = "без категории"
 	}
 
-	result := fmt.Sprintf("%s %s записан: %.0f ₽ → %s", icon, label, t.Amount, cat)
+	cur := currencySymbol(t.Currency)
+	result := fmt.Sprintf("%s %s записан: %.0f %s → %s", icon, label, t.Amount, cur, cat)
 	if t.Description != "" {
 		result += fmt.Sprintf(" (%s)", t.Description)
 	}
@@ -502,6 +509,21 @@ func parsePeriod(s string) budget.Period {
 	from := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local)
 	to := from.AddDate(0, 1, -1)
 	return budget.Period{From: from, To: to}
+}
+
+func currencySymbol(currency string) string {
+	switch currency {
+	case "USD":
+		return "$"
+	case "EUR":
+		return "€"
+	case "THB":
+		return "฿"
+	case "CNY":
+		return "¥"
+	default:
+		return "₽"
+	}
 }
 
 func monthsUntil(deadline time.Time) int {

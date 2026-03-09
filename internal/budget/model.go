@@ -21,6 +21,7 @@ type Transaction struct {
 	ID           uuid.UUID
 	Type         string // "income" | "expense"
 	Amount       float64
+	Currency     string // ISO 4217: RUB, USD, EUR, THB, ...
 	CategoryID   *uuid.UUID
 	CategoryName string
 	Description  string

@@ -83,10 +83,13 @@ func (s *Store) AddTransaction(ctx context.Context, t Transaction) error {
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
 	}
+	if t.Currency == "" {
+		t.Currency = "RUB"
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO budget_transaction (id, type, amount, category_id, description, transaction_date)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, t.ID, t.Type, t.Amount, t.CategoryID, t.Description, t.Date)
+		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, t.ID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date)
 	if err != nil {
 		return fmt.Errorf("add transaction: %w", err)
 	}
@@ -128,7 +131,7 @@ func (s *Store) ListTransactions(ctx context.Context, f TransactionFilter) ([]Tr
 	args = append(args, limit)
 
 	query := fmt.Sprintf(`
-		SELECT t.id, t.type, t.amount, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
+		SELECT t.id, t.type, t.amount, t.currency, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		%s
@@ -145,7 +148,7 @@ func (s *Store) ListTransactions(ctx context.Context, f TransactionFilter) ([]Tr
 	var out []Transaction
 	for rows.Next() {
 		var t Transaction
-		if err := rows.Scan(&t.ID, &t.Type, &t.Amount, &t.CategoryID, &t.CategoryName, &t.Description, &t.Date, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Type, &t.Amount, &t.Currency, &t.CategoryID, &t.CategoryName, &t.Description, &t.Date, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan transaction: %w", err)
 		}
 		out = append(out, t)
