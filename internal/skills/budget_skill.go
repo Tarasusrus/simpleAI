@@ -220,7 +220,7 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Транзакции за %s:\n\n", formatPeriodName(p)))
+	fmt.Fprintf(&sb, "Транзакции за %s:\n\n", formatPeriodName(p))
 	for _, t := range txs {
 		icon := "🔴"
 		sign := "-"
@@ -236,8 +236,8 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 		if desc != "" {
 			desc = " — " + desc
 		}
-		sb.WriteString(fmt.Sprintf("%s %s%.0f ₽ | %s%s | %s\n",
-			icon, sign, t.Amount, cat, desc, t.Date.Format("02.01")))
+		fmt.Fprintf(&sb, "%s %s%.0f ₽ | %s%s | %s\n",
+			icon, sign, t.Amount, cat, desc, t.Date.Format("02.01"))
 	}
 	return sb.String(), nil
 }
@@ -324,10 +324,10 @@ func (s *BudgetSkill) goalStatus(ctx context.Context) (string, error) {
 		case "cancelled":
 			status = " ❌"
 		}
-		sb.WriteString(fmt.Sprintf("• %s%s: %.0f / %.0f ₽ (%.0f%%)\n",
-			g.Name, status, g.CurrentAmount, g.TargetAmount, pct))
+		fmt.Fprintf(&sb, "• %s%s: %.0f / %.0f ₽ (%.0f%%)\n",
+			g.Name, status, g.CurrentAmount, g.TargetAmount, pct)
 		if g.Deadline != nil && g.Status == "active" {
-			sb.WriteString(fmt.Sprintf("  Дедлайн: %s\n", g.Deadline.Format("02.01.2006")))
+			fmt.Fprintf(&sb, "  Дедлайн: %s\n", g.Deadline.Format("02.01.2006"))
 		}
 	}
 	return sb.String(), nil
@@ -418,8 +418,8 @@ func (s *BudgetSkill) debtStatus(ctx context.Context) (string, error) {
 		if d.Status == "paid" {
 			status = " ✅"
 		}
-		sb.WriteString(fmt.Sprintf("• %s%s: осталось %.0f ₽ из %.0f ₽ (%.0f%% погашено) — %s\n",
-			d.Name, status, remaining, d.TotalAmount, pct, dir))
+		fmt.Fprintf(&sb, "• %s%s: осталось %.0f ₽ из %.0f ₽ (%.0f%% погашено) — %s\n",
+			d.Name, status, remaining, d.TotalAmount, pct, dir)
 	}
 	return sb.String(), nil
 }
@@ -451,10 +451,10 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 
 func formatSummary(s *budget.Summary) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📊 Сводка за %s:\n\n", formatPeriodName(s.Period)))
-	sb.WriteString(fmt.Sprintf("Доходы:  %.0f ₽\n", s.TotalIncome))
-	sb.WriteString(fmt.Sprintf("Расходы: %.0f ₽\n", s.TotalExpense))
-	sb.WriteString(fmt.Sprintf("Баланс:  %.0f ₽\n", s.Balance))
+	fmt.Fprintf(&sb, "📊 Сводка за %s:\n\n", formatPeriodName(s.Period))
+	fmt.Fprintf(&sb, "Доходы:  %.0f ₽\n", s.TotalIncome)
+	fmt.Fprintf(&sb, "Расходы: %.0f ₽\n", s.TotalExpense)
+	fmt.Fprintf(&sb, "Баланс:  %.0f ₽\n", s.Balance)
 
 	if len(s.ByCategory) > 0 {
 		sb.WriteString("\nРасходы по категориям:\n")
@@ -463,7 +463,7 @@ func formatSummary(s *budget.Summary) string {
 			if icon == "" {
 				icon = "•"
 			}
-			sb.WriteString(fmt.Sprintf("  %s %s: %.0f ₽\n", icon, c.CategoryName, c.Total))
+			fmt.Fprintf(&sb, "  %s %s: %.0f ₽\n", icon, c.CategoryName, c.Total)
 		}
 	}
 	return sb.String()

@@ -121,11 +121,11 @@ func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	sb.WriteString(`{"skill": "<id>", "input": {<параметры>}}`)
 	sb.WriteString("\n\nДоступные инструменты:\n")
 	for _, m := range manifests {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", m.ID, m.Description))
+		fmt.Fprintf(&sb, "- %s: %s\n", m.ID, m.Description)
 		if m.InputSchema != nil {
 			b, err := json.Marshal(m.InputSchema.JSON)
 			if err == nil {
-				sb.WriteString(fmt.Sprintf("  Параметры: %s\n", string(b)))
+				fmt.Fprintf(&sb, "  Параметры: %s\n", string(b))
 			}
 		}
 	}

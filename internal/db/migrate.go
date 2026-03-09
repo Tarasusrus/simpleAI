@@ -16,7 +16,7 @@ import (
 var migrationsFS embed.FS
 
 // Migrate применяет все pending миграции.
-func Migrate(ctx context.Context, cfg config.DBConfig) error {
+func Migrate(ctx context.Context, cfg config.DBConfig) (retErr error) {
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
 		cfg.User, cfg.Pass, cfg.Host, cfg.Port, cfg.Name,
@@ -25,7 +25,11 @@ func Migrate(ctx context.Context, cfg config.DBConfig) error {
 	if err != nil {
 		return fmt.Errorf("migrate: open db: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("migrate: close db: %w", err)
+		}
+	}()
 
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("migrate: ping db: %w", err)

@@ -24,7 +24,7 @@ func HandleHelp(ctx context.Context, tctx *Context) error {
 		if skills := tctx.Registry.List(); len(skills) > 0 {
 			sb.WriteString("\nДоступные возможности:\n")
 			for _, s := range skills {
-				sb.WriteString(fmt.Sprintf("• %s — %s\n", s.Name, s.Description))
+				fmt.Fprintf(&sb, "• %s — %s\n", s.Name, s.Description)
 			}
 		}
 	}

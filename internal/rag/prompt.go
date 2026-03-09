@@ -19,7 +19,7 @@ func BuildPrompt(query string, results []SearchResult) string {
 	} else {
 		sb.WriteString("<documents>\n")
 		for i, item := range results {
-			sb.WriteString(fmt.Sprintf("  <document index=\"%d\">\n", i+1))
+			fmt.Fprintf(&sb, "  <document index=\"%d\">\n", i+1)
 			sb.WriteString(item.Content)
 			sb.WriteString("\n  </document>\n")
 		}

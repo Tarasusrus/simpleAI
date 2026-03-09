@@ -68,6 +68,22 @@ jobs:
             cd ~/simpleAI
             git pull origin main
             docker compose up -d
+            sleep 3
+
+            # Сбрасываем схему если goose ещё не инициализирован (первый запуск)
+            docker exec simpleai-postgres psql -U simpleai -d simpleai -c "
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = 'goose_db_version'
+                ) THEN
+                  DROP SCHEMA public CASCADE;
+                  CREATE SCHEMA public;
+                  GRANT ALL ON SCHEMA public TO simpleai;
+                END IF;
+              END
+              \$\$;"
             CGO_ENABLED=0 /usr/local/go/bin/go build -o bin/app ./cmd/app
             sudo systemctl restart simpleai
             systemctl is-active --quiet simpleai && echo "✓ simpleai is running"
