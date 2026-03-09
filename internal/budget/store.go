@@ -79,6 +79,8 @@ func (s *Store) AddCategory(ctx context.Context, name string, typ string) (*Cate
 // --- Транзакции ---
 
 // AddTransaction записывает доход или расход.
+// Защита от дублей: если за последние 60 секунд уже существует запись
+// с теми же type, amount, currency, category_id, description и transaction_date — пропускаем INSERT.
 func (s *Store) AddTransaction(ctx context.Context, t Transaction) error {
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
@@ -86,7 +88,28 @@ func (s *Store) AddTransaction(ctx context.Context, t Transaction) error {
 	if t.Currency == "" {
 		t.Currency = "RUB"
 	}
-	_, err := s.pool.Exec(ctx, `
+
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM budget_transaction
+			WHERE type = $1
+			  AND amount = $2
+			  AND currency = $3
+			  AND category_id IS NOT DISTINCT FROM $4
+			  AND description IS NOT DISTINCT FROM $5
+			  AND transaction_date = $6
+			  AND created_at >= NOW() - INTERVAL '60 seconds'
+		)
+	`, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("dedup check: %w", err)
+	}
+	if exists {
+		return nil
+	}
+
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, t.ID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date)

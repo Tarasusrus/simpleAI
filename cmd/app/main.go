@@ -33,6 +33,7 @@ import (
 	"simpleAI/internal/skills"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
+	"simpleAI/internal/trace"
 )
 
 func main() {
@@ -67,11 +68,13 @@ func main() {
 
 	var wg sync.WaitGroup
 
+	tracer := trace.NewStore(pool)
+
 	// --- Telegram бот ---
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry); err != nil {
+		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -102,7 +105,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry) error {
+func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -124,7 +127,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
 
-	agentService := agent.NewServiceWithRegistry(llmClient, registry)
+	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer)
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))
