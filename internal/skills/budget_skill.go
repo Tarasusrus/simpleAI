@@ -538,28 +538,42 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 	if t.Description != "" {
 		result += fmt.Sprintf(" (%s)", t.Description)
 	}
-	if summary != nil {
-		result += fmt.Sprintf("\n\nБаланс месяца: %.0f ₽ (доходы %.0f ₽, расходы %.0f ₽)",
-			summary.Balance, summary.TotalIncome, summary.TotalExpense)
+	if summary != nil && len(summary.Currencies) > 0 {
+		result += "\n"
+		for _, cg := range summary.Currencies {
+			sym := currencySymbol(cg.Currency)
+			result += fmt.Sprintf("\nБаланс месяца (%s): %.0f %s (доходы %.0f, расходы %.0f)",
+				cg.Currency, cg.Balance, sym, cg.TotalIncome, cg.TotalExpense)
+		}
 	}
 	return result
 }
 
 func formatSummary(s *budget.Summary) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "📊 Сводка за %s:\n\n", formatPeriodName(s.Period))
-	fmt.Fprintf(&sb, "Доходы:  %.0f ₽\n", s.TotalIncome)
-	fmt.Fprintf(&sb, "Расходы: %.0f ₽\n", s.TotalExpense)
-	fmt.Fprintf(&sb, "Баланс:  %.0f ₽\n", s.Balance)
+	fmt.Fprintf(&sb, "📊 Сводка за %s:\n", formatPeriodName(s.Period))
 
-	if len(s.ByCategory) > 0 {
-		sb.WriteString("\nРасходы по категориям:\n")
-		for _, c := range s.ByCategory {
-			icon := c.Icon
-			if icon == "" {
-				icon = "•"
+	if len(s.Currencies) == 0 {
+		sb.WriteString("\nОпераций нет.")
+		return sb.String()
+	}
+
+	for _, cg := range s.Currencies {
+		sym := currencySymbol(cg.Currency)
+		fmt.Fprintf(&sb, "\n💱 %s\n", cg.Currency)
+		fmt.Fprintf(&sb, "  Доходы:  %.0f %s\n", cg.TotalIncome, sym)
+		fmt.Fprintf(&sb, "  Расходы: %.0f %s\n", cg.TotalExpense, sym)
+		fmt.Fprintf(&sb, "  Баланс:  %.0f %s\n", cg.Balance, sym)
+
+		if len(cg.ByCategory) > 0 {
+			sb.WriteString("  Расходы по категориям:\n")
+			for _, c := range cg.ByCategory {
+				icon := c.Icon
+				if icon == "" {
+					icon = "•"
+				}
+				fmt.Fprintf(&sb, "    %s %s: %.0f %s\n", icon, c.CategoryName, c.Total, sym)
 			}
-			fmt.Fprintf(&sb, "  %s %s: %.0f ₽\n", icon, c.CategoryName, c.Total)
 		}
 	}
 	return sb.String()

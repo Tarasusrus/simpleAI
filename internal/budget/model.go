@@ -56,13 +56,19 @@ type Debt struct {
 	UpdatedAt      time.Time
 }
 
-// Summary — сводка доходов/расходов за период.
+// Summary — сводка доходов/расходов за период, сгруппированная по валютам.
 type Summary struct {
+	Currencies []CurrencyGroup
+	Period     Period
+}
+
+// CurrencyGroup — итоги по одной валюте.
+type CurrencyGroup struct {
+	Currency     string
 	TotalIncome  float64
 	TotalExpense float64
 	Balance      float64
 	ByCategory   []CategoryTotal
-	Period       Period
 }
 
 // CategoryTotal — итог по одной категории.
