@@ -106,7 +106,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"date": map[string]any{
 						"type":        "string",
-						"description": "Дата транзакции YYYY-MM-DD (для edit_transaction)",
+						"description": "Дата транзакции в формате YYYY-MM-DD или DD.MM.YYYY. Указывай всегда если пользователь назвал дату. Используется при add_expense, add_income, edit_transaction.",
 					},
 				},
 				"required": []string{"action"},
@@ -179,13 +179,23 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 		return "", fmt.Errorf("amount must be positive")
 	}
 
+	date := time.Now()
+	if req.Date != "" {
+		for _, layout := range []string{"2006-01-02", "02.01.2006", "2006-01-02T15:04:05Z07:00"} {
+			if d, err := time.Parse(layout, req.Date); err == nil {
+				date = d
+				break
+			}
+		}
+	}
+
 	t := budget.Transaction{
 		ID:          uuid.New(),
 		Type:        typ,
 		Amount:      req.Amount,
 		Currency:    req.Currency,
 		Description: req.Description,
-		Date:        time.Now(),
+		Date:        date,
 	}
 
 	// Найти категорию по имени.
@@ -571,8 +581,8 @@ func formatPeriodName(p budget.Period) string {
 
 func currentMonthPeriod() budget.Period {
 	now := time.Now()
-	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-	to := from.AddDate(0, 1, -1)
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
 	return budget.Period{From: from, To: to}
 }
 
@@ -585,8 +595,8 @@ func parsePeriod(s string) budget.Period {
 	if err != nil {
 		return currentMonthPeriod()
 	}
-	from := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local)
-	to := from.AddDate(0, 1, -1)
+	from := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
 	return budget.Period{From: from, To: to}
 }
 
