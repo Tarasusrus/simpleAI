@@ -17,8 +17,46 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: 22
+          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID
           script: |
             set -e
+
+            # Генерируем .env из GitHub Secrets
+            {
+              echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+              echo "GEMINI_API_KEY=$GEMINI_API_KEY"
+              echo "SYS_PROMPT=$SYS_PROMPT"
+              echo ""
+              echo "LLM_PROVIDER=openai"
+              echo "LLM_BASE_URL=https://api.deepseek.com/v1"
+              echo "LLM_CHAT_MODEL=deepseek-chat"
+              echo "LLM_TIMEOUT_SECONDS=30"
+              echo "LLM_RETRY_COUNT=2"
+              echo "LLM_RETRY_BASE_MS=500"
+              echo "LLM_FALLBACK_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/"
+              echo "LLM_FALLBACK_MODEL=gemini-2.0-flash"
+              echo ""
+              echo "EMBEDDING_MODEL=text-embedding-004"
+              echo ""
+              echo "POSTGRES_DB=simpleai"
+              echo "POSTGRES_USER=simpleai"
+              echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD"
+              echo "POSTGRES_PORT=5432"
+              echo "POSTGRES_HOST=localhost"
+              echo ""
+              echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+              echo "TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID"
+              echo "TELEGRAM_ALLOWED_CHATS=$TELEGRAM_ALLOWED_CHATS"
+              echo "TELEGRAM_WORKERS=4"
+              echo "TELEGRAM_RATE_LIMIT_MS=0"
+              echo "TELEGRAM_MEDIA_DIR=data/telegram"
+              echo ""
+              echo "MAIL_ACCOUNTS_JSON=[]"
+              echo ""
+              echo "LOG_LEVEL=info"
+              echo "LOG_FORMAT=json"
+            } > ~/simpleAI/.env
+
             cd ~/simpleAI
             git pull origin main
             CGO_ENABLED=0 /usr/local/go/bin/go build -o bin/app ./cmd/app

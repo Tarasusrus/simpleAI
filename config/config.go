@@ -12,10 +12,9 @@ import (
 )
 
 type Config struct {
-	APIKey    string    `env:"API_KEY"`
-	SysPrompt string    `env:"SYS_PROMPT"`
-	DB        DBConfig  `env:",inline"`
-	RAG       RAGConfig `env:",inline"`
+	SysPrompt string `env:"SYS_PROMPT"`
+	DB        DBConfig
+	RAG       RAGConfig
 	Mail      MailConfig
 	Telegram  TelegramBotConfig
 	LLM       LLMConfig
@@ -34,11 +33,21 @@ type RAGConfig struct {
 }
 
 type LLMConfig struct {
-	Provider            string
-	ChatModel           string
-	Timeout             time.Duration
-	RetryCount          int
-	RetryBase           time.Duration
+	// Primary provider
+	Provider   string
+	APIKey     string
+	BaseURL    string
+	ChatModel  string
+	Timeout    time.Duration
+	RetryCount int
+	RetryBase  time.Duration
+
+	// Fallback OpenAI-compatible provider (e.g. Gemini)
+	FallbackAPIKey    string
+	FallbackBaseURL   string
+	FallbackChatModel string
+
+	// Ollama (local dev)
 	OllamaBaseURL       string
 	OllamaModel         string
 	OllamaEmbedModel    string
@@ -85,13 +94,9 @@ func LoadConfig() (Config, error) {
 
 	cfg := Config{}
 	cfg.LLM = loadLLMConfig()
-	cfg.APIKey = os.Getenv("API_KEY")
 	cfg.SysPrompt = os.Getenv("SYS_PROMPT")
 	if cfg.SysPrompt == "" {
 		return Config{}, fmt.Errorf("SysPrompt not found in .env")
-	}
-	if strings.ToLower(strings.TrimSpace(cfg.LLM.Provider)) != "ollama" && cfg.APIKey == "" {
-		return Config{}, fmt.Errorf("API key not found in .env")
 	}
 	cfg.DB = DBConfig{
 		Host: getenvOrDefault("POSTGRES_HOST", "localhost"),
@@ -155,11 +160,18 @@ func loadTelegramBotConfig() TelegramBotConfig {
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Provider:            getenvOrDefault("LLM_PROVIDER", "openai"),
-		ChatModel:           getenvOrDefault("LLM_CHAT_MODEL", "gpt-4.1-mini"),
-		Timeout:             parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
-		RetryCount:          parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
-		RetryBase:           parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		Provider:   getenvOrDefault("LLM_PROVIDER", "openai"),
+		APIKey:     os.Getenv("DEEPSEEK_API_KEY"),
+		BaseURL:    getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+		ChatModel:  getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
+		Timeout:    parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
+		RetryBase:  parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+
+		FallbackAPIKey:    os.Getenv("GEMINI_API_KEY"),
+		FallbackBaseURL:   getenvOrDefault("LLM_FALLBACK_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+		FallbackChatModel: getenvOrDefault("LLM_FALLBACK_MODEL", "gemini-2.0-flash"),
+
 		OllamaBaseURL:       getenvOrDefault("OLLAMA_BASE_URL", "http://localhost:11434"),
 		OllamaModel:         getenvOrDefault("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M"),
 		OllamaEmbedModel:    strings.TrimSpace(os.Getenv("OLLAMA_EMBED_MODEL")),

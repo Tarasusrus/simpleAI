@@ -20,20 +20,43 @@ import (
 var ErrChatCompletion = errors.New("Completions.New.Err")
 
 type Client struct {
-	api openai.Client
-	l   *slog.Logger
-	cfg config.Config
+	api           openai.Client
+	l             *slog.Logger
+	cfg           config.Config
+	modelOverride string
 }
 
 func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
-	if strings.TrimSpace(cfg.APIKey) == "" {
-		return nil, fmt.Errorf("API key not found in .env")
+	apiKey := strings.TrimSpace(cfg.LLM.APIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("DEEPSEEK_API_KEY not configured")
 	}
-	client := openai.NewClient(option.WithAPIKey(cfg.APIKey))
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL := strings.TrimSpace(cfg.LLM.BaseURL); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	client := openai.NewClient(opts...)
 	if logger != nil {
-		logger.Debug("openai client initialized", "model", cfg.LLM.ChatModel)
+		logger.Debug("llm client initialized", "model", cfg.LLM.ChatModel, "base_url", cfg.LLM.BaseURL)
 	}
 	return &Client{api: client, l: logger, cfg: cfg}, nil
+}
+
+// NewFallbackClient создаёт клиент для резервного провайдера (например Gemini).
+func NewFallbackClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
+	apiKey := strings.TrimSpace(cfg.LLM.FallbackAPIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY not configured")
+	}
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL := strings.TrimSpace(cfg.LLM.FallbackBaseURL); baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	client := openai.NewClient(opts...)
+	if logger != nil {
+		logger.Debug("fallback llm client initialized", "model", cfg.LLM.FallbackChatModel, "base_url", cfg.LLM.FallbackBaseURL)
+	}
+	return &Client{api: client, l: logger, cfg: cfg, modelOverride: cfg.LLM.FallbackChatModel}, nil
 }
 
 func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
@@ -137,9 +160,12 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 }
 
 func (c *Client) chatModel() openai.ChatModel {
+	if c.modelOverride != "" {
+		return openai.ChatModel(c.modelOverride)
+	}
 	model := strings.TrimSpace(c.cfg.LLM.ChatModel)
 	if model == "" {
-		return openai.ChatModelGPT4_1Mini
+		return openai.ChatModel("deepseek-chat")
 	}
 	return openai.ChatModel(model)
 }
