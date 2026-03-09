@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"simpleAI/internal/core"
 	"simpleAI/internal/plugin"
+	"simpleAI/internal/trace"
 )
 
 const maxIterations = 10
@@ -17,6 +21,7 @@ const maxIterations = 10
 type Service struct {
 	client   core.LLM
 	registry *plugin.Registry
+	tracer   *trace.Store
 }
 
 func NewService(client core.LLM) *Service {
@@ -27,21 +32,35 @@ func NewServiceWithRegistry(client core.LLM, registry *plugin.Registry) *Service
 	return &Service{client: client, registry: registry}
 }
 
+// WithTracer добавляет трейс-стор в сервис (опционально).
+func (s *Service) WithTracer(t *trace.Store) *Service {
+	s.tracer = t
+	return s
+}
+
 // Ask отвечает на запрос пользователя.
 // Если registry содержит skills — запускает agentic loop:
 // LLM может вызвать один или несколько инструментов за итерацию,
 // результаты передаются обратно до получения финального текстового ответа.
 func (s *Service) Ask(ctx context.Context, input string) (string, error) {
+	return s.AskWithMeta(ctx, input, nil)
+}
+
+// AskWithMeta аналогичен Ask, но принимает chatID для трейсинга.
+func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) (string, error) {
 	if s.registry == nil || len(s.registry.List()) == 0 {
 		return s.client.Ask(ctx, input)
 	}
 
+	sessionID := uuid.New()
 	toolSystemPrompt := buildToolsSystemPrompt(s.registry.List())
 
 	currentPrompt := input
 	var accumulatedResults []string
+	iteration := 0
 
 	for range maxIterations {
+		iteration++
 		resp, err := s.client.AskWithSystem(ctx, toolSystemPrompt, currentPrompt)
 		if err != nil {
 			return "", err
@@ -50,30 +69,71 @@ func (s *Service) Ask(ctx context.Context, input string) (string, error) {
 		calls := parseToolCalls(resp)
 		if len(calls) == 0 {
 			// Финальный текстовый ответ — выходим из цикла.
+			s.appendTrace(ctx, trace.Entry{
+				SessionID:   sessionID,
+				ChatID:      chatID,
+				UserInput:   input,
+				Iteration:   iteration,
+				LLMResponse: resp,
+				IsFinal:     true,
+			})
 			return resp, nil
 		}
 
 		// Выполняем все tool calls последовательно.
 		for i, call := range calls {
-			result, err := s.runSkill(ctx, call)
+			inputJSON, err := json.Marshal(call.Input)
 			if err != nil {
+				inputJSON = []byte("{}")
+			}
+			result, err := s.runSkill(ctx, call)
+
+			skillName := call.Skill
+			var skillResult *string
+			if err != nil {
+				msg := fmt.Sprintf("Ошибка: %v", err)
+				skillResult = &msg
 				accumulatedResults = append(accumulatedResults,
-					fmt.Sprintf("[%d] %s → Ошибка: %v", i+1, call.Skill, err))
+					fmt.Sprintf("[%d] %s → %s", i+1, call.Skill, msg))
 			} else {
+				skillResult = &result
 				accumulatedResults = append(accumulatedResults,
 					fmt.Sprintf("[%d] %s → %s", i+1, call.Skill, result))
 			}
+
+			s.appendTrace(ctx, trace.Entry{
+				SessionID:   sessionID,
+				ChatID:      chatID,
+				UserInput:   input,
+				Iteration:   iteration,
+				Skill:       &skillName,
+				SkillInput:  inputJSON,
+				SkillResult: skillResult,
+				LLMResponse: resp,
+				IsFinal:     false,
+			})
 		}
 
 		// Передаём накопленный контекст обратно LLM.
+		// ВАЖНО: не повторяем исходный запрос дословно, чтобы LLM не вызвала инструменты повторно.
 		currentPrompt = fmt.Sprintf(
-			"[Исходный запрос]: %s\n\n[Результаты инструментов]:\n%s\n\nОтветь пользователю или вызови ещё инструменты если нужно.",
-			input, strings.Join(accumulatedResults, "\n"),
+			"Инструменты уже выполнены. Результаты:\n%s\n\nСформулируй финальный ответ пользователю на основе этих результатов. НЕ вызывай инструменты повторно.",
+			strings.Join(accumulatedResults, "\n"),
 		)
 	}
 
 	// Превышен лимит итераций — финальный ответ без tool calling.
 	return s.client.Ask(ctx, currentPrompt)
+}
+
+// appendTrace записывает трейс, если tracer настроен. Ошибки не прерывают работу агента.
+func (s *Service) appendTrace(ctx context.Context, e trace.Entry) {
+	if s.tracer == nil {
+		return
+	}
+	if err := s.tracer.Append(ctx, e); err != nil {
+		slog.Default().WarnContext(ctx, "trace append failed", "err", err, "session_id", e.SessionID)
+	}
 }
 
 func (s *Service) runSkill(ctx context.Context, call toolCall) (string, error) {
