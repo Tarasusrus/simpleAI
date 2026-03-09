@@ -16,6 +16,7 @@ import (
 
 type AgentService interface {
 	Ask(ctx context.Context, input string) (string, error)
+	AskWithMeta(ctx context.Context, input string, chatID *int64) (string, error)
 }
 
 // TypingSender — опциональный интерфейс для отправки индикатора набора.
