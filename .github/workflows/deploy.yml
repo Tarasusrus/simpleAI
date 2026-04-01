@@ -93,6 +93,15 @@ jobs:
             # Явно применяем pending миграции схемы (страховка если goose в бинаре не успел)
             docker exec simpleai-postgres psql -U simpleai -d simpleai -c "
               ALTER TABLE budget_transaction ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB';"
+            docker exec simpleai-postgres psql -U simpleai -d simpleai -c "
+              CREATE TABLE IF NOT EXISTS budget_reminder (
+                chat_id       BIGINT PRIMARY KEY,
+                enabled       BOOLEAN NOT NULL DEFAULT true,
+                notify_hour   INT NOT NULL DEFAULT 21,
+                notify_minute INT NOT NULL DEFAULT 0,
+                timezone      TEXT NOT NULL DEFAULT 'UTC',
+                updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+              );"
 
             # Форсируем пересборку (go build берёт кеш если Go-файлы не менялись,
             # но embedded SQL файлы при этом могут быть устаревшими)
