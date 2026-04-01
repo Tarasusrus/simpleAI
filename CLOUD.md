@@ -159,7 +159,33 @@ README должен содержать:
 ### Если изменяешь /help или /start текст:
 - [ ] Проверь `internal/constants/messages.go` — оба текста актуальны и описывают все фичи
 
-## 7. Экстренные команды
+## 7. Obsidian — живая документация проекта
+
+**Заметка проекта:** `simpleAI.md` в корне vault
+(`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/my_synk/simpleAI.md`)
+
+### Что обновлять в Obsidian после значимых изменений
+
+После каждого merged PR — добавь запись в раздел `## Changelog`:
+```
+### YYYY-MM-DD
+- feat/fix/refactor: краткое описание
+- Ключевые решения если есть
+```
+
+Обязательно синхронизировать если:
+- Изменилась архитектура (новый компонент, новая зависимость)
+- Добавлен новый skill или action
+- Изменился процесс деплоя
+- Принято архитектурное решение (ADR)
+- Появились новые известные проблемы или закрыты старые
+
+### Деплой
+
+Merge в `main` → GitHub Actions (`deploy.yml`) → SSH на сервер → `git pull` + `go build` + `systemctl restart simpleai`
+Время деплоя: ~2 минуты. Логи: `journalctl -u simpleai -f`
+
+## 8. Экстренные команды
 
 ```bash
 bd quickstart          # если граф сломался
