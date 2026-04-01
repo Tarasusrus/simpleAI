@@ -94,6 +94,15 @@ type TransactionFilter struct {
 	Limit      int
 }
 
+// Reminder — настройки ежедневного напоминания для пользователя.
+type Reminder struct {
+	ChatID       int64
+	Enabled      bool
+	NotifyHour   int // 0–23
+	NotifyMinute int // 0–59
+	Timezone     string
+}
+
 // TransactionPatch — поля для частичного обновления транзакции.
 // Нулевое значение означает «не менять».
 type TransactionPatch struct {

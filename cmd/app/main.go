@@ -99,6 +99,17 @@ func main() {
 		logger.Info("mail worker skipped: no accounts configured")
 	}
 
+	// --- Reminder worker ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		budgetStore := budget.NewStore(pool)
+		tg := notify.NewTelegram(cfg.Telegram.Token, "")
+		worker := notify.NewReminderWorker(budgetStore, tg, logger)
+		logger.Info("reminder worker started")
+		worker.Run(ctx)
+	}()
+
 	logger.Info("all services started")
 	wg.Wait()
 	pool.Close()
