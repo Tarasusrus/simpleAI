@@ -58,7 +58,8 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 	}
 
 	stopTyping := tctx.StartTyping(ctx)
-	reply, err := tctx.Agent.Ask(ctx, prompt)
+	chatID := tctx.Update.ChatID
+	reply, err := tctx.Agent.AskWithMeta(ctx, prompt, &chatID)
 	stopTyping()
 	if err != nil {
 		return tctx.Reply(fmt.Sprintf("Ошибка агента: %v", err))
