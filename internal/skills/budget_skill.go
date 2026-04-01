@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -254,11 +255,15 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 
 func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, error) {
 	p := parsePeriod(req.Period)
-	summary, err := s.store.GetSummary(ctx, p)
+	curr, err := s.store.GetSummary(ctx, p)
 	if err != nil {
 		return "", fmt.Errorf("get summary: %w", err)
 	}
-	return formatSummary(summary), nil
+	prev, err := s.store.GetSummary(ctx, prevMonthPeriod(p))
+	if err != nil {
+		prev = nil // предыдущий месяц не критичен
+	}
+	return formatSummary(curr, prev), nil
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
@@ -574,33 +579,174 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 	return result
 }
 
-func formatSummary(s *budget.Summary) string {
+// rubRates — приблизительные курсы к рублю для сводного отчёта.
+var rubRates = map[string]float64{
+	"RUB": 1.0,
+	"THB": 2.5,
+	"USD": 82.0,
+	"EUR": 90.0,
+}
+
+func toRUB(amount float64, currency string) float64 {
+	rate, ok := rubRates[currency]
+	if !ok {
+		return amount
+	}
+	return amount * rate
+}
+
+// summaryTotalRUB считает суммарные расходы сводки в RUB-эквиваленте.
+func summaryTotalRUB(s *budget.Summary) float64 {
+	var total float64
+	for _, cg := range s.Currencies {
+		total += toRUB(cg.TotalExpense, cg.Currency)
+	}
+	return total
+}
+
+// summaryCategories собирает все категории сводки с конвертацией в RUB.
+func summaryCategories(s *budget.Summary) map[string]float64 {
+	m := map[string]float64{}
+	for _, cg := range s.Currencies {
+		for _, c := range cg.ByCategory {
+			m[c.CategoryName] += toRUB(c.Total, cg.Currency)
+		}
+	}
+	return m
+}
+
+func formatSummary(s *budget.Summary, prev *budget.Summary) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "📊 Сводка за %s:\n", formatPeriodName(s.Period))
+	fmt.Fprintf(&sb, "%s — расходы\n", formatPeriodName(s.Period))
 
 	if len(s.Currencies) == 0 {
 		sb.WriteString("\nОпераций нет.")
 		return sb.String()
 	}
 
-	for _, cg := range s.Currencies {
-		sym := currencySymbol(cg.Currency)
-		fmt.Fprintf(&sb, "\n💱 %s\n", cg.Currency)
-		fmt.Fprintf(&sb, "  Доходы:  %.0f %s\n", cg.TotalIncome, sym)
-		fmt.Fprintf(&sb, "  Расходы: %.0f %s\n", cg.TotalExpense, sym)
-		fmt.Fprintf(&sb, "  Баланс:  %.0f %s\n", cg.Balance, sym)
+	totalRUB := summaryTotalRUB(s)
 
-		if len(cg.ByCategory) > 0 {
-			sb.WriteString("  Расходы по категориям:\n")
-			for _, c := range cg.ByCategory {
+	fmt.Fprintf(&sb, "\n💸 Всего потрачено: ~%.0f ₽ экв.\n", totalRUB)
+
+	// Собираем категории из всех валют, конвертируем в RUB.
+	type catEntry struct {
+		name     string
+		icon     string
+		rubTotal float64
+		origAmt  float64
+		origCur  string // пусто если RUB
+	}
+	catMap := map[string]*catEntry{}
+	for _, cg := range s.Currencies {
+		for _, c := range cg.ByCategory {
+			key := c.CategoryName
+			rubAmt := toRUB(c.Total, cg.Currency)
+			if e, ok := catMap[key]; ok {
+				e.rubTotal += rubAmt
+				if cg.Currency != "RUB" {
+					e.origAmt += c.Total
+					e.origCur = cg.Currency
+				}
+			} else {
+				orig := ""
+				origAmt := 0.0
+				if cg.Currency != "RUB" {
+					orig = cg.Currency
+					origAmt = c.Total
+				}
 				icon := c.Icon
 				if icon == "" {
 					icon = "•"
 				}
-				fmt.Fprintf(&sb, "    %s %s: %.0f %s\n", icon, c.CategoryName, c.Total, sym)
+				catMap[key] = &catEntry{
+					name:     c.CategoryName,
+					icon:     icon,
+					rubTotal: rubAmt,
+					origAmt:  origAmt,
+					origCur:  orig,
+				}
 			}
 		}
 	}
+
+	// Сортируем по убыванию суммы.
+	cats := make([]*catEntry, 0, len(catMap))
+	for _, e := range catMap {
+		cats = append(cats, e)
+	}
+	sort.Slice(cats, func(i, j int) bool {
+		return cats[i].rubTotal > cats[j].rubTotal
+	})
+
+	sb.WriteString("\nПо категориям:\n")
+	for _, e := range cats {
+		pct := 0.0
+		if totalRUB > 0 {
+			pct = e.rubTotal / totalRUB * 100
+		}
+		sym := currencySymbol(e.origCur)
+		if e.origCur != "" && e.origAmt > 0 {
+			fmt.Fprintf(&sb, "%s %-14s ~%6.0f ₽  %2.0f%%  (%.0f %s)\n",
+				e.icon, e.name, e.rubTotal, pct, e.origAmt, sym)
+		} else {
+			fmt.Fprintf(&sb, "%s %-14s %7.0f ₽  %2.0f%%\n",
+				e.icon, e.name, e.rubTotal, pct)
+		}
+	}
+
+	// Блок сравнения с предыдущим месяцем.
+	if prev != nil && len(prev.Currencies) > 0 {
+		prevTotal := summaryTotalRUB(prev)
+		if prevTotal > 0 {
+			diff := totalRUB - prevTotal
+			sign := "+"
+			if diff < 0 {
+				sign = ""
+			}
+			pct := diff / prevTotal * 100
+			prevName := formatPeriodName(prev.Period)
+			fmt.Fprintf(&sb, "\nvs %s: %s%.0f ₽ (%s%.0f%%)\n", prevName, sign, diff, sign, pct)
+
+			// Топ-2 изменения по категориям.
+			prevCats := summaryCategories(prev)
+			type catDiff struct {
+				name string
+				pct  float64
+			}
+			var diffs []catDiff
+			for _, e := range cats {
+				if pv, ok := prevCats[e.name]; ok && pv > 0 {
+					d := (e.rubTotal - pv) / pv * 100
+					if d > 15 || d < -15 {
+						diffs = append(diffs, catDiff{e.name, d})
+					}
+				} else if _, ok := prevCats[e.name]; !ok && e.rubTotal > 1000 {
+					diffs = append(diffs, catDiff{e.name + " (новое)", 100})
+				}
+			}
+			sort.Slice(diffs, func(i, j int) bool {
+				ai, aj := diffs[i].pct, diffs[j].pct
+				if ai < 0 {
+					ai = -ai
+				}
+				if aj < 0 {
+					aj = -aj
+				}
+				return ai > aj
+			})
+			for i, d := range diffs {
+				if i >= 2 {
+					break
+				}
+				arrow := "↑"
+				if d.pct < 0 {
+					arrow = "↓"
+				}
+				fmt.Fprintf(&sb, "  %s %s %+.0f%%\n", arrow, d.name, d.pct)
+			}
+		}
+	}
+
 	return sb.String()
 }
 
@@ -617,6 +763,12 @@ func formatPeriodName(p budget.Period) string {
 }
 
 // --- Утилиты ---
+
+func prevMonthPeriod(p budget.Period) budget.Period {
+	from := time.Date(p.From.Year(), p.From.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(p.From.Year(), p.From.Month(), 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+	return budget.Period{From: from, To: to}
+}
 
 func currentMonthPeriod() budget.Period {
 	now := time.Now()
