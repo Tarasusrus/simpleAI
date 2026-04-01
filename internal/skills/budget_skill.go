@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/plugin"
 
@@ -38,7 +39,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status",
+						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -50,7 +51,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"description": map[string]any{
 						"type":        "string",
-						"description": "Описание операции",
+						"description": "Описание операции. ОБЯЗАТЕЛЬНО если category='прочее' — перед вызовом спроси пользователя что это за трата.",
 					},
 					"period": map[string]any{
 						"type":        "string",
@@ -108,6 +109,22 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 						"type":        "string",
 						"description": "Дата транзакции в формате YYYY-MM-DD или DD.MM.YYYY. Указывай всегда если пользователь назвал дату. Используется при add_expense, add_income, edit_transaction.",
 					},
+					"reminder_enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Включить (true) или выключить (false) ежедневное напоминание. Используется в set_reminder.",
+					},
+					"reminder_hour": map[string]any{
+						"type":        "integer",
+						"description": "Час отправки напоминания (0–23). Используется в set_reminder.",
+					},
+					"reminder_minute": map[string]any{
+						"type":        "integer",
+						"description": "Минута отправки напоминания (0–59), по умолчанию 0. Используется в set_reminder.",
+					},
+					"reminder_timezone": map[string]any{
+						"type":        "string",
+						"description": "Часовой пояс пользователя в формате IANA (например, Asia/Bangkok, Europe/Moscow). Используется в set_reminder.",
+					},
 				},
 				"required": []string{"action"},
 			},
@@ -132,9 +149,13 @@ type budgetInput struct {
 	Counterparty string  `json:"counterparty,omitempty"`
 	Direction     string  `json:"direction,omitempty"`
 	Currency      string  `json:"currency,omitempty"`
-	TransactionID string  `json:"transaction_id,omitempty"`
-	Keyword       string  `json:"keyword,omitempty"`
-	Date          string  `json:"date,omitempty"`
+	TransactionID     string  `json:"transaction_id,omitempty"`
+	Keyword           string  `json:"keyword,omitempty"`
+	Date              string  `json:"date,omitempty"`
+	ReminderEnabled   *bool   `json:"reminder_enabled,omitempty"`
+	ReminderHour      *int    `json:"reminder_hour,omitempty"`
+	ReminderMinute    *int    `json:"reminder_minute,omitempty"`
+	ReminderTimezone  string  `json:"reminder_timezone,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -167,6 +188,10 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.payDebt(ctx, req)
 	case "debt_status":
 		return s.debtStatus(ctx)
+	case "set_reminder":
+		return s.setReminder(ctx, req)
+	case "get_reminder":
+		return s.getReminder(ctx)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}
@@ -177,6 +202,10 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ string) (string, error) {
 	if req.Amount <= 0 {
 		return "", fmt.Errorf("amount must be positive")
+	}
+
+	if strings.EqualFold(strings.TrimSpace(req.Category), "прочее") && strings.TrimSpace(req.Description) == "" {
+		return "Категория «прочее» требует описания — что именно это была за трата? Уточни у пользователя и повтори вызов с заполненным description.", nil
 	}
 
 	date := time.Now()
@@ -636,4 +665,61 @@ func monthsUntil(deadline time.Time) int {
 		return 1
 	}
 	return months
+}
+
+// --- Напоминания ---
+
+func (s *BudgetSkill) setReminder(ctx context.Context, req budgetInput) (string, error) {
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	if !ok || chatID == 0 {
+		return "", fmt.Errorf("chat_id unavailable")
+	}
+
+	r := budget.Reminder{
+		ChatID:       chatID,
+		Enabled:      true,
+		NotifyHour:   21,
+		NotifyMinute: 0,
+		Timezone:     "UTC",
+	}
+
+	// Применяем явно переданные поля.
+	if req.ReminderEnabled != nil {
+		r.Enabled = *req.ReminderEnabled
+	}
+	if req.ReminderHour != nil {
+		r.NotifyHour = *req.ReminderHour
+	}
+	if req.ReminderMinute != nil {
+		r.NotifyMinute = *req.ReminderMinute
+	}
+	if req.ReminderTimezone != "" {
+		r.Timezone = req.ReminderTimezone
+	}
+
+	if err := s.store.SetReminder(ctx, r); err != nil {
+		return "", fmt.Errorf("set reminder: %w", err)
+	}
+
+	if !r.Enabled {
+		return "🔕 Ежедневные напоминания отключены.", nil
+	}
+	return fmt.Sprintf("🔔 Напоминание настроено: каждый день в %02d:%02d (%s) бот напомнит внести покупки.", r.NotifyHour, r.NotifyMinute, r.Timezone), nil
+}
+
+func (s *BudgetSkill) getReminder(ctx context.Context) (string, error) {
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	if !ok || chatID == 0 {
+		return "", fmt.Errorf("chat_id unavailable")
+	}
+
+	r, err := s.store.GetReminder(ctx, chatID)
+	if err != nil {
+		return "Напоминания не настроены. Скажи «включи напоминания в 21:00» чтобы настроить.", nil
+	}
+
+	if !r.Enabled {
+		return "🔕 Напоминания отключены.", nil
+	}
+	return fmt.Sprintf("🔔 Напоминание активно: каждый день в %02d:%02d (%s).", r.NotifyHour, r.NotifyMinute, r.Timezone), nil
 }

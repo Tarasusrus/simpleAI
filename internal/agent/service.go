@@ -47,8 +47,14 @@ func (s *Service) Ask(ctx context.Context, input string) (string, error) {
 	return s.AskWithMeta(ctx, input, nil)
 }
 
+// ChatIDKey — ключ контекста для передачи chat_id в skills.
+type ChatIDKey struct{}
+
 // AskWithMeta аналогичен Ask, но принимает chatID для трейсинга.
 func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) (string, error) {
+	if chatID != nil {
+		ctx = context.WithValue(ctx, ChatIDKey{}, *chatID)
+	}
 	if s.registry == nil || len(s.registry.List()) == 0 {
 		return s.client.Ask(ctx, input)
 	}

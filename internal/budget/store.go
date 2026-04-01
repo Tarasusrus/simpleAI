@@ -448,3 +448,61 @@ func (s *Store) PatchTransaction(ctx context.Context, id uuid.UUID, p Transactio
 
 	return s.GetTransactionByPrefix(ctx, id.String()[:8])
 }
+
+// --- Напоминания ---
+
+// SetReminder сохраняет или обновляет настройки напоминания для пользователя.
+func (s *Store) SetReminder(ctx context.Context, r Reminder) error {
+	if r.Timezone == "" {
+		r.Timezone = "UTC"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO budget_reminder (chat_id, enabled, notify_hour, notify_minute, timezone, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (chat_id) DO UPDATE
+		SET enabled = EXCLUDED.enabled,
+		    notify_hour = EXCLUDED.notify_hour,
+		    notify_minute = EXCLUDED.notify_minute,
+		    timezone = EXCLUDED.timezone,
+		    updated_at = NOW()
+	`, r.ChatID, r.Enabled, r.NotifyHour, r.NotifyMinute, r.Timezone)
+	if err != nil {
+		return fmt.Errorf("set reminder: %w", err)
+	}
+	return nil
+}
+
+// GetReminder возвращает настройки напоминания для пользователя. Ошибка если не найден.
+func (s *Store) GetReminder(ctx context.Context, chatID int64) (*Reminder, error) {
+	var r Reminder
+	err := s.pool.QueryRow(ctx, `
+		SELECT chat_id, enabled, notify_hour, notify_minute, timezone
+		FROM budget_reminder WHERE chat_id = $1
+	`, chatID).Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("get reminder: %w", err)
+	}
+	return &r, nil
+}
+
+// ListActiveReminders возвращает все включённые напоминания.
+func (s *Store) ListActiveReminders(ctx context.Context) ([]Reminder, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT chat_id, enabled, notify_hour, notify_minute, timezone
+		FROM budget_reminder WHERE enabled = true
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list reminders: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Reminder
+	for rows.Next() {
+		var r Reminder
+		if err := rows.Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone); err != nil {
+			return nil, fmt.Errorf("scan reminder: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
