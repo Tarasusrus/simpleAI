@@ -51,7 +51,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"description": map[string]any{
 						"type":        "string",
-						"description": "Описание операции. ОБЯЗАТЕЛЬНО если category='прочее' — перед вызовом спроси пользователя что это за трата.",
+						"description": "Описание операции. Для category='прочее' всегда заполняй из текста сообщения пользователя (название товара или услуги).",
 					},
 					"period": map[string]any{
 						"type":        "string",
@@ -202,10 +202,6 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ string) (string, error) {
 	if req.Amount <= 0 {
 		return "", fmt.Errorf("amount must be positive")
-	}
-
-	if strings.EqualFold(strings.TrimSpace(req.Category), "прочее") && strings.TrimSpace(req.Description) == "" {
-		return "Категория «прочее» требует описания — что именно это была за трата? Уточни у пользователя и повтори вызов с заполненным description.", nil
 	}
 
 	date := time.Now()
@@ -671,8 +667,9 @@ func monthsUntil(deadline time.Time) int {
 
 func (s *BudgetSkill) setReminder(ctx context.Context, req budgetInput) (string, error) {
 	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
-	if !ok || chatID == 0 {
-		return "", fmt.Errorf("chat_id unavailable")
+	_ = ok
+	if chatID == 0 {
+		return "Не удалось определить чат — попробуй ещё раз.", nil
 	}
 
 	r := budget.Reminder{
@@ -709,8 +706,9 @@ func (s *BudgetSkill) setReminder(ctx context.Context, req budgetInput) (string,
 
 func (s *BudgetSkill) getReminder(ctx context.Context) (string, error) {
 	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
-	if !ok || chatID == 0 {
-		return "", fmt.Errorf("chat_id unavailable")
+	_ = ok
+	if chatID == 0 {
+		return "Напоминания не настроены. Скажи «включи напоминания в 21:00» чтобы настроить.", nil
 	}
 
 	r, err := s.store.GetReminder(ctx, chatID)
