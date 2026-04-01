@@ -695,7 +695,7 @@ func (s *BudgetSkill) setReminder(ctx context.Context, req budgetInput) (string,
 	}
 
 	if err := s.store.SetReminder(ctx, r); err != nil {
-		return "", fmt.Errorf("set reminder: %w", err)
+		return fmt.Sprintf("Не удалось сохранить напоминание: %v. Попробуй ещё раз позже.", err), nil
 	}
 
 	if !r.Enabled {
