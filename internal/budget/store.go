@@ -506,3 +506,39 @@ func (s *Store) ListActiveReminders(ctx context.Context) ([]Reminder, error) {
 	}
 	return out, rows.Err()
 }
+
+// --- Курсы валют ---
+
+// GetExchangeRates возвращает все курсы из БД как map[currency]rate_to_rub.
+func (s *Store) GetExchangeRates(ctx context.Context) (map[string]float64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT currency, rate_to_rub FROM exchange_rate`)
+	if err != nil {
+		return nil, fmt.Errorf("get exchange rates: %w", err)
+	}
+	defer rows.Close()
+
+	rates := map[string]float64{}
+	for rows.Next() {
+		var currency string
+		var rate float64
+		if err := rows.Scan(&currency, &rate); err != nil {
+			return nil, fmt.Errorf("scan exchange rate: %w", err)
+		}
+		rates[currency] = rate
+	}
+	return rates, rows.Err()
+}
+
+// SaveExchangeRate сохраняет или обновляет курс валюты.
+func (s *Store) SaveExchangeRate(ctx context.Context, currency string, rateToRUB float64) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO exchange_rate (currency, rate_to_rub, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (currency) DO UPDATE
+		SET rate_to_rub = EXCLUDED.rate_to_rub, updated_at = NOW()
+	`, currency, rateToRUB)
+	if err != nil {
+		return fmt.Errorf("save exchange rate: %w", err)
+	}
+	return nil
+}

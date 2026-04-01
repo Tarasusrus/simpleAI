@@ -263,7 +263,21 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	if err != nil {
 		prev = nil // предыдущий месяц не критичен
 	}
-	return formatSummary(curr, prev), nil
+
+	// Загружаем актуальные курсы из БД; при ошибке используем хардкод-fallback.
+	rates, err := s.store.GetExchangeRates(ctx)
+	if err != nil || len(rates) == 0 {
+		rates = rubRates
+	} else {
+		// Дополняем хардкодом для валют, которых нет в БД.
+		for k, v := range rubRates {
+			if _, ok := rates[k]; !ok {
+				rates[k] = v
+			}
+		}
+	}
+
+	return formatSummary(curr, prev, rates), nil
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
@@ -587,35 +601,34 @@ var rubRates = map[string]float64{
 	"EUR": 90.0,
 }
 
-func toRUB(amount float64, currency string) float64 {
-	rate, ok := rubRates[currency]
-	if !ok {
-		return amount
+func toRUB(amount float64, currency string, rates map[string]float64) float64 {
+	if rate, ok := rates[currency]; ok {
+		return amount * rate
 	}
-	return amount * rate
+	return amount
 }
 
 // summaryTotalRUB считает суммарные расходы сводки в RUB-эквиваленте.
-func summaryTotalRUB(s *budget.Summary) float64 {
+func summaryTotalRUB(s *budget.Summary, rates map[string]float64) float64 {
 	var total float64
 	for _, cg := range s.Currencies {
-		total += toRUB(cg.TotalExpense, cg.Currency)
+		total += toRUB(cg.TotalExpense, cg.Currency, rates)
 	}
 	return total
 }
 
 // summaryCategories собирает все категории сводки с конвертацией в RUB.
-func summaryCategories(s *budget.Summary) map[string]float64 {
+func summaryCategories(s *budget.Summary, rates map[string]float64) map[string]float64 {
 	m := map[string]float64{}
 	for _, cg := range s.Currencies {
 		for _, c := range cg.ByCategory {
-			m[c.CategoryName] += toRUB(c.Total, cg.Currency)
+			m[c.CategoryName] += toRUB(c.Total, cg.Currency, rates)
 		}
 	}
 	return m
 }
 
-func formatSummary(s *budget.Summary, prev *budget.Summary) string {
+func formatSummary(s *budget.Summary, prev *budget.Summary, rates map[string]float64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s — расходы\n", formatPeriodName(s.Period))
 
@@ -624,7 +637,7 @@ func formatSummary(s *budget.Summary, prev *budget.Summary) string {
 		return sb.String()
 	}
 
-	totalRUB := summaryTotalRUB(s)
+	totalRUB := summaryTotalRUB(s, rates)
 
 	fmt.Fprintf(&sb, "\n💸 Всего потрачено: ~%.0f ₽ экв.\n", totalRUB)
 
@@ -640,7 +653,7 @@ func formatSummary(s *budget.Summary, prev *budget.Summary) string {
 	for _, cg := range s.Currencies {
 		for _, c := range cg.ByCategory {
 			key := c.CategoryName
-			rubAmt := toRUB(c.Total, cg.Currency)
+			rubAmt := toRUB(c.Total, cg.Currency, rates)
 			if e, ok := catMap[key]; ok {
 				e.rubTotal += rubAmt
 				if cg.Currency != "RUB" {
@@ -696,7 +709,7 @@ func formatSummary(s *budget.Summary, prev *budget.Summary) string {
 
 	// Блок сравнения с предыдущим месяцем.
 	if prev != nil && len(prev.Currencies) > 0 {
-		prevTotal := summaryTotalRUB(prev)
+		prevTotal := summaryTotalRUB(prev, rates)
 		if prevTotal > 0 {
 			diff := totalRUB - prevTotal
 			sign := "+"
@@ -708,7 +721,7 @@ func formatSummary(s *budget.Summary, prev *budget.Summary) string {
 			fmt.Fprintf(&sb, "\nvs %s: %s%.0f ₽ (%s%.0f%%)\n", prevName, sign, diff, sign, pct)
 
 			// Топ-2 изменения по категориям.
-			prevCats := summaryCategories(prev)
+			prevCats := summaryCategories(prev, rates)
 			type catDiff struct {
 				name string
 				pct  float64

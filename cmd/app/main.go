@@ -30,6 +30,7 @@ import (
 	"simpleAI/internal/notify"
 	"simpleAI/internal/plugin"
 	"simpleAI/internal/rag"
+	"simpleAI/internal/rates"
 	"simpleAI/internal/skills"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
@@ -108,6 +109,15 @@ func main() {
 		worker := notify.NewReminderWorker(budgetStore, tg, logger)
 		logger.Info("reminder worker started")
 		worker.Run(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		budgetStore := budget.NewStore(pool)
+		ratesWorker := rates.New(budgetStore)
+		logger.Info("rates worker started")
+		ratesWorker.Run(ctx)
 	}()
 
 	logger.Info("all services started")
