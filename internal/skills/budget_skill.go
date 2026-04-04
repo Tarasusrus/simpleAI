@@ -108,7 +108,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"date": map[string]any{
 						"type":        "string",
-						"description": "Дата транзакции в формате YYYY-MM-DD или DD.MM.YYYY. Указывай всегда если пользователь назвал дату. Используется при add_expense, add_income, edit_transaction.",
+						"description": "Дата в формате YYYY-MM-DD или DD.MM.YYYY. При add_expense, add_income, edit_transaction — дата операции. При list_transactions — фильтр по конкретному дню.",
 					},
 					"reminder_enabled": map[string]any{
 						"type":        "boolean",
@@ -281,7 +281,30 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
-	p := parsePeriod(req.Period)
+	var p budget.Period
+	var periodLabel string
+
+	if req.Date != "" {
+		var day time.Time
+		for _, layout := range []string{"2006-01-02", "02.01.2006"} {
+			if d, err := time.Parse(layout, req.Date); err == nil {
+				day = d
+				break
+			}
+		}
+		if day.IsZero() {
+			return "", fmt.Errorf("неверный формат даты %q, используй YYYY-MM-DD или DD.MM.YYYY", req.Date)
+		}
+		p = budget.Period{
+			From: time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC),
+			To:   time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, time.UTC),
+		}
+		periodLabel = day.Format("02.01.2006")
+	} else {
+		p = parsePeriod(req.Period)
+		periodLabel = formatPeriodName(p)
+	}
+
 	f := budget.TransactionFilter{
 		Period:  &p,
 		Keyword: req.Keyword,
@@ -298,7 +321,7 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Транзакции за %s:\n\n", formatPeriodName(p))
+	fmt.Fprintf(&sb, "Транзакции за %s:\n\n", periodLabel)
 	for _, t := range txs {
 		icon := "🔴"
 		sign := "-"
