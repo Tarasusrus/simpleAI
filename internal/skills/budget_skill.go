@@ -57,7 +57,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"period": map[string]any{
 						"type":        "string",
-						"description": "Период: month (текущий месяц по умолчанию), или YYYY-MM",
+						"description": "Период для summary/list_transactions: month (текущий месяц, по умолчанию) или YYYY-MM (конкретный месяц). НЕ используй для конкретного дня — для дня используй поле date.",
 					},
 					"name": map[string]any{
 						"type":        "string",
@@ -109,7 +109,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"date": map[string]any{
 						"type":        "string",
-						"description": "Дата в формате YYYY-MM-DD или DD.MM.YYYY. При add_expense, add_income, edit_transaction — дата операции. При list_transactions — фильтр по конкретному дню.",
+						"description": "Конкретная дата в формате YYYY-MM-DD или DD.MM.YYYY. При add_expense, add_income, edit_transaction — дата операции. При list_transactions — фильтр по конкретному дню (например '8 марта' → '2026-03-08'). Для конкретного дня всегда используй date, не period.",
 					},
 					"reminder_enabled": map[string]any{
 						"type":        "boolean",
@@ -293,6 +293,17 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
 	var p budget.Period
 	var periodLabel string
+
+	// LLM иногда кладёт конкретную дату в period вместо date — исправляем.
+	if req.Date == "" && req.Period != "" {
+		for _, layout := range []string{"2006-01-02", "02.01.2006"} {
+			if _, err := time.Parse(layout, req.Period); err == nil {
+				req.Date = req.Period
+				req.Period = ""
+				break
+			}
+		}
+	}
 
 	if req.Date != "" {
 		var day time.Time
