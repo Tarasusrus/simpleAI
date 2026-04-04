@@ -41,7 +41,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -139,6 +139,10 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 						"type":        "string",
 						"description": "Transaction type for add_recurring: 'expense' (default) or 'income' (e.g. monthly salary).",
 					},
+					"months": map[string]any{
+						"type":        "integer",
+						"description": "Number of past months to use for forecast calculation (default: all available). Used in forecast action.",
+					},
 				},
 				"required": []string{"action"},
 			},
@@ -173,6 +177,7 @@ type budgetInput struct {
 	RecurringID       string  `json:"recurring_id,omitempty"`
 	DayOfMonth        *int    `json:"day_of_month,omitempty"`
 	TransactionType   string  `json:"transaction_type,omitempty"`
+	Months            int     `json:"months,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -224,6 +229,8 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.listRecurring(ctx)
 	case "disable_recurring":
 		return s.disableRecurring(ctx, req)
+	case "forecast":
+		return s.forecastAction(ctx, req)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}
@@ -308,7 +315,20 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 		}
 	}
 
-	return formatSummary(curr, prev, rates), nil
+	result := formatSummary(curr, prev, rates)
+
+	// Show forecast only if the next month after the requested period is actually in the future.
+	// E.g. viewing January summary in April → next=February → already past → skip.
+	next := time.Date(p.To.Year(), p.To.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	currentMonth := time.Date(time.Now().UTC().Year(), time.Now().UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	if next.After(currentMonth) {
+		forecasts, forecastErr := s.store.GetForecastData(ctx, 0)
+		if forecastErr == nil && len(forecasts) > 0 {
+			result += "\n" + formatForecastBlock(forecasts, next, rates)
+		}
+	}
+
+	return result, nil
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
@@ -1066,4 +1086,81 @@ func (s *BudgetSkill) disableRecurring(ctx context.Context, req budgetInput) (st
 		return fmt.Sprintf("Не удалось отключить: %v", err), nil
 	}
 	return "⏸ Повторяющийся платёж отключён.", nil
+}
+
+// --- Прогнозирование ---
+
+func (s *BudgetSkill) forecastAction(ctx context.Context, req budgetInput) (string, error) {
+	forecasts, err := s.store.GetForecastData(ctx, req.Months)
+	if err != nil {
+		return fmt.Sprintf("Не удалось посчитать прогноз: %v", err), nil
+	}
+	if len(forecasts) == 0 {
+		return "Недостаточно данных для прогноза — добавь несколько трат и попробуй снова.", nil
+	}
+
+	rates, err := s.store.GetExchangeRates(ctx)
+	if err != nil || len(rates) == 0 {
+		rates = rubRates
+	} else {
+		for k, v := range rubRates {
+			if _, ok := rates[k]; !ok {
+				rates[k] = v
+			}
+		}
+	}
+
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	return formatForecastBlock(forecasts, next, rates), nil
+}
+
+// formatForecastBlock форматирует блок прогноза 🔮 для вывода пользователю.
+// rates используются для конвертации итого в THB.
+// Используется как в forecastAction, так и в summary.
+func formatForecastBlock(forecasts []budget.CategoryForecast, nextMonth time.Time, rates map[string]float64) string {
+	if len(forecasts) == 0 {
+		return ""
+	}
+
+	months := [...]string{"", "январь", "февраль", "март", "апрель", "май", "июнь",
+		"июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🔮 Прогноз на %s %d:\n", months[nextMonth.Month()], nextMonth.Year())
+
+	var totalTHB float64
+	thbRate := rates["THB"]
+	if thbRate == 0 {
+		thbRate = rubRates["THB"] // fallback
+	}
+
+	for _, f := range forecasts {
+		trend := trendLabel(f.TrendPct, f.HasTrend)
+		if trend != "" {
+			fmt.Fprintf(&sb, "  %s %-14s ~%.0f %s  (%s)\n", f.Icon, f.CategoryName, f.ForecastAmount, f.Currency, trend)
+		} else {
+			fmt.Fprintf(&sb, "  %s %-14s ~%.0f %s\n", f.Icon, f.CategoryName, f.ForecastAmount, f.Currency)
+		}
+		totalTHB += toRUB(f.ForecastAmount, f.Currency, rates) / thbRate
+	}
+
+	fmt.Fprintf(&sb, "  ──────────────────────\n  Итого: ~%.0f THB\n", totalTHB)
+
+	return sb.String()
+}
+
+// trendLabel возвращает строку тренда: ↑/↓/→ или пустую строку.
+func trendLabel(pct float64, hasTrend bool) string {
+	if !hasTrend {
+		return ""
+	}
+	switch {
+	case pct > 3:
+		return fmt.Sprintf("↑ +%.0f%%", pct)
+	case pct < -3:
+		return fmt.Sprintf("↓ %.0f%%", pct)
+	default:
+		return "→ стабильно"
+	}
 }

@@ -103,6 +103,17 @@ type Reminder struct {
 	Timezone     string
 }
 
+// CategoryForecast — прогноз трат по одной категории в одной валюте на следующий период.
+// Используется как граница интерфейса для будущего ForecastSkill (ADR-001).
+type CategoryForecast struct {
+	CategoryName    string
+	Icon            string
+	Currency        string
+	ForecastAmount  float64 // среднее за последние N месяцев (Этап 1)
+	TrendPct        float64 // (last_month - prev_month) / prev_month * 100
+	HasTrend        bool    // false если данных только за 1 месяц
+}
+
 // RecurringPayment — повторяющийся платёж, создающий транзакцию автоматически по расписанию.
 type RecurringPayment struct {
 	ID              uuid.UUID

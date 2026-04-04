@@ -671,6 +671,80 @@ func (s *Store) DeleteRecurring(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// --- Прогнозирование ---
+
+// GetForecastData возвращает прогноз трат по категориям на основе последних months месяцев.
+// Учитываются только расходы (type = 'expense').
+// Если months <= 0 — берёт все доступные данные.
+func (s *Store) GetForecastData(ctx context.Context, months int) ([]CategoryForecast, error) {
+	var fromClause string
+	var args []any
+
+	if months > 0 {
+		fromClause = `AND t.transaction_date >= date_trunc('month', NOW()) - ($1 * INTERVAL '1 month')`
+		args = append(args, months)
+	}
+
+	// Агрегируем траты по (категория, валюта, месяц).
+	// Из этого считаем: среднее, last_month, prev_month.
+	query := fmt.Sprintf(`
+		WITH monthly AS (
+			SELECT
+				COALESCE(c.name, 'Прочее')                          AS category_name,
+				COALESCE(c.icon, '📦')                              AS icon,
+				t.currency,
+				date_trunc('month', t.transaction_date)             AS month,
+				SUM(t.amount)                                       AS total
+			FROM budget_transaction t
+			LEFT JOIN budget_category c ON c.id = t.category_id
+			WHERE t.type = 'expense'
+			%s
+			GROUP BY category_name, icon, t.currency, month
+		),
+		ranked AS (
+			SELECT *,
+				ROW_NUMBER() OVER (PARTITION BY category_name, currency ORDER BY month DESC) AS rn,
+				AVG(total)   OVER (PARTITION BY category_name, currency)                     AS avg_total,
+				COUNT(*)     OVER (PARTITION BY category_name, currency)                     AS month_count
+			FROM monthly
+		)
+		SELECT
+			category_name,
+			icon,
+			currency,
+			avg_total,
+			MAX(CASE WHEN rn = 1 THEN total END) AS last_month,
+			MAX(CASE WHEN rn = 2 THEN total END) AS prev_month,
+			MAX(month_count)                      AS month_count
+		FROM ranked
+		GROUP BY category_name, icon, currency, avg_total
+		ORDER BY avg_total DESC
+	`, fromClause)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get forecast data: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CategoryForecast
+	for rows.Next() {
+		var f CategoryForecast
+		var lastMonth, prevMonth *float64
+		var monthCount int
+		if err := rows.Scan(&f.CategoryName, &f.Icon, &f.Currency, &f.ForecastAmount,
+			&lastMonth, &prevMonth, &monthCount); err != nil {
+			return nil, fmt.Errorf("scan forecast: %w", err)
+		}
+		if monthCount >= 2 && lastMonth != nil && prevMonth != nil && *prevMonth > 0 {
+			f.TrendPct = (*lastMonth - *prevMonth) / *prevMonth * 100
+			f.HasTrend = true
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // --- Курсы валют ---
 
 // GetExchangeRates возвращает все курсы из БД как map[currency]rate_to_rub.
