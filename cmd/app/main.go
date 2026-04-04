@@ -111,6 +111,17 @@ func main() {
 		worker.Run(ctx)
 	}()
 
+	// --- Recurring worker ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		budgetStore := budget.NewStore(pool)
+		tg := notify.NewTelegram(cfg.Telegram.Token, "")
+		worker := notify.NewRecurringWorker(budgetStore, tg, logger)
+		logger.Info("recurring worker started")
+		worker.Run(ctx)
+	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

@@ -103,6 +103,24 @@ type Reminder struct {
 	Timezone     string
 }
 
+// RecurringPayment — повторяющийся платёж, создающий транзакцию автоматически по расписанию.
+type RecurringPayment struct {
+	ID              uuid.UUID
+	ChatID          int64
+	Name            string
+	Type            string    // "expense" | "income"
+	Amount          float64
+	CategoryID      *uuid.UUID
+	CategoryName    string
+	Currency        string    // ISO 4217
+	RecurrenceType  string    // "monthly" | "weekly" | "daily"
+	DayOfMonth      *int      // для monthly: день месяца (1–31)
+	NextDate        time.Time // следующая дата срабатывания
+	Enabled         bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 // TransactionPatch — поля для частичного обновления транзакции.
 // Нулевое значение означает «не менять».
 type TransactionPatch struct {

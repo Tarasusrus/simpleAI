@@ -31,7 +31,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
 		ID:          "budget",
 		Name:        "Budget Tracker",
-		Description: "Управление личными финансами: записать расход/доход, сводка за период, цели накоплений, долги и кредиты. Используй этот инструмент когда пользователь говорит о тратах, деньгах, бюджете, накоплениях или долгах.",
+		Description: "Personal finance management: record expenses and income, get spending summaries, manage savings goals, debts, and recurring payments. Use this tool when the user talks about spending, money, budget, savings, or debts.",
 		Version:     "1.0.0",
 		InputSchema: &plugin.Schema{
 			Name:    "BudgetInput",
@@ -41,91 +41,103 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Действие: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring",
 					},
 					"amount": map[string]any{
 						"type":        "number",
-						"description": "Сумма операции",
+						"description": "Transaction amount (positive number)",
 					},
 					"category": map[string]any{
 						"type":        "string",
-						"description": "Категория расхода или дохода. Стандартные: еда, транспорт, жильё, здоровье, красота, развлечения, подписки, одежда, переводы, зарплата, фриланс, прочее. Если пользователь назвал категорию явно — передавай её как есть, не заменяй на 'прочее'. Система создаст категорию автоматически если не найдёт совпадения.",
+						"description": "Expense or income category. Standard expense categories: еда (food), транспорт (transport), жильё (housing), здоровье (health), красота (beauty), развлечения (entertainment), подписки (subscriptions), одежда (clothes), переводы (transfers), прочее (other). Standard income categories: зарплата (salary), фриланс (freelance), прочее (other). If the user explicitly named a category — pass it as-is, do not replace with 'прочее'. The system will create a new category automatically if no match is found.",
 					},
 					"description": map[string]any{
 						"type":        "string",
-						"description": "Описание операции. Для category='прочее' всегда заполняй из текста сообщения пользователя (название товара или услуги).",
+						"description": "Transaction description or note. For category='прочее' always fill from the user's message text (item or service name).",
 					},
 					"period": map[string]any{
 						"type":        "string",
-						"description": "Период для summary/list_transactions: month (текущий месяц, по умолчанию) или YYYY-MM (конкретный месяц). НЕ используй для конкретного дня — для дня используй поле date.",
+						"description": "Period for summary/list_transactions: 'month' (current month, default) or 'YYYY-MM' (specific month). Do NOT use for a specific day — use the 'date' field instead.",
 					},
 					"name": map[string]any{
 						"type":        "string",
-						"description": "Название цели или долга",
+						"description": "Name of a savings goal, debt, or recurring payment",
 					},
 					"target_amount": map[string]any{
 						"type":        "number",
-						"description": "Целевая сумма накопления",
+						"description": "Target amount for a savings goal",
 					},
 					"deadline": map[string]any{
 						"type":        "string",
-						"description": "Дедлайн цели (YYYY-MM-DD)",
+						"description": "Goal deadline in YYYY-MM-DD format",
 					},
 					"goal_id": map[string]any{
 						"type":        "string",
-						"description": "UUID цели для пополнения",
+						"description": "UUID of the savings goal to top up (used in update_goal)",
 					},
 					"debt_id": map[string]any{
 						"type":        "string",
-						"description": "UUID долга для платежа",
+						"description": "UUID of the debt to pay (used in pay_debt)",
 					},
 					"total": map[string]any{
 						"type":        "number",
-						"description": "Полная сумма долга",
+						"description": "Total debt amount",
 					},
 					"monthly": map[string]any{
 						"type":        "number",
-						"description": "Ежемесячный платёж по долгу",
+						"description": "Monthly payment amount for a debt",
 					},
 					"counterparty": map[string]any{
 						"type":        "string",
-						"description": "Кому должен / кто должен",
+						"description": "Who owes whom (person or organization name)",
 					},
 					"direction": map[string]any{
 						"type":        "string",
-						"description": "owe (я должен) или owed (мне должны)",
+						"description": "'owe' — I owe someone, 'owed' — someone owes me",
 					},
 					"currency": map[string]any{
 						"type":        "string",
-						"description": "Валюта операции: RUB (по умолчанию), USD, EUR, THB, и т.д. (ISO 4217)",
+						"description": "Transaction currency: RUB (default), USD, EUR, THB, etc. (ISO 4217)",
 					},
 					"transaction_id": map[string]any{
 						"type":        "string",
-						"description": "Короткий ID транзакции (первые 8 символов из списка) для edit_transaction. ВАЖНО: перед вызовом edit_transaction всегда покажи найденную транзакцию и изменения пользователю, дождись подтверждения.",
+						"description": "Short transaction ID (first 8 characters from list) for edit_transaction. IMPORTANT: before calling edit_transaction always show the found transaction and proposed changes to the user and wait for confirmation.",
 					},
 					"keyword": map[string]any{
 						"type":        "string",
-						"description": "Ключевое слово для поиска транзакций по описанию (для list_transactions)",
+						"description": "Keyword to search transactions by description (used in list_transactions)",
 					},
 					"date": map[string]any{
 						"type":        "string",
-						"description": "Конкретная дата в формате YYYY-MM-DD или DD.MM.YYYY. При add_expense, add_income, edit_transaction — дата операции. При list_transactions — фильтр по конкретному дню (например '8 марта' → '2026-03-08'). Для конкретного дня всегда используй date, не period.",
+						"description": "Specific date in YYYY-MM-DD or DD.MM.YYYY format. For add_expense, add_income, edit_transaction — the operation date. For list_transactions — filter by a specific day (e.g. 'March 8' → '2026-03-08'). Always use 'date' for a specific day, never 'period'.",
 					},
 					"reminder_enabled": map[string]any{
 						"type":        "boolean",
-						"description": "Включить (true) или выключить (false) ежедневное напоминание. Используется в set_reminder.",
+						"description": "Enable (true) or disable (false) daily reminder. Used in set_reminder.",
 					},
 					"reminder_hour": map[string]any{
 						"type":        "integer",
-						"description": "Час отправки напоминания (0–23). Используется в set_reminder.",
+						"description": "Hour to send the daily reminder (0–23). Used in set_reminder.",
 					},
 					"reminder_minute": map[string]any{
 						"type":        "integer",
-						"description": "Минута отправки напоминания (0–59), по умолчанию 0. Используется в set_reminder.",
+						"description": "Minute to send the daily reminder (0–59), default 0. Used in set_reminder.",
 					},
 					"reminder_timezone": map[string]any{
 						"type":        "string",
-						"description": "Часовой пояс пользователя в формате IANA (например, Asia/Bangkok, Europe/Moscow). Используется в set_reminder.",
+						"description": "User's timezone in IANA format (e.g. Asia/Bangkok, Europe/Moscow). Used in set_reminder.",
+					},
+					"recurring_id": map[string]any{
+						"type":        "string",
+						"description": "Short recurring payment ID (first 8 characters from list_recurring output). Used in disable_recurring.",
+					},
+					"day_of_month": map[string]any{
+						"type":        "integer",
+						"description": "Day of month (1–31) for monthly recurring payment. Used in add_recurring.",
+					},
+					"transaction_type": map[string]any{
+						"type":        "string",
+						"description": "Transaction type for add_recurring: 'expense' (default) or 'income' (e.g. monthly salary).",
 					},
 				},
 				"required": []string{"action"},
@@ -158,6 +170,9 @@ type budgetInput struct {
 	ReminderHour      *int    `json:"reminder_hour,omitempty"`
 	ReminderMinute    *int    `json:"reminder_minute,omitempty"`
 	ReminderTimezone  string  `json:"reminder_timezone,omitempty"`
+	RecurringID       string  `json:"recurring_id,omitempty"`
+	DayOfMonth        *int    `json:"day_of_month,omitempty"`
+	TransactionType   string  `json:"transaction_type,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -203,6 +218,12 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.setReminder(ctx, req)
 	case "get_reminder":
 		return s.getReminder(ctx)
+	case "add_recurring":
+		return s.addRecurring(ctx, req)
+	case "list_recurring":
+		return s.listRecurring(ctx)
+	case "disable_recurring":
+		return s.disableRecurring(ctx, req)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}
@@ -929,4 +950,120 @@ func (s *BudgetSkill) getReminder(ctx context.Context) (string, error) {
 		return "🔕 Напоминания отключены.", nil
 	}
 	return fmt.Sprintf("🔔 Напоминание активно: каждый день в %02d:%02d (%s).", r.NotifyHour, r.NotifyMinute, r.Timezone), nil
+}
+
+// --- Повторяющиеся платежи ---
+
+func (s *BudgetSkill) addRecurring(ctx context.Context, req budgetInput) (string, error) {
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	_ = ok
+	if chatID == 0 {
+		return "Не удалось определить чат — попробуй ещё раз.", nil
+	}
+	if req.Name == "" {
+		return "", fmt.Errorf("name is required for recurring payment")
+	}
+	if req.Amount <= 0 {
+		return "", fmt.Errorf("amount must be positive")
+	}
+
+	currency := req.Currency
+	if currency == "" {
+		currency = "RUB"
+	}
+
+	txType := req.TransactionType
+	if txType != "income" {
+		txType = "expense"
+	}
+
+	var catID *uuid.UUID
+	if req.Category != "" {
+		cat, err := s.store.FindCategoryByName(ctx, req.Category, txType)
+		if err != nil {
+			cat, err = s.store.AddCategory(ctx, req.Category, txType)
+		}
+		if err == nil {
+			catID = &cat.ID
+		}
+	}
+
+	// Вычисляем первую дату срабатывания.
+	now := time.Now().UTC()
+	var nextDate time.Time
+	dayOfMonth := 1
+	if req.DayOfMonth != nil {
+		dayOfMonth = *req.DayOfMonth
+	}
+	// Если этот день в текущем месяце ещё не прошёл — ставим его, иначе следующий месяц.
+	candidate := time.Date(now.Year(), now.Month(), dayOfMonth, 0, 0, 0, 0, time.UTC)
+	if !candidate.Before(now.Truncate(24 * time.Hour)) {
+		nextDate = candidate
+	} else {
+		nextDate = candidate.AddDate(0, 1, 0)
+	}
+
+	r := budget.RecurringPayment{
+		ChatID:         chatID,
+		Name:           req.Name,
+		Type:           txType,
+		Amount:         req.Amount,
+		CategoryID:     catID,
+		Currency:       currency,
+		RecurrenceType: "monthly",
+		DayOfMonth:     &dayOfMonth,
+		NextDate:       nextDate,
+		Enabled:        true,
+	}
+
+	if err := s.store.AddRecurring(ctx, r); err != nil {
+		return fmt.Sprintf("Не удалось сохранить повторяющийся платёж: %v", err), nil
+	}
+
+	return fmt.Sprintf("🔄 Повторяющийся платёж добавлен: *%s* — %.0f %s каждое %d-е число месяца. Первое списание: %s.",
+		req.Name, req.Amount, currency, dayOfMonth, nextDate.Format("02.01.2006")), nil
+}
+
+func (s *BudgetSkill) listRecurring(ctx context.Context) (string, error) {
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	_ = ok
+	if chatID == 0 {
+		return "Не удалось определить чат — попробуй ещё раз.", nil
+	}
+
+	list, err := s.store.ListRecurring(ctx, chatID)
+	if err != nil {
+		return fmt.Sprintf("Не удалось загрузить список: %v", err), nil
+	}
+	if len(list) == 0 {
+		return "Повторяющихся платежей нет. Чтобы добавить, скажи: «каждое 1-е число списывай аренду 30000 THB».", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🔄 *Повторяющиеся платежи:*\n\n")
+	for _, r := range list {
+		status := "✅"
+		if !r.Enabled {
+			status = "⏸"
+		}
+		day := "?"
+		if r.DayOfMonth != nil {
+			day = fmt.Sprintf("%d-е", *r.DayOfMonth)
+		}
+		fmt.Fprintf(&sb, "%s %s — %.0f %s | каждое %s | след. %s | ID: %s\n",
+			status, r.Name, r.Amount, r.Currency, day,
+			r.NextDate.Format("02.01"), r.ID.String()[:8])
+	}
+	return sb.String(), nil
+}
+
+func (s *BudgetSkill) disableRecurring(ctx context.Context, req budgetInput) (string, error) {
+	if req.RecurringID == "" {
+		return "", fmt.Errorf("recurring_id is required")
+	}
+
+	if err := s.store.DisableRecurringByPrefix(ctx, req.RecurringID); err != nil {
+		return fmt.Sprintf("Не удалось отключить: %v", err), nil
+	}
+	return "⏸ Повторяющийся платёж отключён.", nil
 }

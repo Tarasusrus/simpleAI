@@ -507,6 +507,170 @@ func (s *Store) ListActiveReminders(ctx context.Context) ([]Reminder, error) {
 	return out, rows.Err()
 }
 
+// --- Повторяющиеся платежи ---
+
+// AddRecurring создаёт повторяющийся платёж.
+func (s *Store) AddRecurring(ctx context.Context, r RecurringPayment) error {
+	if r.ID == uuid.Nil {
+		r.ID = uuid.New()
+	}
+	if r.Currency == "" {
+		r.Currency = "RUB"
+	}
+	if r.Type == "" {
+		r.Type = "expense"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO budget_recurring (id, chat_id, name, type, amount, category_id, currency, recurrence_type, day_of_month, next_date, enabled)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+	`, r.ID, r.ChatID, r.Name, r.Type, r.Amount, r.CategoryID, r.Currency, r.RecurrenceType, r.DayOfMonth, r.NextDate)
+	if err != nil {
+		return fmt.Errorf("add recurring: %w", err)
+	}
+	return nil
+}
+
+// ListRecurring возвращает все повторяющиеся платежи для чата (включая отключённые).
+func (s *Store) ListRecurring(ctx context.Context, chatID int64) ([]RecurringPayment, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.id, r.chat_id, r.name, r.type, r.amount, r.category_id, COALESCE(c.name, ''), r.currency,
+		       r.recurrence_type, r.day_of_month, r.next_date, r.enabled, r.created_at, r.updated_at
+		FROM budget_recurring r
+		LEFT JOIN budget_category c ON c.id = r.category_id
+		WHERE r.chat_id = $1
+		ORDER BY r.enabled DESC, r.next_date
+	`, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("list recurring: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RecurringPayment
+	for rows.Next() {
+		var r RecurringPayment
+		if err := rows.Scan(&r.ID, &r.ChatID, &r.Name, &r.Type, &r.Amount, &r.CategoryID, &r.CategoryName,
+			&r.Currency, &r.RecurrenceType, &r.DayOfMonth, &r.NextDate, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan recurring: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetDueRecurring возвращает включённые платежи, чья next_date <= date.
+func (s *Store) GetDueRecurring(ctx context.Context, date time.Time) ([]RecurringPayment, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.id, r.chat_id, r.name, r.type, r.amount, r.category_id, COALESCE(c.name, ''), r.currency,
+		       r.recurrence_type, r.day_of_month, r.next_date, r.enabled, r.created_at, r.updated_at
+		FROM budget_recurring r
+		LEFT JOIN budget_category c ON c.id = r.category_id
+		WHERE r.enabled = true AND r.next_date <= $1
+	`, date)
+	if err != nil {
+		return nil, fmt.Errorf("get due recurring: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RecurringPayment
+	for rows.Next() {
+		var r RecurringPayment
+		if err := rows.Scan(&r.ID, &r.ChatID, &r.Name, &r.Type, &r.Amount, &r.CategoryID, &r.CategoryName,
+			&r.Currency, &r.RecurrenceType, &r.DayOfMonth, &r.NextDate, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan due recurring: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// CreateRecurringTransaction атомарно создаёт транзакцию и сдвигает next_date в одной DB-транзакции.
+func (s *Store) CreateRecurringTransaction(ctx context.Context, t Transaction, recurringID uuid.UUID, nextDate time.Time) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	if t.Currency == "" {
+		t.Currency = "RUB"
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Dedup-guard: не создаём дубль если уже есть такая же транзакция за последние 60 секунд.
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM budget_transaction
+			WHERE type = $1 AND amount = $2 AND currency = $3
+			  AND category_id IS NOT DISTINCT FROM $4
+			  AND description IS NOT DISTINCT FROM $5
+			  AND transaction_date = $6
+			  AND created_at >= NOW() - INTERVAL '60 seconds'
+		)
+	`, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date).Scan(&exists); err != nil {
+		return fmt.Errorf("dedup check: %w", err)
+	}
+	if !exists {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, t.ID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date); err != nil {
+			return fmt.Errorf("insert transaction: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE budget_recurring SET next_date = $2, updated_at = NOW() WHERE id = $1
+	`, recurringID, nextDate); err != nil {
+		return fmt.Errorf("advance next_date: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// AdvanceRecurringNextDate сдвигает next_date на следующий период и обновляет updated_at.
+func (s *Store) AdvanceRecurringNextDate(ctx context.Context, id uuid.UUID, nextDate time.Time) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE budget_recurring SET next_date = $2, updated_at = NOW() WHERE id = $1
+	`, id, nextDate)
+	if err != nil {
+		return fmt.Errorf("advance recurring next_date: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("recurring %s not found", id)
+	}
+	return nil
+}
+
+// DisableRecurringByPrefix отключает повторяющийся платёж по префиксу UUID (enabled = false).
+func (s *Store) DisableRecurringByPrefix(ctx context.Context, prefix string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE budget_recurring SET enabled = false, updated_at = NOW()
+		WHERE CAST(id AS TEXT) LIKE $1
+	`, prefix+"%")
+	if err != nil {
+		return fmt.Errorf("disable recurring: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("recurring with prefix %q not found", prefix)
+	}
+	return nil
+}
+
+// DeleteRecurring удаляет повторяющийся платёж полностью.
+func (s *Store) DeleteRecurring(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM budget_recurring WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete recurring: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("recurring %s not found", id)
+	}
+	return nil
+}
+
 // --- Курсы валют ---
 
 // GetExchangeRates возвращает все курсы из БД как map[currency]rate_to_rub.
