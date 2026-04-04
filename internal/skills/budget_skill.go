@@ -1115,12 +1115,71 @@ func (s *BudgetSkill) forecastAction(ctx context.Context, req budgetInput) (stri
 	return formatForecastBlock(forecasts, next, rates), nil
 }
 
+// forecastItem — объединённая категория в THB для отображения.
+type forecastItem struct {
+	Icon        string
+	Name        string
+	TotalTHB    float64
+	TrendPct    float64
+	HasTrend    bool
+	dominantTHB float64 // для выбора тренда доминирующей валюты
+}
+
 // formatForecastBlock форматирует блок прогноза 🔮 для вывода пользователю.
-// rates используются для конвертации итого в THB.
-// Используется как в forecastAction, так и в summary.
+// Все суммы конвертируются в THB. Одинаковые категории из разных валют объединяются.
+// Показываются топ-8 категорий, остальные группируются в "другие".
 func formatForecastBlock(forecasts []budget.CategoryForecast, nextMonth time.Time, rates map[string]float64) string {
 	if len(forecasts) == 0 {
 		return ""
+	}
+
+	thbRate := rates["THB"]
+	if thbRate == 0 {
+		thbRate = rubRates["THB"]
+	}
+
+	// 1. Мержим категории из разных валют → всё в THB.
+	merged := map[string]*forecastItem{}
+	for _, f := range forecasts {
+		amountTHB := toRUB(f.ForecastAmount, f.Currency, rates) / thbRate
+		icon := f.Icon
+		if icon == "" {
+			icon = "📦"
+		}
+		if m, ok := merged[f.CategoryName]; ok {
+			m.TotalTHB += amountTHB
+			// Тренд берём от доминирующей по сумме валюты.
+			if amountTHB > m.dominantTHB {
+				m.TrendPct = f.TrendPct
+				m.HasTrend = f.HasTrend
+				m.dominantTHB = amountTHB
+			}
+		} else {
+			merged[f.CategoryName] = &forecastItem{
+				Icon: icon, Name: f.CategoryName, TotalTHB: amountTHB,
+				TrendPct: f.TrendPct, HasTrend: f.HasTrend, dominantTHB: amountTHB,
+			}
+		}
+	}
+
+	// 2. Сортируем по убыванию THB.
+	items := make([]*forecastItem, 0, len(merged))
+	for _, m := range merged {
+		items = append(items, m)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].TotalTHB > items[j].TotalTHB })
+
+	// 3. Топ-8, остальное — "другие".
+	const maxItems = 8
+	var otherTHB float64
+	var totalTHB float64
+	for _, m := range items {
+		totalTHB += m.TotalTHB
+	}
+	for i, m := range items {
+		if i >= maxItems {
+			otherTHB += m.TotalTHB
+		}
 	}
 
 	months := [...]string{"", "январь", "февраль", "март", "апрель", "май", "июнь",
@@ -1129,31 +1188,34 @@ func formatForecastBlock(forecasts []budget.CategoryForecast, nextMonth time.Tim
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "🔮 Прогноз на %s %d:\n", months[nextMonth.Month()], nextMonth.Year())
 
-	var totalTHB float64
-	thbRate := rates["THB"]
-	if thbRate == 0 {
-		thbRate = rubRates["THB"] // fallback
+	limit := len(items)
+	if limit > maxItems {
+		limit = maxItems
 	}
-
-	for _, f := range forecasts {
-		trend := trendLabel(f.TrendPct, f.HasTrend)
+	for _, m := range items[:limit] {
+		trend := trendLabel(m.TrendPct, m.HasTrend)
 		if trend != "" {
-			fmt.Fprintf(&sb, "  %s %-14s ~%.0f %s  (%s)\n", f.Icon, f.CategoryName, f.ForecastAmount, f.Currency, trend)
+			fmt.Fprintf(&sb, "  %s %-14s ~%.0f ฿  (%s)\n", m.Icon, m.Name, m.TotalTHB, trend)
 		} else {
-			fmt.Fprintf(&sb, "  %s %-14s ~%.0f %s\n", f.Icon, f.CategoryName, f.ForecastAmount, f.Currency)
+			fmt.Fprintf(&sb, "  %s %-14s ~%.0f ฿\n", m.Icon, m.Name, m.TotalTHB)
 		}
-		totalTHB += toRUB(f.ForecastAmount, f.Currency, rates) / thbRate
 	}
-
-	fmt.Fprintf(&sb, "  ──────────────────────\n  Итого: ~%.0f THB\n", totalTHB)
+	if otherTHB > 0 {
+		fmt.Fprintf(&sb, "  📦 другие        ~%.0f ฿\n", otherTHB)
+	}
+	fmt.Fprintf(&sb, "  ──────────────────────\n  Итого: ~%.0f ฿\n", totalTHB)
 
 	return sb.String()
 }
 
 // trendLabel возвращает строку тренда: ↑/↓/→ или пустую строку.
+// Тренд > ±200% считается шумом при малом объёме данных и не отображается.
 func trendLabel(pct float64, hasTrend bool) string {
 	if !hasTrend {
 		return ""
+	}
+	if pct > 200 || pct < -200 {
+		return "" // шум при малом количестве месяцев
 	}
 	switch {
 	case pct > 3:

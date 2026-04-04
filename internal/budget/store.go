@@ -690,8 +690,8 @@ func (s *Store) GetForecastData(ctx context.Context, months int) ([]CategoryFore
 	query := fmt.Sprintf(`
 		WITH monthly AS (
 			SELECT
-				COALESCE(c.name, 'Прочее')                          AS category_name,
-				COALESCE(c.icon, '📦')                              AS icon,
+				COALESCE(c.name, 'Прочее')                              AS category_name,
+				COALESCE(NULLIF(c.icon, ''), '📦')                   AS icon,
 				t.currency,
 				date_trunc('month', t.transaction_date)             AS month,
 				SUM(t.amount)                                       AS total
