@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -165,6 +166,15 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 	if err := json.Unmarshal([]byte(input), &req); err != nil {
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
+
+	slog.Default().InfoContext(ctx, "budget action",
+		"action", req.Action,
+		"amount", req.Amount,
+		"category", req.Category,
+		"date", req.Date,
+		"period", req.Period,
+		"keyword", req.Keyword,
+	)
 
 	switch req.Action {
 	case "add_expense":

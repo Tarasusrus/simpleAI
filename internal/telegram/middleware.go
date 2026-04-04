@@ -41,11 +41,16 @@ func LogUpdates() Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
 			if tctx.Logger != nil && tctx.Update.ChatID != 0 {
+				text := tctx.Update.Text
+				if len(text) > 80 {
+					text = text[:80] + "…"
+				}
 				tctx.Logger.Info("telegram update",
 					"request_id", tctx.RequestID,
 					"chat_id", tctx.Update.ChatID,
 					"from", tctx.Update.UserName,
 					"command", commandForLog(tctx.Update.Text),
+					"text", text,
 				)
 			}
 			return next(ctx, tctx)

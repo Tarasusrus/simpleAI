@@ -148,7 +148,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
 
-	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer)
+	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer).WithLogger(logger)
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))

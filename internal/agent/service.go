@@ -23,14 +23,21 @@ type Service struct {
 	client   core.LLM
 	registry *plugin.Registry
 	tracer   *trace.Store
+	logger   *slog.Logger
 }
 
 func NewService(client core.LLM) *Service {
-	return &Service{client: client}
+	return &Service{client: client, logger: slog.Default()}
 }
 
 func NewServiceWithRegistry(client core.LLM, registry *plugin.Registry) *Service {
-	return &Service{client: client, registry: registry}
+	return &Service{client: client, registry: registry, logger: slog.Default()}
+}
+
+// WithLogger добавляет logger в сервис.
+func (s *Service) WithLogger(l *slog.Logger) *Service {
+	s.logger = l
+	return s
 }
 
 // WithTracer добавляет трейс-стор в сервис (опционально).
@@ -93,17 +100,33 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 			if err != nil {
 				inputJSON = []byte("{}")
 			}
+
+			skillStart := time.Now()
 			result, err := s.runSkill(ctx, call)
+			skillDuration := time.Since(skillStart).Milliseconds()
 
 			skillName := call.Skill
 			var skillResult *string
 			if err != nil {
 				msg := fmt.Sprintf("Ошибка: %v", err)
 				skillResult = &msg
+				s.logger.ErrorContext(ctx, "skill error",
+					"skill", call.Skill,
+					"input", string(inputJSON),
+					"duration_ms", skillDuration,
+					"iteration", iteration,
+					"err", err,
+				)
 				accumulatedResults = append(accumulatedResults,
 					fmt.Sprintf("[%d] %s → %s", i+1, call.Skill, msg))
 			} else {
 				skillResult = &result
+				s.logger.InfoContext(ctx, "skill called",
+					"skill", call.Skill,
+					"input", string(inputJSON),
+					"duration_ms", skillDuration,
+					"iteration", iteration,
+				)
 				accumulatedResults = append(accumulatedResults,
 					fmt.Sprintf("[%d] %s → %s", i+1, call.Skill, result))
 			}
@@ -139,7 +162,7 @@ func (s *Service) appendTrace(ctx context.Context, e trace.Entry) {
 		return
 	}
 	if err := s.tracer.Append(ctx, e); err != nil {
-		slog.Default().WarnContext(ctx, "trace append failed", "err", err, "session_id", e.SessionID)
+		s.logger.WarnContext(ctx, "trace append failed", "err", err, "session_id", e.SessionID)
 	}
 }
 
