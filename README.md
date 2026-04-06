@@ -1,198 +1,139 @@
-# SimpleAI
+# simpleAI
 
-Персональный AI-ассистент с RAG-поиском по базе знаний, Telegram-интерфейсом и MCP-шлюзом для внешних агентов (Claude Code и др.).
-
----
-
-## Архитектура
-
-```
-Пользователь
-    │
-    ├─── Telegram сообщение
-    │        ↓
-    │    Telegram Bot (cmd/telegram)
-    │        ↓
-    │    agent.Service  ←── plugin.Registry ──┬── RAGSearchSkill
-    │        ↓                                └── BudgetSkill
-    │    LLM (OpenAI/Ollama)                        ↓
-    │                                          budget.Store → PostgreSQL
-    │
-    └─── Claude Code / внешний агент
-             ↓ HTTP/SSE :8080
-         MCP Server (cmd/mcp)
-             ↓
-         plugin.Registry (тот же)
-```
-
-**Ключевое:** `plugin.Registry` — единственный источник правды по доступным инструментам.
-Оба входа (Telegram и MCP) используют один реестр.
+Personal AI agent running in production. Telegram interface + MCP server gateway for external agents (Claude Code, etc.). Built with Go.
 
 ---
 
-## Структура каталогов
+## Architecture
+
+```
+User
+ │
+ ├─── Telegram message
+ │        ↓
+ │    Telegram Bot (cmd/telegram)
+ │        ↓
+ │    agent.Service  ←── plugin.Registry ──┬── RAGSearchSkill
+ │        ↓                                ├── BudgetSkill
+ │    LLM (OpenAI/Ollama/DeepSeek)         └── ...more skills
+ │
+ └─── Claude Code / external agent
+          ↓ HTTP/SSE :8080
+      MCP Server (cmd/mcp)
+          ↓
+      plugin.Registry (shared)
+```
+
+**Key design:** `plugin.Registry` is the single source of truth for available tools.  
+Both entry points (Telegram and MCP) use the same registry.
+
+---
+
+## Features
+
+- **Budget tracker** — expenses, income, goals, debts, multi-currency
+- **Expense forecasting** — category-level forecast with trend analysis
+- **Recurring payments** — auto-transactions on schedule with notifications
+- **RAG search** — knowledge base search over documents via pgvector
+- **Mail digest** — Gmail/IMAP integration
+- **MCP server** — HTTP/SSE gateway on `:8080` for Claude Code and other agents
+- **Daily reminders** — configurable by time and timezone
+- **CI/CD** — GitHub Actions → SSH → Docker Compose → systemd (~2 min deploy)
+
+---
+
+## Project Structure
 
 ```
 cmd/
-  agent/        — CLI-агент: читает stdin, отвечает через LLM (git diff → code review)
-  embeddings/   — Генерация эмбеддингов для rag_document записей без embedding
-  ingest/       — Загрузка чеков из JSON в БД + rag_document
-  mcp/          — MCP HTTP/SSE сервер на :8080 (внешние агенты)
-  rag-query/    — CLI для ручной проверки RAG-поиска
-  telegram/     — Telegram-бот (основной пользовательский интерфейс)
-  worker/       — Фоновый воркер
+  app/          — Main entry: runs Telegram bot + MCP server + workers
+  agent/        — CLI agent: reads stdin, responds via LLM (e.g. git diff → code review)
+  embeddings/   — Generate embeddings for rag_document records
+  ingest/       — Load receipts from JSON into DB + rag_document
+  mcp/          — MCP HTTP/SSE server on :8080
+  rag-query/    — CLI for manual RAG search testing
+  telegram/     — Telegram bot (standalone)
+  worker/       — Background worker
 
 internal/
-  adapters/
-    llm/        — Фабрика LLM-клиентов (OpenAI, Ollama, автофоллбэк)
-    telegram/   — Обёртка над telegram-bot-api (отправка, polling, вложения)
-  agent/
-    core.go     — Struct Agent (LLM + Registry + Logger), используется в CLI
-    service.go  — Service.Ask() с tool calling loop для Telegram
-  core/
-    llm.go      — Интерфейсы LLM, Embedder, LLMClient
-    bot.go      — Интерфейсы Bot, Update, Attachment
-  db/
-    postgres.go — pgxpool.Pool по DBConfig
-  ingest/       — Модели и store для загрузки чеков
-  mail/         — Gmail/IMAP интеграция, дайджест
-  mcp/
-    server.go   — Адаптер plugin.Registry → mcp-go инструменты
-  notify/       — Telegram-уведомления из фоновых задач
-  plugin/
-    registry.go — Registry: Register / Get / List
-    types.go    — Интерфейс Skill, struct Manifest
-    schema.go   — Schema для input/output
-  rag/
-    store.go    — Хранение и обновление эмбеддингов в rag_document
-    retriever.go— Векторный поиск (pgvector) с фильтрами
-    prompt.go   — BuildPrompt: контекст + вопрос → строка для LLM
-  skills/
-    rag_search.go — RAGSearchSkill: embed → search → BuildPrompt
-    budget_skill.go — BudgetSkill: учёт финансов (10 actions)
-  budget/
-    model.go    — Модели: Transaction, Category, Goal, Debt, Summary
-    store.go    — CRUD-операции над бюджетными данными (pgxpool)
-  telegram/     — Роутер, хендлеры, middleware, контекст
-  tools/        — NewLogger (slog)
-
-config/
-  config.go     — LoadConfig из .env
-
-migrations/     — SQL-миграции (goose)
+  agent/        — agent.Service: tool calling loop for Telegram
+  plugin/       — Registry, Skill interface, Manifest
+  skills/       — RAGSearchSkill, BudgetSkill (add more here)
+  rag/          — pgvector store, retriever, prompt builder
+  budget/       — Budget models and CRUD store
+  mail/         — Gmail/IMAP integration
+  mcp/          — plugin.Registry → mcp-go adapter
+  notify/       — Telegram notifications from background tasks
+  adapters/     — LLM factory (OpenAI, Ollama, auto-fallback), Telegram wrapper
 ```
 
 ---
 
-## Компоненты и их роли
+## How It Works
 
-### agent.Service (internal/agent/service.go)
-Основной оркестратор для Telegram. При наличии registry делает tool calling:
-1. Строит system prompt со списком skills
-2. Отправляет LLM: пользователь получает JSON `{"skill": "...", "input": {...}}`
-3. Выполняет skill, передаёт результат обратно в LLM
-4. Возвращает финальный ответ
+### Tool calling loop (Telegram)
+1. Build system prompt with available skills list
+2. Send to LLM → get JSON `{"skill": "...", "input": {...}}`
+3. Execute skill, pass result back to LLM
+4. Return final answer to user
 
-### plugin.Registry (internal/plugin/)
-Реестр skills. Ключевые методы: `Register(Skill)`, `Get(id)`, `List() []Manifest`.
+### RAG search example
+```
+User: "find receipts from January"
+  → LLM → {"skill":"rag_search","input":{"query":"receipts January"}}
+  → embed query → pgvector search → BuildPrompt → LLM → answer
+```
 
-### RAGSearchSkill (internal/skills/rag_search.go)
-Поиск по базе знаний. Input: `{"query": "...", "limit": 5}`.
-Поток: embed query → pgvector search → BuildPrompt.
-
-### BudgetSkill (internal/skills/budget_skill.go)
-Управление личными финансами. 10 actions:
-- `add_expense` / `add_income` — записать расход/доход с категорией
-- `summary` — сводка за период с разбивкой по категориям
-- `list_transactions` — список операций за период
-- `add_goal` / `update_goal` / `goal_status` — цели накоплений
-- `add_debt` / `pay_debt` / `debt_status` — долги и кредиты
-
-Пример: `{"skill": "budget", "input": {"action": "add_expense", "amount": 1500, "category": "еда"}}`
-
-### MCP Server (internal/mcp/server.go + cmd/mcp/main.go)
-Превращает registry в MCP-инструменты над HTTP/SSE. Claude Code и другие MCP-клиенты подключаются к `:8080/sse`.
-
----
-
-## Переменные окружения (.env)
-
-```env
-# Обязательно
-SYS_PROMPT=You are a helpful assistant...
-API_KEY=sk-...                     # OpenAI (не нужен при LLM_PROVIDER=ollama)
-
-# LLM
-LLM_PROVIDER=openai                # openai | ollama
-LLM_CHAT_MODEL=gpt-4.1-mini
-EMBEDDING_MODEL=text-embedding-3-small
-
-# Ollama (если LLM_PROVIDER=ollama)
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
-OLLAMA_EMBED_MODEL=nomic-embed-text
-
-# База данных
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=simpleai
-POSTGRES_USER=simpleai
-POSTGRES_PASSWORD=simpleai
-
-# Telegram
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_ALLOWED_CHATS=123456789  # чат ID через запятую
-TELEGRAM_MEDIA_DIR=data/telegram
-TELEGRAM_WORKERS=4
-TELEGRAM_RATE_LIMIT_MS=500
-
-# Логирование
-LOG_LEVEL=info                     # debug | info | warn | error
-LOG_FORMAT=text                    # text | json
+### Budget tracker example
+```
+User: "spent 1500 on groceries"
+  → LLM → {"skill":"budget","input":{"action":"add_expense","amount":1500,"category":"food"}}
+  → BudgetSkill → AddTransaction → GetSummary → answer
 ```
 
 ---
 
-## Запуск
+## Adding a New Skill
 
-### 1. Инфраструктура
+1. Create `internal/skills/my_skill.go`, implement `plugin.Skill`:
+   ```go
+   func (s *MySkill) Manifest() plugin.Manifest { ... }
+   func (s *MySkill) Run(ctx context.Context, input string) (string, error) { ... }
+   ```
+2. Register in `cmd/app/main.go` → `buildRegistry()`.
+3. Update README.
 
-```bash
-docker compose up -d   # Postgres + pgvector
-make migrate-up        # применить миграции
-```
+See `rag_search.go` (simple) and `budget_skill.go` (action-based) as examples.
 
-### 2. Запуск всего одной командой (рекомендуется)
+---
 
-```bash
-make run-all
-# или: go run ./cmd/app
-```
+## Setup
 
-Поднимает в одном процессе:
-- Telegram-бот
-- MCP SSE-сервер на `:8080`
-- Mail worker (если настроены аккаунты в `MAIL_ACCOUNTS_JSON`)
+### Prerequisites
+- Go 1.24+
+- Docker (for PostgreSQL + pgvector)
 
-Graceful shutdown по `Ctrl+C` / `SIGTERM`.
-
-### 3. Запуск отдельных компонентов
+### Run
 
 ```bash
-go run cmd/telegram/main.go   # только бот
-make run-mcp                  # только MCP сервер
-go run cmd/worker/main.go     # только mail worker
+cp .env.example .env   # fill in required values
+docker compose up -d   # start Postgres
+make migrate-up        # apply migrations
+make run-all           # start everything
 ```
 
-### 4. MCP-сервер (для Claude Code и внешних агентов)
+`make run-all` starts in one process:
+- Telegram bot
+- MCP SSE server on `:8080`
+- Mail worker (if `MAIL_ACCOUNTS_JSON` is set)
+
+### MCP server (for Claude Code)
 
 ```bash
 make run-mcp
-# или: go run ./cmd/mcp
 ```
 
-Сервер поднимается на `:8080/sse`. Для подключения Claude Code — файл `.mcp.json` уже в корне:
-
+`.mcp.json` is already in the root:
 ```json
 {
   "mcpServers": {
@@ -201,80 +142,66 @@ make run-mcp
 }
 ```
 
-Проверка в Claude Code:
-```
-/mcp   →  должен показать инструмент rag_search
-```
+Verify in Claude Code: `/mcp` → should show `rag_search` tool.
 
-### 4. Загрузка данных (чеки)
-
-```bash
-go run cmd/ingest/main.go -file receipt.json
-go run cmd/embeddings/main.go -limit 100 -batch 20
-```
-
-### 5. Ручная проверка RAG
-
-```bash
-go run cmd/rag-query/main.go -q "сахар в январе" -limit 5
-```
-
-### 6. Code review через CLI-агент
+### Code review via CLI
 
 ```bash
 git diff | go run cmd/agent/main.go
-# или через make:
+# or:
 make run-diff
 ```
 
 ---
 
-## Добавить новый Skill
+## Environment Variables
 
-1. Создать `internal/skills/my_skill.go`, реализовать интерфейс `plugin.Skill`:
-   ```go
-   func (s *MySkill) Manifest() plugin.Manifest { ... }
-   func (s *MySkill) Run(ctx context.Context, input string) (string, error) { ... }
-   ```
-2. Зарегистрировать в `cmd/app/main.go` → `buildRegistry()`.
-3. Обновить README.
+```env
+# LLM
+LLM_PROVIDER=openai                # openai | ollama
+LLM_CHAT_MODEL=gpt-4.1-mini
+EMBEDDING_MODEL=text-embedding-3-small
+API_KEY=sk-...
 
-Примеры: `rag_search.go` (простой), `budget_skill.go` (action-based с store).
+# Ollama (if LLM_PROVIDER=ollama)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
+OLLAMA_EMBED_MODEL=nomic-embed-text
 
----
+# Database
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=simpleai
+POSTGRES_USER=simpleai
+POSTGRES_PASSWORD=simpleai
 
-## Поток запроса через Telegram
+# Telegram
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_CHATS=123456789
+TELEGRAM_WORKERS=4
 
-### RAG-поиск
-```
-Пользователь: "найди чеки за январь"
-    ↓
-agent.Service.Ask → LLM → {"skill":"rag_search","input":{"query":"чеки за январь"}}
-    ↓
-RAGSearchSkill.Run → embed → pgvector search → BuildPrompt → LLM → ответ
-```
-
-### Бюджет-трекер
-```
-Пользователь: "потратил 1500 на продукты"
-    ↓
-agent.Service.Ask → LLM → {"skill":"budget","input":{"action":"add_expense","amount":1500,"category":"еда"}}
-    ↓
-BudgetSkill.Run → FindCategory("еда") → AddTransaction → GetSummary → ответ
-    ↓
-"🔴 Расход записан: 1500 ₽ → Еда. Баланс месяца: +12 300 ₽"
+# System
+SYS_PROMPT=You are a helpful assistant...
+LOG_LEVEL=info        # debug | info | warn | error
+LOG_FORMAT=text       # text | json
 ```
 
 ---
 
-## Make-таргеты
+## Make Targets
 
-| Команда | Что делает |
-|---------|-----------|
-| `make run-all` | **Запустить всё** — telegram + MCP + worker |
-| `make db-up` | Поднять Postgres в Docker |
-| `make migrate-up` | Применить SQL-миграции |
-| `make migrate-down` | Откатить последнюю миграцию |
-| `make run-mcp` | Только MCP SSE-сервер на :8080 |
-| `make run-diff` | Git diff текущего проекта → code review агент |
-| `make lint` | Запустить golangci-lint |
+| Command | Description |
+|---------|-------------|
+| `make run-all` | **Start everything** — Telegram + MCP + worker |
+| `make db-up` | Start Postgres in Docker |
+| `make migrate-up` | Apply SQL migrations |
+| `make migrate-down` | Rollback last migration |
+| `make run-mcp` | MCP SSE server only on :8080 |
+| `make run-diff` | Git diff → code review agent |
+| `make lint` | Run golangci-lint |
+
+---
+
+## Stack
+
+Go · PostgreSQL · pgvector · Docker · GitHub Actions · OpenAI API · Ollama · DeepSeek · Gemini · goose · slog
