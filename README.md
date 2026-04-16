@@ -1,6 +1,35 @@
-# simpleAI
+# simpleAI — Open Source MCP Gateway
 
-Personal AI agent running in production. Telegram interface + MCP server gateway for external agents (Claude Code, etc.). Built with Go.
+> **Multi-model MCP gateway for personal AI agents.**  
+> Route tasks across DeepSeek, Gemini, and Claude via standard Model Context Protocol.  
+> Built in Go. Self-hosted. Production-ready.
+
+[![MCP](https://img.shields.io/badge/MCP-SSE%20%3A8080-7c6af7)](https://modelcontextprotocol.io)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8)](https://go.dev)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+**[mcpgate.org](https://mcpgate.org)** · [Quick Start](#setup) · [Adding Skills](#adding-a-new-skill)
+
+---
+
+## What is this?
+
+An open-source MCP (Model Context Protocol) gateway that exposes personal AI agent tools to any MCP-compatible client (Claude Code, etc.).
+
+**Multi-model routing:**
+- **DeepSeek** — commodity tasks (budget tracking, search)
+- **Gemini** — fallback
+- **Claude** — agentic planning, reasoning-heavy workflows, MCP tool calls
+
+Connect once via SSE, get access to all skills:
+
+```json
+{
+  "mcpServers": {
+    "simpleai": { "type": "http", "url": "http://your-host:8080/sse" }
+  }
+}
+```
 
 ---
 
@@ -15,7 +44,7 @@ User
  │        ↓
  │    agent.Service  ←── plugin.Registry ──┬── RAGSearchSkill
  │        ↓                                ├── BudgetSkill
- │    LLM (OpenAI/Ollama/DeepSeek)         └── ...more skills
+ │    LLM (DeepSeek primary, Gemini fallback, Claude for agentic)
  │
  └─── Claude Code / external agent
           ↓ HTTP/SSE :8080
@@ -25,18 +54,19 @@ User
 ```
 
 **Key design:** `plugin.Registry` is the single source of truth for available tools.  
-Both entry points (Telegram and MCP) use the same registry.
+Both entry points (Telegram and MCP) use the same registry — add a skill once, available everywhere.
 
 ---
 
 ## Features
 
+- **MCP server** — HTTP/SSE gateway on `:8080` for Claude Code and other MCP clients
+- **Multi-model routing** — DeepSeek → Gemini → Claude pipeline
 - **Budget tracker** — expenses, income, goals, debts, multi-currency
 - **Expense forecasting** — category-level forecast with trend analysis
 - **Recurring payments** — auto-transactions on schedule with notifications
 - **RAG search** — knowledge base search over documents via pgvector
 - **Mail digest** — Gmail/IMAP integration
-- **MCP server** — HTTP/SSE gateway on `:8080` for Claude Code and other agents
 - **Daily reminders** — configurable by time and timezone
 - **CI/CD** — GitHub Actions → SSH → Docker Compose → systemd (~2 min deploy)
 
@@ -204,4 +234,4 @@ LOG_FORMAT=text       # text | json
 
 ## Stack
 
-Go · PostgreSQL · pgvector · Docker · GitHub Actions · OpenAI API · Ollama · DeepSeek · Gemini · goose · slog
+Go · PostgreSQL · pgvector · Docker · GitHub Actions · DeepSeek · Gemini · Claude (Bedrock) · goose · slog
