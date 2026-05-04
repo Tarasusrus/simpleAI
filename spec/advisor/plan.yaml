@@ -1,0 +1,266 @@
+plan:
+  name: "Financial Advisor Skill"
+  description: >
+    Add advisor skill to simpleAI Go service. Auto-routed via LLM,
+    builds financial snapshot from existing budget tables, returns
+    structured purchase advice (verdict + key numbers + reasoning) in THB.
+  phases:
+
+    - id: phase-1
+      name: "Domain model + snapshot SQL"
+      description: >
+        Add AdvisorSnapshot type and Store.GetAdvisorSnapshot in budget package.
+        One SQL CTE for transactions/debt/recurring; forecast fetched separately.
+      tasks:
+        - id: task-1.1
+          name: "Define AdvisorSnapshot struct"
+          description: >
+            Add AdvisorSnapshot type to internal/budget/model.go next to CategoryForecast.
+            Fields: BalanceMTD, SpentByCategory map[string]float64, ForecastRemaining,
+            UpcomingRecurring, ActiveDebtDue, FreeCash (all THB float64), TxCount int,
+            LowData bool (computed: TxCount < MinTxForConfidence).
+          artifact: "internal/budget/model.go"
+          depends_on: []
+          validation: "go build ./... passes; struct exported, all fields documented"
+
+        - id: task-1.2
+          name: "Add MinTxForConfidence constant"
+          description: >
+            Add `const MinTxForConfidence = 5` in internal/budget package
+            or internal/skills (whichever owns the threshold). Recommend skills package.
+          artifact: "internal/skills/advisor_skill.go (const) — file may be created by 1.1"
+          depends_on: []
+          validation: "constant defined and used in subsequent tasks"
+
+        - id: task-1.3
+          name: "Implement Store.GetAdvisorSnapshot"
+          description: >
+            Add method GetAdvisorSnapshot(ctx, chatID int64, today time.Time, rates map[string]float64)
+            (*AdvisorSnapshot, error) to internal/budget/store.go.
+            One SQL CTE that joins:
+              - budget_transaction (global, MTD)
+              - budget_debt (global, status='active', direction='owe', due_date <= end_of_month)
+              - budget_recurring (chat_id=$, enabled, next_date <= end_of_month)
+            Convert all amounts: currency -> RUB (rate_to_rub) -> THB (1 / rate_to_rub for THB).
+            Return populated snapshot WITHOUT ForecastRemaining (filled by skill).
+            Skip records with missing rates, log slog.Warn.
+            Return error if THB rate missing.
+            Comment in SQL explicitly: which CTEs are global vs chat-scoped.
+          artifact: "internal/budget/store.go"
+          depends_on: ["task-1.1"]
+          validation: "compiles; one round-trip via sql-spy or query log"
+
+        - id: task-1.4
+          name: "Unit test GetAdvisorSnapshot"
+          description: >
+            Use existing testcontainers/Postgres infra if present in internal/budget tests;
+            otherwise use minimal in-memory pgx mock for SQL contract.
+            Cover: happy path, empty recurring, empty debt, no THB rate (error),
+            currency without rate (skipped, warn), low-data (TxCount < 5).
+          artifact: "internal/budget/store_test.go (extension)"
+          depends_on: ["task-1.3"]
+          validation: "go test ./internal/budget passes"
+
+      checkpoint:
+        description: "Snapshot layer complete and verified independently"
+        criteria:
+          - "AdvisorSnapshot fields match constraints §3 / requirements FR-2 / FR-3"
+          - "SQL CTE hits DB exactly once per call"
+          - "All currency conversions go via rate_to_rub pivot"
+          - "Missing-rate behavior matches constraints §6 (THB error vs warn-skip)"
+
+    - id: phase-2
+      name: "Advisor skill scaffold"
+      description: "AdvisorSkill struct, Manifest, Run signature, registration."
+      tasks:
+        - id: task-2.1
+          name: "Create AdvisorSkill struct + constructor"
+          description: >
+            New file internal/skills/advisor_skill.go with type AdvisorSkill struct holding
+            store *budget.Store, llm llm.Client, logger *slog.Logger.
+            Constructor: NewAdvisorSkill(store, llm, logger). Fields lowercase, injected.
+          artifact: "internal/skills/advisor_skill.go"
+          depends_on: ["task-1.1"]
+          validation: "go vet passes; struct + constructor exposed"
+
+        - id: task-2.2
+          name: "Implement Manifest()"
+          description: >
+            Manifest with Name='advisor', Description matching constraints §4:
+              - positive: 'Use when user asks for advice about a potential purchase,
+                prioritization between expenses, affordability check.'
+              - negative: 'Do NOT use for recording, listing or summarizing transactions —
+                use budget skill for those.'
+            Schema: action='advice', payload {question:string, amount?:number, currency?:string}.
+          artifact: "internal/skills/advisor_skill.go (Manifest method)"
+          depends_on: ["task-2.1"]
+          validation: "manifest content asserted in unit test (task-4.2)"
+
+        - id: task-2.3
+          name: "Wire skill into cmd/app/main.go"
+          description: >
+            Register AdvisorSkill via plugin.Registry alongside BudgetSkill.
+            Inject store, llm client, logger from existing wiring.
+          artifact: "cmd/app/main.go"
+          depends_on: ["task-2.1"]
+          validation: "go build ./cmd/app passes; bot starts locally without panic"
+
+      checkpoint:
+        description: "Skill registered and routable but logic stubbed"
+        criteria:
+          - "Manifest description follows constraints §4"
+          - "Skill present in plugin.Registry list at startup"
+          - "No new external deps in go.mod"
+
+    - id: phase-3
+      name: "Prompt + LLM call + response formatting"
+      description: "Snapshot → prompt → LLM JSON → user-facing Markdown."
+      tasks:
+        - id: task-3.1
+          name: "Define prompt template"
+          description: >
+            Const advisorPromptTemplate in advisor_skill.go (or advisor_prompt.go).
+            Single template: takes question, amount, currency (optional), snapshot,
+            low_data flag. Output schema instruction: JSON
+            {verdict: 'Да'|'Нет'|'Условно', numbers: {free_cash_thb,
+            forecast_remaining_thb, obligations_thb}, explanation: string,
+            recommendation?: string}. Russian language for content.
+          artifact: "internal/skills/advisor_skill.go (const block)"
+          depends_on: ["task-2.1"]
+          validation: "prompt rendered against fixture snapshot in test (task-4.3)"
+
+        - id: task-3.2
+          name: "Implement Run()"
+          description: >
+            Run(ctx, payload):
+              1. Parse payload (question/amount/currency).
+              2. Get rates: store.GetExchangeRates(ctx). Fail fast if no THB.
+              3. If amount + currency != THB → convert to THB, store both for output.
+              4. Get snapshot: store.GetAdvisorSnapshot(ctx, chatID, time.Now(), rates).
+              5. Get forecast: store.GetForecastData(ctx, 0); compute ForecastRemaining
+                 in THB and set on snapshot.
+              6. Render prompt; call llm.Complete(ctx, prompt).
+              7. Parse JSON response. On parse error: friendly message + slog.Error.
+              8. Format Markdown output (Russian). Round THB to 0 decimals.
+              9. Log slog with skill='advisor', chat_id, question_len, verdict,
+                 free_cash_thb, duration_ms.
+          artifact: "internal/skills/advisor_skill.go (Run method)"
+          depends_on: ["task-1.3", "task-2.2", "task-3.1"]
+          validation: "go vet passes; integration smoke (task-4.4) passes"
+
+        - id: task-3.3
+          name: "Format helper for user output"
+          description: >
+            Pure function formatAdvisorReply(parsed, originalAmount, originalCurrency) string.
+            Sections: verdict (bold), key numbers (3 lines), explanation, optional recommendation.
+            If originalCurrency != THB: show both amounts.
+          artifact: "internal/skills/advisor_skill.go (helper)"
+          depends_on: ["task-3.2"]
+          validation: "table-driven unit test (task-4.5) green"
+
+      checkpoint:
+        description: "End-to-end advisor logic in place behind mocked LLM"
+        criteria:
+          - "Manual smoke: 'можем купить велосипед за 25000?' returns valid Markdown"
+          - "Manual smoke RUB: 'можем купить за 50000 руб?' shows both currencies"
+          - "Latency under 4s on local data sample"
+
+    - id: phase-4
+      name: "Tests"
+      description: "Unit + smoke coverage for skill behavior."
+      tasks:
+        - id: task-4.1
+          name: "Routing/manifest content test"
+          description: >
+            Assert AdvisorSkill.Manifest().Description contains:
+              - positive trigger phrase ('purchase', 'afford', 'prioritization')
+              - negative phrase ('Do NOT use ... budget skill')
+            (No real LLM — manifest sanity only.)
+          artifact: "internal/skills/advisor_skill_test.go"
+          depends_on: ["task-2.2"]
+          validation: "go test ./internal/skills passes"
+
+        - id: task-4.2
+          name: "Prompt rendering test"
+          description: >
+            Table-driven: snapshot fixture × question → assert key fields embedded
+            in rendered prompt; assert low_data=true variant.
+          artifact: "internal/skills/advisor_skill_test.go"
+          depends_on: ["task-3.1"]
+          validation: "go test green"
+
+        - id: task-4.3
+          name: "LLM JSON parsing test"
+          description: >
+            Table-driven: valid JSON, invalid JSON, missing fields, wrong verdict —
+            assert friendly fallback + slog.Error.
+          artifact: "internal/skills/advisor_skill_test.go"
+          depends_on: ["task-3.2"]
+          validation: "go test green; covers AC-E4"
+
+        - id: task-4.4
+          name: "Run() integration test with mocks"
+          description: >
+            Mock store + mock llm. Provide canned snapshot + canned LLM JSON.
+            Assert final Markdown matches expected for: happy path, low_data, RUB question,
+            missing THB rate (error), missing currency rate (warn skip).
+          artifact: "internal/skills/advisor_skill_test.go"
+          depends_on: ["task-3.2", "task-3.3"]
+          validation: "go test green; covers AC-D1..D5, AC-E1..E5"
+
+        - id: task-4.5
+          name: "Format helper unit test"
+          description: "Unit-test formatAdvisorReply per branch."
+          artifact: "internal/skills/advisor_skill_test.go"
+          depends_on: ["task-3.3"]
+          validation: "go test green"
+
+      checkpoint:
+        description: "Test suite green; ACs covered by at least one test each"
+        criteria:
+          - "go test ./... passes"
+          - "AC traceability: every AC except A1/A2/I1 mapped to a test"
+          - "A1/A2 — manual verification on dev (manifest test only)"
+          - "I1 — design goal, not in CI"
+
+    - id: phase-5
+      name: "Manual verification + ship"
+      description: "Local + dev-stand validation; merge to main."
+      tasks:
+        - id: task-5.1
+          name: "Local smoke run"
+          description: >
+            docker compose up -d && go run ./cmd/app.
+            Send via Telegram (or test chat): 4 questions covering happy/low_data/RUB/edge.
+            Verify slog output, response format, latency.
+          artifact: "screenshot or transcript in beads notes"
+          depends_on: ["task-4.4"]
+          validation: "All 4 scenarios produce valid Markdown advice"
+
+        - id: task-5.2
+          name: "/review pass"
+          description: "Run /review on the branch. Resolve findings until PASS."
+          artifact: "/review verdict = PASS"
+          depends_on: ["task-5.1"]
+          validation: "review output 'PASS'"
+
+        - id: task-5.3
+          name: "Commit + PR"
+          description: "Conventional Commits format: feat(advisor): financial advisor skill."
+          artifact: "PR opened against main"
+          depends_on: ["task-5.2"]
+          validation: "CI green; PR ready for merge"
+
+      checkpoint:
+        description: "Feature ready to merge"
+        criteria:
+          - "/review = PASS"
+          - "CI green"
+          - "Manual smoke recorded in bd notes"
+          - "User approval before merge"
+
+  notes:
+    - "Issue #43 (RAG advisor) — out of scope this iteration"
+    - "Latency SLO 4s p95 — design goal, no CI gate"
+    - "Multi-instance (per-chat budget separation) — out of scope; depends on schema change for budget_transaction/debt"
+    - "Architect review (per global CLAUDE.md) required before bd create — feature touches /skills and /budget store, > 20 LOC"
