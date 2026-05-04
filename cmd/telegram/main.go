@@ -48,6 +48,10 @@ func main() {
 	if err := adapter.SetCommands(context.Background(), []telegramadapter.Command{
 		{Command: "start", Description: "Приветствие и краткая справка"},
 		{Command: "help", Description: "Список доступных команд"},
+		{Command: "budget", Description: "💰 Бюджет: расходы, доходы, цели, долги"},
+		{Command: "recurring", Description: "🔄 Регулярные платежи"},
+		{Command: "forecast", Description: "🔮 Прогноз трат на следующий месяц"},
+		{Command: "reminders", Description: "🔔 Напоминания о внесении трат"},
 	}); err != nil {
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
@@ -68,6 +72,10 @@ func main() {
 	router.Use(telegram.RateLimit(cfg.Telegram.RateLimit))
 	router.HandleCommand("start", telegram.HandleStart)
 	router.HandleCommand("help", telegram.HandleHelp)
+	router.HandleCommand("budget", telegram.HandleBudget)
+	router.HandleCommand("recurring", telegram.HandleRecurring)
+	router.HandleCommand("forecast", telegram.HandleForecast)
+	router.HandleCommand("reminders", telegram.HandleReminders)
 	router.HandleDefault(telegram.HandleDefault)
 
 	updates, err := adapter.Updates(context.Background())

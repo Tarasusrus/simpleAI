@@ -30,6 +30,22 @@ func HandleHelp(ctx context.Context, tctx *Context) error {
 	return tctx.Reply(constants.MsgTelegramHelp)
 }
 
+func HandleBudget(ctx context.Context, tctx *Context) error {
+	return tctx.Reply(constants.MsgHelpBudget)
+}
+
+func HandleRecurring(ctx context.Context, tctx *Context) error {
+	return tctx.Reply(constants.MsgHelpRecurring)
+}
+
+func HandleForecast(ctx context.Context, tctx *Context) error {
+	return tctx.Reply(constants.MsgHelpForecast)
+}
+
+func HandleReminders(ctx context.Context, tctx *Context) error {
+	return tctx.Reply(constants.MsgHelpReminders)
+}
+
 func HandleDefault(ctx context.Context, tctx *Context) error {
 	incoming, ok := FromUpdate(tctx.Update)
 	if !ok {
