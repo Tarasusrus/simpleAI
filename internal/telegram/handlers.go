@@ -13,21 +13,23 @@ func HandleStart(ctx context.Context, tctx *Context) error {
 	return tctx.Reply(constants.MsgTelegramStart)
 }
 
-func HandleHelp(ctx context.Context, tctx *Context) error {
-	parts := strings.Fields(strings.TrimSpace(tctx.Update.Text))
-	if len(parts) >= 2 {
-		switch strings.ToLower(parts[1]) {
-		case "budget", "бюджет":
-			return tctx.Reply(constants.MsgHelpBudget)
-		case "recurring", "регулярные":
-			return tctx.Reply(constants.MsgHelpRecurring)
-		case "forecast", "прогноз":
-			return tctx.Reply(constants.MsgHelpForecast)
-		case "reminders", "reminder", "напоминания":
-			return tctx.Reply(constants.MsgHelpReminders)
+func NewHandleHelp(generalHelp string) Handler {
+	return func(ctx context.Context, tctx *Context) error {
+		parts := strings.Fields(strings.TrimSpace(tctx.Update.Text))
+		if len(parts) >= 2 {
+			switch strings.ToLower(parts[1]) {
+			case "budget", "бюджет":
+				return tctx.Reply(constants.MsgHelpBudget)
+			case "recurring", "регулярные":
+				return tctx.Reply(constants.MsgHelpRecurring)
+			case "forecast", "прогноз":
+				return tctx.Reply(constants.MsgHelpForecast)
+			case "reminders", "reminder", "напоминания":
+				return tctx.Reply(constants.MsgHelpReminders)
+			}
 		}
+		return tctx.Reply(generalHelp)
 	}
-	return tctx.Reply(constants.MsgTelegramHelp)
 }
 
 func HandleBudget(ctx context.Context, tctx *Context) error {

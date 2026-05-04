@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -152,14 +153,15 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 	if err != nil {
 		return err
 	}
-	if err := adapter.SetCommands(ctx, []telegramadapter.Command{
+	botCommands := []telegramadapter.Command{
 		{Command: "start", Description: "Приветствие и краткая справка"},
 		{Command: "help", Description: "Список доступных команд"},
 		{Command: "budget", Description: "💰 Бюджет: расходы, доходы, цели, долги"},
 		{Command: "recurring", Description: "🔄 Регулярные платежи"},
 		{Command: "forecast", Description: "🔮 Прогноз трат на следующий месяц"},
 		{Command: "reminders", Description: "🔔 Напоминания о внесении трат"},
-	}); err != nil {
+	}
+	if err := adapter.SetCommands(ctx, botCommands); err != nil {
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
 
@@ -172,7 +174,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 	router.Use(telegram.LogDuration())
 	router.Use(telegram.RateLimit(cfg.Telegram.RateLimit))
 	router.HandleCommand("start", telegram.HandleStart)
-	router.HandleCommand("help", telegram.HandleHelp)
+	router.HandleCommand("help", telegram.NewHandleHelp(buildHelpText(botCommands)))
 	router.HandleCommand("budget", telegram.HandleBudget)
 	router.HandleCommand("recurring", telegram.HandleRecurring)
 	router.HandleCommand("forecast", telegram.HandleForecast)
@@ -284,6 +286,22 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 
 	logger.Info("registry ready", "skills", len(registry.List()))
 	return registry
+}
+
+func buildHelpText(commands []telegramadapter.Command) string {
+	var b strings.Builder
+	b.WriteString("Что умею:\n")
+	for _, cmd := range commands {
+		if cmd.Command == "start" || cmd.Command == "help" {
+			continue
+		}
+		b.WriteString("\n")
+		b.WriteString(cmd.Description)
+		b.WriteString(" — /")
+		b.WriteString(cmd.Command)
+	}
+	b.WriteString("\n\nИли просто пиши своими словами.")
+	return b.String()
 }
 
 func mapAccounts(accounts []config.MailAccount) []mail.Account {
