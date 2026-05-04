@@ -153,8 +153,12 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		return err
 	}
 	if err := adapter.SetCommands(ctx, []telegramadapter.Command{
-		{Command: "start", Description: "Приветствие"},
-		{Command: "help", Description: "Что умею и доступные возможности"},
+		{Command: "start", Description: "Приветствие и краткая справка"},
+		{Command: "help", Description: "Список доступных команд"},
+		{Command: "budget", Description: "💰 Бюджет: расходы, доходы, цели, долги"},
+		{Command: "recurring", Description: "🔄 Регулярные платежи"},
+		{Command: "forecast", Description: "🔮 Прогноз трат на следующий месяц"},
+		{Command: "reminders", Description: "🔔 Напоминания о внесении трат"},
 	}); err != nil {
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
@@ -169,6 +173,10 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 	router.Use(telegram.RateLimit(cfg.Telegram.RateLimit))
 	router.HandleCommand("start", telegram.HandleStart)
 	router.HandleCommand("help", telegram.HandleHelp)
+	router.HandleCommand("budget", telegram.HandleBudget)
+	router.HandleCommand("recurring", telegram.HandleRecurring)
+	router.HandleCommand("forecast", telegram.HandleForecast)
+	router.HandleCommand("reminders", telegram.HandleReminders)
 	router.HandleDefault(telegram.HandleDefault)
 
 	updates, err := adapter.Updates(ctx)
