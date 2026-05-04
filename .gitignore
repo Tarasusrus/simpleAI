@@ -16,3 +16,6 @@ data/
 # Beads lock-файлы
 .beads/*.lock
 .beads/.migration-hint-ts
+
+# rapid: оставлять минимизированные fail-кейсы только если намеренно сохраняем как corpus
+internal/**/testdata/rapid/

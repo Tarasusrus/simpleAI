@@ -3,6 +3,7 @@ package budget
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -779,4 +780,157 @@ func (s *Store) SaveExchangeRate(ctx context.Context, currency string, rateToRUB
 		return fmt.Errorf("save exchange rate: %w", err)
 	}
 	return nil
+}
+
+// --- Advisor snapshot (ADR-002) ---
+
+// advisorRow — сырая строка из advisor snapshot CTE.
+type advisorRow struct {
+	Kind     string  // "tx" | "debt" | "recurring"
+	Subtype  string  // "income" | "expense" | "" (debt)
+	Currency string  // ISO 4217
+	Category string  // имя категории (только для tx)
+	Total    float64 // сумма в исходной валюте
+	Cnt      int     // число агрегированных записей
+}
+
+// advisorSnapshotQuery — единственный CTE собирающий MTD-транзакции, активные долги
+// с due_date <= конец месяца, и enabled recurring с next_date <= конец месяца.
+//
+// Асимметрия chat_id (constraints §2):
+//   - budget_transaction и budget_debt — глобальные (нет колонки chat_id)
+//   - budget_recurring — фильтруется по chat_id = $2
+const advisorSnapshotQuery = `
+WITH params AS (
+    SELECT
+        date_trunc('month', $1::date)::date AS month_start,
+        (date_trunc('month', $1::date) + interval '1 month - 1 day')::date AS month_end
+),
+tx_agg AS (
+    SELECT
+        'tx'::text                          AS kind,
+        t.type                              AS subtype,
+        t.currency                          AS currency,
+        COALESCE(c.name, 'Прочее')          AS category,
+        SUM(t.amount)::float8               AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_transaction t
+    LEFT JOIN budget_category c ON c.id = t.category_id
+    CROSS JOIN params p
+    WHERE t.transaction_date >= p.month_start
+      AND t.transaction_date <= p.month_end
+    GROUP BY t.type, t.currency, COALESCE(c.name, 'Прочее')
+),
+debt_agg AS (
+    SELECT
+        'debt'::text                        AS kind,
+        ''::text                            AS subtype,
+        'RUB'::text                         AS currency,
+        ''::text                            AS category,
+        COALESCE(SUM(d.total_amount - d.paid_amount), 0)::float8 AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_debt d
+    CROSS JOIN params p
+    WHERE d.status = 'active'
+      AND d.direction = 'owe'
+      AND d.due_date IS NOT NULL
+      AND d.due_date <= p.month_end
+),
+recurring_agg AS (
+    SELECT
+        'recurring'::text                   AS kind,
+        r.type                              AS subtype,
+        r.currency                          AS currency,
+        ''::text                            AS category,
+        SUM(r.amount)::float8               AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_recurring r
+    CROSS JOIN params p
+    WHERE r.chat_id = $2
+      AND r.enabled = true
+      AND r.next_date <= p.month_end
+    GROUP BY r.type, r.currency
+)
+SELECT kind, subtype, currency, category, total, cnt FROM tx_agg
+UNION ALL
+SELECT kind, subtype, currency, category, total, cnt FROM debt_agg WHERE cnt > 0
+UNION ALL
+SELECT kind, subtype, currency, category, total, cnt FROM recurring_agg
+`
+
+// GetAdvisorSnapshot собирает финансовый снимок для AdvisorSkill одним SQL CTE.
+// Все суммы конвертируются в THB через rates (map[currency]rate_to_rub).
+//
+//   - $1: today (определяет границы месяца)
+//   - $2: chat_id (фильтр для budget_recurring; budget_transaction и budget_debt — глобальные)
+//   - rates: map currency → rate_to_rub. Должна содержать "THB", иначе ошибка.
+//
+// ForecastRemaining не заполняется — это делает skill отдельным вызовом GetForecastData.
+func (s *Store) GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, rates map[string]float64) (*AdvisorSnapshot, error) {
+	rows, err := s.pool.Query(ctx, advisorSnapshotQuery, today, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("advisor snapshot query: %w", err)
+	}
+	defer rows.Close()
+
+	var collected []advisorRow
+	for rows.Next() {
+		var r advisorRow
+		if err := rows.Scan(&r.Kind, &r.Subtype, &r.Currency, &r.Category, &r.Total, &r.Cnt); err != nil {
+			return nil, fmt.Errorf("scan advisor row: %w", err)
+		}
+		collected = append(collected, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("advisor rows: %w", err)
+	}
+	return aggregateAdvisorSnapshot(collected, rates)
+}
+
+// aggregateAdvisorSnapshot — чистая агрегация: rows → AdvisorSnapshot в THB.
+//
+// Конверсия: amount * rates[currency] / rates["THB"].
+// Отсутствие THB-курса — ошибка. Отсутствие курса для отдельной валюты —
+// запись пропускается со slog.Warn.
+func aggregateAdvisorSnapshot(rows []advisorRow, rates map[string]float64) (*AdvisorSnapshot, error) {
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return nil, fmt.Errorf("advisor snapshot: THB exchange rate missing")
+	}
+
+	snap := &AdvisorSnapshot{SpentByCategory: map[string]float64{}}
+	var income, expense float64
+
+	for _, r := range rows {
+		rubRate, hasRate := rates[r.Currency]
+		if !hasRate || rubRate == 0 {
+			slog.Warn("advisor snapshot: skipping row, no exchange rate",
+				"currency", r.Currency, "kind", r.Kind, "amount", r.Total)
+			continue
+		}
+		thb := r.Total * rubRate / thbRate
+
+		switch r.Kind {
+		case "tx":
+			if r.Subtype == "income" {
+				income += thb
+			} else {
+				expense += thb
+				snap.SpentByCategory[r.Category] += thb
+			}
+			snap.TxCount += r.Cnt
+		case "debt":
+			snap.ActiveDebtDue += thb
+		case "recurring":
+			if r.Subtype == "expense" {
+				snap.UpcomingRecurring += thb
+			}
+		}
+	}
+
+	snap.BalanceMTD = income - expense
+	snap.FreeCash = snap.BalanceMTD - snap.UpcomingRecurring - snap.ActiveDebtDue
+	snap.LowData = snap.TxCount < MinTxForConfidence
+
+	return snap, nil
 }

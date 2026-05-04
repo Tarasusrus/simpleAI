@@ -114,6 +114,27 @@ type CategoryForecast struct {
 	HasTrend        bool    // false если данных только за 1 месяц
 }
 
+// MinTxForConfidence — минимум транзакций в текущем месяце для уверенного прогноза.
+// Меньше — AdvisorSnapshot.LowData = true, AdvisorSkill отдаёт verdict='Условно'.
+const MinTxForConfidence = 5
+
+// AdvisorSnapshot — финансовый снимок для AdvisorSkill (ADR-002).
+//
+// Все суммы в THB. Собирается одним SQL CTE из budget_transaction (global, MTD),
+// budget_debt (global, status='active', direction='owe'), budget_recurring
+// (chat-scoped, enabled). ForecastRemaining заполняется skill'ом отдельным
+// вызовом Store.GetForecastData (не входит в CTE).
+type AdvisorSnapshot struct {
+	BalanceMTD        float64            // доходы − расходы текущего месяца, THB
+	SpentByCategory   map[string]float64 // расходы MTD по категориям, THB
+	ForecastRemaining float64            // прогнозный остаток до конца месяца, THB (заполняется skill'ом)
+	UpcomingRecurring float64            // сумма enabled recurring с next_date <= конец месяца, THB
+	ActiveDebtDue     float64            // активные долги (owe) с due_date <= конец месяца, THB
+	FreeCash          float64            // BalanceMTD − UpcomingRecurring − ActiveDebtDue, THB
+	TxCount           int                // число транзакций в текущем месяце
+	LowData           bool               // TxCount < MinTxForConfidence (порог в пакете skills)
+}
+
 // RecurringPayment — повторяющийся платёж, создающий транзакцию автоматически по расписанию.
 type RecurringPayment struct {
 	ID              uuid.UUID

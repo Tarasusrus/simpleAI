@@ -284,6 +284,11 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 		logger.Error("failed to register budget skill", "err", err)
 	}
 
+	advisorSkill := skills.NewAdvisorSkill(budgetStore, llmClient, logger)
+	if err := registry.Register(advisorSkill); err != nil {
+		logger.Error("failed to register advisor skill", "err", err)
+	}
+
 	logger.Info("registry ready", "skills", len(registry.List()))
 	return registry
 }
