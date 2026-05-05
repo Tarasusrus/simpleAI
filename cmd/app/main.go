@@ -29,6 +29,7 @@ import (
 	"simpleAI/internal/mail"
 	mcpserver "simpleAI/internal/mcp"
 	"simpleAI/internal/notify"
+	"simpleAI/internal/observability"
 	"simpleAI/internal/plugin"
 	"simpleAI/internal/rag"
 	"simpleAI/internal/rates"
@@ -72,11 +73,19 @@ func main() {
 
 	tracer := trace.NewStore(pool)
 
+	obsTracer := observability.NewTracer(
+		os.Getenv("LANGFUSE_HOST"),
+		os.Getenv("LANGFUSE_PUBLIC_KEY"),
+		os.Getenv("LANGFUSE_SECRET_KEY"),
+		logger,
+	)
+	defer obsTracer.Close()
+
 	// --- Telegram бот ---
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer); err != nil {
+		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -138,7 +147,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store) error {
+func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -165,7 +174,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
 
-	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer).WithLogger(logger)
+	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer).WithObservability(obsTracer).WithLogger(logger)
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))
