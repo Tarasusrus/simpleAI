@@ -52,15 +52,58 @@ docker compose down -v         # снести данные (postgres/clickhouse/
 
 ## Использование из агента
 
+### 1. Включить трейсинг
+
 В корневом `.env` simpleAI задай:
 
 ```
 LANGFUSE_HOST=http://localhost:3001
 LANGFUSE_PUBLIC_KEY=pk-lf-rag-mm-dr-local
-LANGFUSE_SECRET_KEY=sk-lf-rag-mm-dr-local-...
+LANGFUSE_SECRET_KEY=<сикрет из deploy/langfuse/.env, поле LANGFUSE_INIT_PROJECT_SECRET_KEY>
 ```
 
-Инструментация — задача `simpleAI-8h8` (разблокируется после закрытия `simpleAI-0ya`).
+Если хотя бы одна переменная пустая — `observability.NewTracer` вернёт `nil`, агент работает как раньше без трейсинга (no-op).
+
+Запуск приложения как обычно:
+```bash
+go run ./cmd/app
+```
+
+В логах при старте: `langfuse tracer started host=http://localhost:3001`.
+
+### 2. Смотреть трейсы
+
+UI: http://localhost:3001/project/rag-mm/traces
+
+Каждый запрос пользователя в Telegram → один **trace** с именем `agent.run` (или `agent.ask` если skills отключены). Внутри trace:
+- `llm.iterN` — generation (LLM-вызов на итерации N), показывает input/output
+- `tool.<имя>` — span (вызов скилла), показывает input/output и latency
+- `llm.final` — generation последнего ответа, если превышен лимит итераций
+
+В trace проставлены `userId` (chat_id Telegram) и `sessionId` (uuid этого запроса) — можно фильтровать по пользователю.
+
+### 3. Что под капотом
+
+Файл `internal/observability/langfuse.go` — async HTTP-клиент Langfuse Ingestion API:
+- События буферизуются в канал (1024 шт)
+- Фоновая горутина шлёт батчи раз в 2 сек или по достижении 100 событий
+- На переполнении буфера — событие дропается с `WARN` в лог, агент не блокируется
+- При остановке (`Close()`) — буфер дренируется и шлётся последним батчем
+
+Точки инструментации в `internal/agent/service.go`:
+- `obs.StartTrace(...)` в начале `AskWithMeta` + `defer obsTrace.End(...)` в конце
+- `obsTrace.StartGeneration(...)` вокруг каждого `client.AskWithSystem(...)`
+- `obsTrace.StartSpan("tool."+name, input)` вокруг каждого `runSkill(...)`
+
+### 4. Отключить трейсинг
+
+Убери `LANGFUSE_HOST` (или `_KEY`) из `.env` — `NewTracer` вернёт nil, инструментация выключится без перекомпиляции.
+
+### 5. Известные ограничения
+
+- `model` поле в generation сейчас пустое → Langfuse не считает стоимость. TODO: пробрасывать имя модели из LLM-клиента.
+- `usage` (токены) не шлётся — нужен SDK который их возвращает (DeepSeek/OpenAI клиенты их в `core.LLM` сейчас не отдают).
+- Большие input/output не усекаются — отправляются целиком.
 
 ## Порт-карта (чтобы не конфликтовать)
 

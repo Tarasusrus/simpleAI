@@ -214,7 +214,22 @@ TELEGRAM_WORKERS=4
 SYS_PROMPT=You are a helpful assistant...
 LOG_LEVEL=info        # debug | info | warn | error
 LOG_FORMAT=text       # text | json
+
+# Observability (Langfuse, optional — leave empty to disable)
+LANGFUSE_HOST=http://localhost:3001
+LANGFUSE_PUBLIC_KEY=pk-lf-rag-mm-dr-local
+LANGFUSE_SECRET_KEY=sk-lf-...
 ```
+
+---
+
+## Observability (Langfuse)
+
+Self-hosted Langfuse поднимается отдельным compose в `deploy/langfuse/`. После запуска агент шлёт трейсы (trace на запрос → generation на каждый LLM-вызов → span на каждый tool call) в http://localhost:3001/project/rag-mm/traces.
+
+Подробности: [deploy/langfuse/README.md](deploy/langfuse/README.md).
+
+Если переменные `LANGFUSE_*` не заданы — трейсинг просто отключается, агент работает как раньше.
 
 ---
 
