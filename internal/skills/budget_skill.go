@@ -31,7 +31,9 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
 		ID:          "budget",
 		Name:        "Budget Tracker",
-		Description: "Personal finance management: record expenses and income, get spending summaries, manage savings goals, debts, and recurring payments. Use this tool when the user talks about spending, money, budget, savings, or debts.",
+		Description: "Personal finance TRACKER: record COMPLETED expenses/income (past tense: 'купил', 'потратил', 'заплатил', 'получил'), get spending summaries, manage savings goals, debts, and recurring payments. " +
+			"Use when user RECORDS a transaction or asks to SHOW data (summary, list, forecast, debt status). " +
+			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those.",
 		Version:     "1.0.0",
 		InputSchema: &plugin.Schema{
 			Name:    "BudgetInput",

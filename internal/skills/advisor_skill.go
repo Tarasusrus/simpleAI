@@ -53,10 +53,14 @@ func (s *AdvisorSkill) Manifest() plugin.Manifest {
 		ID:      "advisor",
 		Name:    "Financial Advisor",
 		Version: "1.0.0",
-		Description: "Financial advisor for purchase decisions and expense prioritization. " +
-			"Use when user asks for advice about a potential purchase, prioritization between expenses, affordability check " +
-			"(e.g. 'can we afford X?', 'should I buy this now?', 'what is more important right now?', 'do we have enough money for X?'). " +
-			"Do NOT use for recording, listing or summarizing transactions — use budget skill for those.",
+		Description: "Financial advisor for purchase decisions, affordability checks and expense prioritization. " +
+			"Use when user is CONSIDERING or PLANNING a purchase / asks whether they CAN afford something / asks what is more important. " +
+			"Triggers in English: 'can we afford X?', 'should I buy this now?', 'do we have enough money for X?', 'is it worth buying?', 'what should I prioritize?'. " +
+			"Triggers in Russian (примеры — выбирай advisor для ЛЮБЫХ обсуждений будущей покупки, даже без конкретной суммы): " +
+			"«планирую купить ...», «хочу купить ...», «думаю купить ...», «стоит ли покупать ...», «можем ли мы купить ...», " +
+			"«хватит ли денег на ...», «потянем ли ...», «что приоритетнее ...», «что важнее купить ...». " +
+			"Do NOT use this skill for RECORDING a completed purchase (use budget.add_expense — that is past tense: 'купил', 'потратил', 'заплатил'). " +
+			"Do NOT use for listing or summarizing transactions — use budget skill for those.",
 		InputSchema: &plugin.Schema{
 			Name:    "AdvisorInput",
 			Version: "1.0.0",
