@@ -312,6 +312,38 @@ func TestBuildToolsSystemPrompt_MentionsArraySyntax(t *testing.T) {
 	}
 }
 
+// --- Тест routing rules в system prompt ---
+
+func TestBuildToolsSystemPrompt_ContainsRoutingRules(t *testing.T) {
+	manifests := []plugin.Manifest{
+		{ID: "budget", Description: "budget tracker"},
+		{ID: "advisor", Description: "advisor"},
+	}
+	prompt := buildToolsSystemPrompt(manifests)
+
+	mustContain := []string{
+		"ROUTING RULES",
+		"хочу купить",
+		"планирую купить",
+		"стоит ли",
+		"advisor",
+		"add_expense",
+		"прошедшем времени",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(prompt, s) {
+			t.Errorf("system prompt missing routing marker %q", s)
+		}
+	}
+
+	// ROUTING RULES должны идти ДО списка инструментов — приоритет позиции.
+	rulesIdx := strings.Index(prompt, "ROUTING RULES")
+	toolsIdx := strings.Index(prompt, "Доступные инструменты")
+	if rulesIdx == -1 || toolsIdx == -1 || rulesIdx > toolsIdx {
+		t.Errorf("ROUTING RULES must precede tool list (rules=%d, tools=%d)", rulesIdx, toolsIdx)
+	}
+}
+
 // --- Тест контекста ---
 
 func TestAsk_ContextCancelled_ReturnsError(t *testing.T) {

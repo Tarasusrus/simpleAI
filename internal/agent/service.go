@@ -268,6 +268,10 @@ func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	sb.WriteString("У тебя есть доступ к инструментам. Если нужно вызвать инструмент — ответь ТОЛЬКО валидным JSON без markdown и пояснений.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
 	sb.WriteString("Несколько вызовов за раз: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
+	sb.WriteString("\nROUTING RULES (приоритет выше описаний инструментов):\n")
+	sb.WriteString("1. Будущая покупка / совет о покупке («хочу купить», «планирую купить», «думаю купить», «стоит ли купить», «можем ли позволить», «хватит ли денег на», «потянем ли», «что приоритетнее») — ВСЕГДА skill=advisor, action=advice. НИКОГДА не вызывай budget.add_expense для будущих/гипотетических покупок.\n")
+	sb.WriteString("2. Запись СОВЕРШЁННОЙ траты (прошедшее время: «купил», «купила», «потратил», «заплатил», «оплатил») — skill=budget, action=add_expense.\n")
+	sb.WriteString("3. Если в сообщении нет суммы и нет глагола в прошедшем времени — это НЕ add_expense.\n")
 	sb.WriteString("\nДоступные инструменты:\n")
 	for _, m := range manifests {
 		fmt.Fprintf(&sb, "- %s: %s\n", m.ID, m.Description)
