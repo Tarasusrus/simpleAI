@@ -30,10 +30,29 @@ evals/
 
 ## Как прогнать
 
-Harness ещё не реализован — см. simpleAI-85c. После реализации:
+```bash
+# полный прогон
+go run ./evals/cmd/routing
+
+# срез по тегу
+go run ./evals/cmd/routing -tag future_purchase
+
+# smoke (первые N кейсов)
+go run ./evals/cmd/routing -limit 5
+
+# diff vs предыдущий прогон
+go run ./evals/cmd/routing -prev evals/runs/baseline-2026-05-06.jsonl
+
+# проверить только загрузку без вызова LLM
+go run ./evals/cmd/routing -dry-run
 ```
-go run ./cmd/eval -set evals/golden_set.jsonl -out evals/runs/<timestamp>.json
-```
+
+Output:
+- jsonl-файл в `evals/runs/<timestamp>_<promptHash>.jsonl` (одна строка на кейс + summary)
+- stdout: total/pass/fail/accuracy + per-skill + per-tag + failed_ids
+- exit code: 0 если все pass, 1 если есть fail, 2 при ошибке загрузки/конфига
+
+Конфиг LLM читается из env как и в прод-боте (см. `config/config.go`).
 
 ## Baseline
 
