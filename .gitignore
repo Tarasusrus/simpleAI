@@ -19,3 +19,8 @@ data/
 
 # rapid: оставлять минимизированные fail-кейсы только если намеренно сохраняем как corpus
 internal/**/testdata/rapid/
+
+# evals: прогоны накопительно, в репо только baseline и .gitkeep (см. ADR-003)
+evals/runs/*
+!evals/runs/.gitkeep
+!evals/runs/baseline-*.json
