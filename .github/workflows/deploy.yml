@@ -20,12 +20,15 @@ jobs:
           SYS_PROMPT: ${{ secrets.SYS_PROMPT }}
           TELEGRAM_ALLOWED_CHATS: ${{ secrets.TELEGRAM_ALLOWED_CHATS }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: 22
-          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID
+          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID,LANGFUSE_HOST,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY
           script: |
             set -e
 
@@ -65,6 +68,10 @@ jobs:
               echo ""
               echo "LOG_LEVEL=info"
               echo "LOG_FORMAT=json"
+              echo ""
+              echo "LANGFUSE_HOST=$LANGFUSE_HOST"
+              echo "LANGFUSE_PUBLIC_KEY=$LANGFUSE_PUBLIC_KEY"
+              echo "LANGFUSE_SECRET_KEY=$LANGFUSE_SECRET_KEY"
             } > ~/simpleAI/.env
 
             cd ~/simpleAI

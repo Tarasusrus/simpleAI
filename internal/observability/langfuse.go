@@ -53,7 +53,8 @@ type event struct {
 func NewTracer(host, publicKey, secretKey string, logger *slog.Logger) *Tracer {
 	if host == "" || publicKey == "" || secretKey == "" {
 		if logger != nil {
-			logger.Info("langfuse tracer disabled (host or keys missing)")
+			logger.Warn("langfuse tracer disabled — set LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY in .env",
+				"host_set", host != "", "public_key_set", publicKey != "", "secret_key_set", secretKey != "")
 		}
 		return nil
 	}
