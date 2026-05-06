@@ -1,0 +1,26 @@
+# Golden-set routing cases. Schema: docs/adr/003-eval-suite-convention.md.
+# Lines starting with `#` and empty lines ignored by harness.
+{"id":"r001","input":"хочу купить блендер","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","no_amount","ru"],"notes":"bug simpleAI-q49 — раньше уходило в budget.add_expense"}
+{"id":"r002","input":"планирую купить машину за 500000","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","with_amount","ru"]}
+{"id":"r003","input":"стоит ли мне сейчас брать новый ноут?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","advice_request","ru"]}
+{"id":"r004","input":"можем ли позволить отпуск в Турцию?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","no_amount","ru"]}
+{"id":"r005","input":"хватит ли мне на iPhone?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","no_amount","ru"]}
+{"id":"r006","input":"should I buy this MacBook now?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","en"]}
+{"id":"r007","input":"думаю взять PS5 за 60к","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","with_amount","slang","ru"]}
+{"id":"r008","input":"купил кофе 200","expected":{"skill":"budget","action":"add_expense"},"tags":["past_tense","with_amount","ru"]}
+{"id":"r009","input":"потратил 1000 на еду","expected":{"skill":"budget","action":"add_expense"},"tags":["past_tense","with_amount","ru"]}
+{"id":"r010","input":"заплатил за интернет 800","expected":{"skill":"budget","action":"add_expense"},"tags":["past_tense","with_amount","ru"]}
+{"id":"r011","input":"купил блендер 5000","expected":{"skill":"budget","action":"add_expense"},"tags":["past_tense","with_amount","ru"]}
+{"id":"r012","input":"сколько потратил в этом месяце","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru"]}
+{"id":"r013","input":"итого за март","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru"]}
+{"id":"r014","input":"что у меня по бюджету?","expected":{"skill":"budget","action":"summary"},"tags":["summary","generic","ru"]}
+{"id":"r015","input":"прогноз на конец месяца","expected":{"skill":"budget","action":"forecast"},"tags":["forecast","ru"]}
+{"id":"r016","input":"сколько у меня останется к концу месяца","expected":{"skill":"budget","action":"forecast"},"tags":["forecast","ru"]}
+{"id":"r017","input":"покажи траты за неделю","expected":{"skill":"budget","action":"list_transactions"},"tags":["list_transactions","week","ru"]}
+{"id":"r018","input":"что покупал 5 марта","expected":{"skill":"budget","action":"list_transactions"},"tags":["list_transactions","specific_date","ru"]}
+{"id":"r019","input":"список покупок за вчера","expected":{"skill":"budget","action":"list_transactions"},"tags":["list_transactions","yesterday","ru"]}
+{"id":"r020","input":"блендер 5000?","expected":{"skill":"advisor","action":"advice"},"tags":["edge","ambiguous","no_verb","ru"],"notes":"вопросительный знак — пользователь обсуждает покупку, не фиксирует трату"}
+{"id":"r021","input":"планирую купить машину, вчера купил кофе 200","expected":{"skill":"advisor","action":"advice"},"tags":["edge","mixed_intent","priority_future","ru"],"notes":"future_purchase доминирует — advisor; добавление кофе вторично"}
+{"id":"r022","input":"хочу купить блендер за 5000","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","with_amount","ru"]}
+{"id":"r023","input":"сколько откладывать на машину","expected":{"skill":"advisor","action":"advice"},"tags":["advice","saving_plan","ru"]}
+{"id":"r024","input":"do we have enough money for vacation?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","en","no_amount"]}

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"simpleAI/internal/core"
+	"simpleAI/internal/observability"
 	"simpleAI/internal/plugin"
 	"simpleAI/internal/trace"
 )
@@ -23,6 +24,7 @@ type Service struct {
 	client   core.LLM
 	registry *plugin.Registry
 	tracer   *trace.Store
+	obs      *observability.Tracer
 	logger   *slog.Logger
 }
 
@@ -46,6 +48,12 @@ func (s *Service) WithTracer(t *trace.Store) *Service {
 	return s
 }
 
+// WithObservability добавляет Langfuse-трейсер (опционально). nil безопасен.
+func (s *Service) WithObservability(o *observability.Tracer) *Service {
+	s.obs = o
+	return s
+}
+
 // Ask отвечает на запрос пользователя.
 // Если registry содержит skills — запускает agentic loop:
 // LLM может вызвать один или несколько инструментов за итерацию,
@@ -63,11 +71,30 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 		ctx = context.WithValue(ctx, ChatIDKey{}, *chatID)
 	}
 	if s.registry == nil || len(s.registry.List()) == 0 {
-		return s.client.Ask(ctx, input)
+		userID := ""
+		if chatID != nil {
+			userID = fmt.Sprintf("%d", *chatID)
+		}
+		obsTrace := s.obs.StartTrace("agent.ask", map[string]any{"input": input}, "", userID)
+		gen := obsTrace.StartGeneration("llm.ask", "", input)
+		resp, err := s.client.Ask(ctx, input)
+		gen.End(resp, err)
+		obsTrace.End(map[string]any{"answer": resp})
+		return resp, err
 	}
 
 	sessionID := uuid.New()
 	toolSystemPrompt := buildToolsSystemPrompt(s.registry.List())
+
+	userID := ""
+	if chatID != nil {
+		userID = fmt.Sprintf("%d", *chatID)
+	}
+	obsTrace := s.obs.StartTrace("agent.run", map[string]any{"input": input}, sessionID.String(), userID)
+	var finalAnswer string
+	defer func() {
+		obsTrace.End(map[string]any{"answer": finalAnswer})
+	}()
 
 	currentPrompt := input
 	var accumulatedResults []string
@@ -75,7 +102,12 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 
 	for range maxIterations {
 		iteration++
+		gen := obsTrace.StartGeneration(fmt.Sprintf("llm.iter%d", iteration), "", map[string]any{
+			"system": toolSystemPrompt,
+			"prompt": currentPrompt,
+		})
 		resp, err := s.client.AskWithSystem(ctx, toolSystemPrompt, currentPrompt)
+		gen.End(resp, err)
 		if err != nil {
 			return "", err
 		}
@@ -91,6 +123,7 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 				LLMResponse: resp,
 				IsFinal:     true,
 			})
+			finalAnswer = resp
 			return resp, nil
 		}
 
@@ -102,7 +135,9 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 			}
 
 			skillStart := time.Now()
+			sp := obsTrace.StartSpan("tool."+call.Skill, call.Input)
 			result, err := s.runSkill(ctx, call)
+			sp.End(result, err)
 			skillDuration := time.Since(skillStart).Milliseconds()
 
 			skillName := call.Skill
@@ -153,7 +188,11 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 	}
 
 	// Превышен лимит итераций — финальный ответ без tool calling.
-	return s.client.Ask(ctx, currentPrompt)
+	gen := obsTrace.StartGeneration("llm.final", "", currentPrompt)
+	resp, err := s.client.Ask(ctx, currentPrompt)
+	gen.End(resp, err)
+	finalAnswer = resp
+	return resp, err
 }
 
 // appendTrace записывает трейс, если tracer настроен. Ошибки не прерывают работу агента.
@@ -268,6 +307,10 @@ func buildToolsSystemPrompt(manifests []plugin.Manifest) string {
 	sb.WriteString("У тебя есть доступ к инструментам. Если нужно вызвать инструмент — ответь ТОЛЬКО валидным JSON без markdown и пояснений.\n")
 	sb.WriteString("Один вызов: {\"skill\": \"<id>\", \"input\": {<параметры>}}\n")
 	sb.WriteString("Несколько вызовов за раз: [{\"skill\": \"<id>\", \"input\": {...}}, {\"skill\": \"<id>\", \"input\": {...}}]\n")
+	sb.WriteString("\nROUTING RULES (приоритет выше описаний инструментов):\n")
+	sb.WriteString("1. Будущая покупка / совет о покупке («хочу купить», «планирую купить», «думаю купить», «стоит ли купить», «можем ли позволить», «хватит ли денег на», «потянем ли», «что приоритетнее») — ВСЕГДА skill=advisor, action=advice. НИКОГДА не вызывай budget.add_expense для будущих/гипотетических покупок.\n")
+	sb.WriteString("2. Запись СОВЕРШЁННОЙ траты (прошедшее время: «купил», «купила», «потратил», «заплатил», «оплатил») — skill=budget, action=add_expense.\n")
+	sb.WriteString("3. Если в сообщении нет суммы и нет глагола в прошедшем времени — это НЕ add_expense.\n")
 	sb.WriteString("\nДоступные инструменты:\n")
 	for _, m := range manifests {
 		fmt.Fprintf(&sb, "- %s: %s\n", m.ID, m.Description)
