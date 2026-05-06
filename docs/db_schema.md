@@ -98,11 +98,11 @@ go install github.com/pressly/goose/v3/cmd/goose@latest
 Apply schema:
 
 ```bash
-goose -dir migrations postgres "postgres://simpleai:simpleai@localhost:5432/simpleai?sslmode=disable" up
+goose -dir internal/db/migrations postgres "postgres://simpleai:simpleai@localhost:5432/simpleai?sslmode=disable" up
 ```
 
 ## Seed Categories
-Initial top-level categories are added by `migrations/00002_seed_categories.sql`.
+Initial top-level categories are added by `internal/db/migrations/00002_seed_categories.sql`.
 
 ## Ingestion CLI (v1)
 Minimal loader that writes `receipt`, `receipt_item`, and `rag_document` (no embeddings yet):

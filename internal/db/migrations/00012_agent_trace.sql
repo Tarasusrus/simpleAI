@@ -1,5 +1,6 @@
 -- +goose Up
-CREATE TABLE agent_trace (
+-- +goose StatementBegin
+CREATE TABLE IF NOT EXISTS agent_trace (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id  UUID NOT NULL,
     chat_id     BIGINT,
@@ -13,9 +14,12 @@ CREATE TABLE agent_trace (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_agent_trace_chat_id    ON agent_trace (chat_id);
-CREATE INDEX idx_agent_trace_session_id ON agent_trace (session_id);
-CREATE INDEX idx_agent_trace_created_at ON agent_trace (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_trace_chat_id    ON agent_trace (chat_id);
+CREATE INDEX IF NOT EXISTS idx_agent_trace_session_id ON agent_trace (session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_trace_created_at ON agent_trace (created_at DESC);
+-- +goose StatementEnd
 
 -- +goose Down
+-- +goose StatementBegin
 DROP TABLE IF EXISTS agent_trace;
+-- +goose StatementEnd

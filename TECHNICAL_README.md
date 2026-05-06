@@ -102,7 +102,7 @@
 - `internal/agent`: ядро агента.
 - `internal/adapters/llm`: LLM‑адаптеры (OpenAI, Ollama) и фабрика выбора.
 - `config`: загрузка конфигурации.
-- `migrations`: SQL‑миграции (goose).
+- `internal/db/migrations`: SQL‑миграции (goose, embed). **Единственный источник миграций** — другие папки не использовать.
 - `docker-compose.yml`: локальный Postgres + pgvector.
 
 ## Риски / слабые места
