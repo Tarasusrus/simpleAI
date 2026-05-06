@@ -23,4 +23,5 @@ internal/**/testdata/rapid/
 # evals: прогоны накопительно, в репо только baseline и .gitkeep (см. ADR-003)
 evals/runs/*
 !evals/runs/.gitkeep
-!evals/runs/baseline-*.json
+!evals/runs/baseline-*.jsonl
+!evals/runs/BASELINE.md
