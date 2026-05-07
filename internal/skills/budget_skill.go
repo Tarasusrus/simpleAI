@@ -33,6 +33,8 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 		Name:        "Budget Tracker",
 		Description: "Personal finance TRACKER: record COMPLETED expenses/income (past tense: 'купил', 'потратил', 'заплатил', 'получил'), get spending summaries, manage savings goals, debts, and recurring payments. " +
 			"Use when user RECORDS a transaction or asks to SHOW data (summary, list, forecast, debt status). " +
+			"action='summary' covers BOTH income AND expense overview for a period — use it for 'покажи доходы / траты / итоги за <период>', 'сколько я заработал', 'how much did I earn/spend in <month>'. " +
+			"action='list_transactions' shows individual transaction entries; pass transaction_type='income' or 'expense' when the user explicitly asks to LIST income or expense entries ('перечисли все доходы за апрель'). " +
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
 			"Use budget.summary for plain numerical totals only.",
@@ -141,7 +143,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"transaction_type": map[string]any{
 						"type":        "string",
-						"description": "Transaction type for add_recurring: 'expense' (default) or 'income' (e.g. monthly salary).",
+						"description": "Transaction type filter. For add_recurring: 'expense' (default) or 'income' (e.g. monthly salary). For list_transactions: pass 'income' to list ONLY income transactions, 'expense' to list ONLY expenses; omit to list all. Use when user explicitly asks to LIST income/expense entries (e.g. 'перечисли все доходы за апрель').",
 					},
 					"months": map[string]any{
 						"type":        "integer",
@@ -374,7 +376,11 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 	f := budget.TransactionFilter{
 		Period:  &p,
 		Keyword: req.Keyword,
+		Type:    strings.ToLower(strings.TrimSpace(req.TransactionType)),
 		Limit:   20,
+	}
+	if f.Type != "income" && f.Type != "expense" {
+		f.Type = ""
 	}
 
 	txs, err := s.store.ListTransactions(ctx, f)
