@@ -117,6 +117,14 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 						"type":        "string",
 						"description": "Specific date in YYYY-MM-DD or DD.MM.YYYY format. For add_expense, add_income, edit_transaction — the operation date. For list_transactions — filter by a specific day (e.g. 'March 8' → '2026-03-08'). Always use 'date' for a specific day, never 'period'.",
 					},
+					"date_from": map[string]any{
+						"type":        "string",
+						"description": "Start of an arbitrary date range for list_transactions (YYYY-MM-DD or DD.MM.YYYY). Use together with date_from/date_to when the user asks for a custom range like '1–10 апреля' or 'с 5 по 20 марта'. Do NOT use 'period' for custom ranges. Inclusive.",
+					},
+					"date_to": map[string]any{
+						"type":        "string",
+						"description": "End of an arbitrary date range for list_transactions (YYYY-MM-DD or DD.MM.YYYY). Pair with date_from. Inclusive.",
+					},
 					"reminder_enabled": map[string]any{
 						"type":        "boolean",
 						"description": "Enable (true) or disable (false) daily reminder. Used in set_reminder.",
@@ -176,6 +184,8 @@ type budgetInput struct {
 	TransactionID     string  `json:"transaction_id,omitempty"`
 	Keyword           string  `json:"keyword,omitempty"`
 	Date              string  `json:"date,omitempty"`
+	DateFrom          string  `json:"date_from,omitempty"`
+	DateTo            string  `json:"date_to,omitempty"`
 	ReminderEnabled   *bool   `json:"reminder_enabled,omitempty"`
 	ReminderHour      *int    `json:"reminder_hour,omitempty"`
 	ReminderMinute    *int    `json:"reminder_minute,omitempty"`
@@ -356,14 +366,10 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 		}
 	}
 
-	if req.Date != "" {
-		var day time.Time
-		for _, layout := range []string{"2006-01-02", "02.01.2006"} {
-			if d, err := time.Parse(layout, req.Date); err == nil {
-				day = d
-				break
-			}
-		}
+	rangeMode := false
+	switch {
+	case req.Date != "":
+		day := parseFlexibleDate(req.Date)
 		if day.IsZero() {
 			return "", fmt.Errorf("неверный формат даты %q, используй YYYY-MM-DD или DD.MM.YYYY", req.Date)
 		}
@@ -372,16 +378,35 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 			To:   time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, time.UTC),
 		}
 		periodLabel = day.Format("02.01.2006")
-	} else {
+	case req.DateFrom != "" || req.DateTo != "":
+		from := parseFlexibleDate(req.DateFrom)
+		to := parseFlexibleDate(req.DateTo)
+		if from.IsZero() || to.IsZero() {
+			return "", fmt.Errorf("неверный формат date_from/date_to, используй YYYY-MM-DD или DD.MM.YYYY")
+		}
+		if to.Before(from) {
+			from, to = to, from
+		}
+		p = budget.Period{
+			From: time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC),
+			To:   time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, time.UTC),
+		}
+		periodLabel = fmt.Sprintf("%s — %s", from.Format("02.01.2006"), to.Format("02.01.2006"))
+		rangeMode = true
+	default:
 		p = parsePeriod(req.Period)
 		periodLabel = formatPeriodName(p)
 	}
 
+	limit := 20
+	if rangeMode {
+		limit = 200
+	}
 	f := budget.TransactionFilter{
 		Period:  &p,
 		Keyword: req.Keyword,
 		Type:    strings.ToLower(strings.TrimSpace(req.TransactionType)),
-		Limit:   20,
+		Limit:   limit,
 	}
 	if f.Type != "income" && f.Type != "expense" {
 		f.Type = ""
@@ -393,7 +418,7 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 	}
 
 	if len(txs) == 0 {
-		return "Транзакций за этот период нет.", nil
+		return fmt.Sprintf("Транзакций за %s нет.", periodLabel), nil
 	}
 
 	var sb strings.Builder
@@ -1288,4 +1313,17 @@ func trendLabel(pct float64, hasTrend bool) string {
 	default:
 		return "→ стабильно"
 	}
+}
+
+func parseFlexibleDate(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{"2006-01-02", "02.01.2006"} {
+		if d, err := time.Parse(layout, s); err == nil {
+			return d
+		}
+	}
+	return time.Time{}
 }
