@@ -33,7 +33,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 		Name:        "Budget Tracker",
 		Description: "Personal finance TRACKER: record COMPLETED expenses/income (past tense: 'купил', 'потратил', 'заплатил', 'получил'), get spending summaries, manage savings goals, debts, and recurring payments. " +
 			"Use when user RECORDS a transaction or asks to SHOW data (summary, list, forecast, debt status). " +
-			"action='summary' covers BOTH income AND expense overview for a period — use it for 'покажи доходы / траты / итоги за <период>', 'сколько я заработал', 'how much did I earn/spend in <month>'. " +
+			"action='summary' shows aggregate totals for a period. Pass transaction_type='income' when user asks ONLY about income ('покажи доходы за <период>', 'сколько я заработал'); pass transaction_type='expense' when user asks ONLY about expenses ('покажи траты / расходы за <период>'); omit transaction_type for a general overview ('итоги за <период>', 'сводка'). " +
 			"action='list_transactions' shows individual transaction entries; pass transaction_type='income' or 'expense' when the user explicitly asks to LIST income or expense entries ('перечисли все доходы за апрель'). " +
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
@@ -321,13 +321,17 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 		}
 	}
 
-	result := formatSummary(curr, prev, rates)
+	filter := strings.ToLower(strings.TrimSpace(req.TransactionType))
+	if filter != "income" && filter != "expense" {
+		filter = ""
+	}
+	result := formatSummaryFiltered(curr, prev, rates, filter)
 
 	// Show forecast only if the next month after the requested period is actually in the future.
 	// E.g. viewing January summary in April → next=February → already past → skip.
 	next := time.Date(p.To.Year(), p.To.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 	currentMonth := time.Date(time.Now().UTC().Year(), time.Now().UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	if next.After(currentMonth) {
+	if filter != "income" && next.After(currentMonth) {
 		forecasts, forecastErr := s.store.GetForecastData(ctx, 0)
 		if forecastErr == nil && len(forecasts) > 0 {
 			result += "\n" + formatForecastBlock(forecasts, next, rates)
@@ -733,22 +737,50 @@ func summaryCategories(s *budget.Summary, rates map[string]float64) map[string]f
 }
 
 func formatSummary(s *budget.Summary, prev *budget.Summary, rates map[string]float64) string {
+	return formatSummaryFiltered(s, prev, rates, "")
+}
+
+// formatSummaryFiltered рендерит сводку с фильтром по типу:
+//   - "income"  — только доходы (агрегат + per-currency); если 0 — явный текст
+//   - "expense" — только расходы с категориями и сравнением с прошлым месяцем
+//   - ""        — оба блока (текущее поведение)
+func formatSummaryFiltered(s *budget.Summary, prev *budget.Summary, rates map[string]float64, filter string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s — сводка\n", formatPeriodName(s.Period))
+
+	totalRUB := summaryTotalRUB(s, rates)
+	incomeRUB := summaryIncomeRUB(s, rates)
+
+	if filter == "income" {
+		if incomeRUB <= 0 {
+			fmt.Fprintf(&sb, "\nДоходов за %s нет.", formatPeriodName(s.Period))
+			return sb.String()
+		}
+		fmt.Fprintf(&sb, "\n💰 Доходы: ~%.0f ₽ экв.\n", incomeRUB)
+		for _, cg := range s.Currencies {
+			if cg.TotalIncome <= 0 {
+				continue
+			}
+			sym := currencySymbol(cg.Currency)
+			if cg.Currency == "RUB" {
+				fmt.Fprintf(&sb, "  %.0f ₽\n", cg.TotalIncome)
+			} else {
+				fmt.Fprintf(&sb, "  %.0f %s\n", cg.TotalIncome, sym)
+			}
+		}
+		return sb.String()
+	}
 
 	if len(s.Currencies) == 0 {
 		sb.WriteString("\nОпераций нет.")
 		return sb.String()
 	}
 
-	totalRUB := summaryTotalRUB(s, rates)
-	incomeRUB := summaryIncomeRUB(s, rates)
-
-	if incomeRUB > 0 {
+	if filter == "" && incomeRUB > 0 {
 		fmt.Fprintf(&sb, "\n💰 Доходы: ~%.0f ₽ экв.\n", incomeRUB)
 	}
 	fmt.Fprintf(&sb, "\n💸 Всего потрачено: ~%.0f ₽ экв.\n", totalRUB)
-	if incomeRUB > 0 {
+	if filter == "" && incomeRUB > 0 {
 		balance := incomeRUB - totalRUB
 		sign := "+"
 		if balance < 0 {
