@@ -332,7 +332,7 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	next := time.Date(p.To.Year(), p.To.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 	currentMonth := time.Date(time.Now().UTC().Year(), time.Now().UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
 	if filter != "income" && next.After(currentMonth) {
-		forecasts, forecastErr := s.store.GetForecastData(ctx, 0)
+		forecasts, forecastErr := s.store.GetForecastData(ctx, 0, rates)
 		if forecastErr == nil && len(forecasts) > 0 {
 			result += "\n" + formatForecastBlock(forecasts, next, rates)
 		}
@@ -1154,14 +1154,6 @@ func (s *BudgetSkill) disableRecurring(ctx context.Context, req budgetInput) (st
 // --- Прогнозирование ---
 
 func (s *BudgetSkill) forecastAction(ctx context.Context, req budgetInput) (string, error) {
-	forecasts, err := s.store.GetForecastData(ctx, req.Months)
-	if err != nil {
-		return fmt.Sprintf("Не удалось посчитать прогноз: %v", err), nil
-	}
-	if len(forecasts) == 0 {
-		return "Недостаточно данных для прогноза — добавь несколько трат и попробуй снова.", nil
-	}
-
 	rates, err := s.store.GetExchangeRates(ctx)
 	if err != nil || len(rates) == 0 {
 		rates = rubRates
@@ -1171,6 +1163,14 @@ func (s *BudgetSkill) forecastAction(ctx context.Context, req budgetInput) (stri
 				rates[k] = v
 			}
 		}
+	}
+
+	forecasts, err := s.store.GetForecastData(ctx, req.Months, rates)
+	if err != nil {
+		return fmt.Sprintf("Не удалось посчитать прогноз: %v", err), nil
+	}
+	if len(forecasts) == 0 {
+		return "Недостаточно данных для прогноза — добавь несколько трат и попробуй снова.", nil
 	}
 
 	now := time.Now()

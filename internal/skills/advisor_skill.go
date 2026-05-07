@@ -22,7 +22,7 @@ type advisorStore interface {
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)
 	GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, monthOffset int, rates map[string]float64) (*budget.AdvisorSnapshot, error)
 	GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset int, limit int, rates map[string]float64) ([]budget.TopExpense, error)
-	GetForecastData(ctx context.Context, months int) ([]budget.CategoryForecast, error)
+	GetForecastData(ctx context.Context, months int, rates map[string]float64) ([]budget.CategoryForecast, error)
 }
 
 // AdvisorSkill — LLM-reasoning skill для советов по покупкам и приоритезации (ADR-002).
@@ -217,7 +217,7 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 		return "Временная ошибка при сборе финансового снимка — попробуй позже.", nil
 	}
 
-	forecasts, err := s.store.GetForecastData(ctx, 0)
+	forecasts, err := s.store.GetForecastData(ctx, 0, rates)
 	if err != nil {
 		s.logger.WarnContext(ctx, "advisor: get forecast (continuing without)", "err", err, "chat_id", chatID)
 	}
