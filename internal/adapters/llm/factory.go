@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"simpleAI/config"
 	ollamaadapter "simpleAI/internal/adapters/llm/ollama"
@@ -44,8 +43,9 @@ func NewClient(cfg config.Config, logger *slog.Logger) (core.LLMClient, error) {
 }
 
 // buildOpenAIClient строит клиент для OpenAI-совместимых провайдеров.
-// Если настроены оба ключа — создаёт составной клиент:
-// primary (DeepSeek) для чата, fallback (Gemini) для эмбеддингов.
+// При наличии обоих ключей возвращает составной клиент с per-request fallback:
+// primary (DeepSeek) для чата с автоматическим переключением на fallback (Gemini)
+// при ошибке отдельного запроса. Embed всегда идёт на fallback (Gemini).
 func buildOpenAIClient(cfg config.Config, logger *slog.Logger) (core.LLMClient, error) {
 	fallback, fallbackErr := openaiadapter.NewFallbackClient(cfg, logger)
 	if fallbackErr != nil && logger != nil {
@@ -55,46 +55,28 @@ func buildOpenAIClient(cfg config.Config, logger *slog.Logger) (core.LLMClient, 
 	primary, primaryErr := openaiadapter.NewClient(cfg, logger)
 	if primaryErr != nil {
 		if logger != nil {
-			logger.Warn("primary llm not available, trying fallback", "err", primaryErr)
+			logger.Warn("primary llm not available", "err", primaryErr)
 		}
 		if fallback != nil {
 			if logger != nil {
-				logger.Info("llm provider active", "provider", "fallback", "model", cfg.LLM.FallbackChatModel)
+				logger.Info("llm provider active", "provider", "fallback-only", "model", cfg.LLM.FallbackChatModel)
 			}
 			return fallback, nil
 		}
 		return fallbackToOllama(cfg, logger, primaryErr)
 	}
 
-	if err := testLLM(primary); err != nil {
+	if fallback != nil {
 		if logger != nil {
-			logger.Warn("primary llm test failed, trying fallback", "err", err)
+			logger.Info("llm provider active", "provider", "composite", "primary_model", cfg.LLM.ChatModel, "fallback_model", cfg.LLM.FallbackChatModel)
 		}
-		if fallback != nil {
-			if logger != nil {
-				logger.Info("llm provider active", "provider", "fallback", "model", cfg.LLM.FallbackChatModel)
-			}
-			return fallback, nil
-		}
-		return fallbackToOllama(cfg, logger, err)
+		return newCompositeClient(primary, fallback, logger), nil
 	}
 
 	if logger != nil {
-		logger.Info("llm provider active", "provider", "primary", "model", cfg.LLM.ChatModel)
-	}
-
-	// Составной клиент: primary для чата, fallback для эмбеддингов.
-	if fallback != nil {
-		return newCompositeClient(primary, fallback), nil
+		logger.Info("llm provider active", "provider", "primary-only", "model", cfg.LLM.ChatModel)
 	}
 	return primary, nil
-}
-
-func testLLM(client core.LLM) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := client.Ask(ctx, "ping")
-	return err
 }
 
 func fallbackToOllama(cfg config.Config, logger *slog.Logger, cause error) (core.LLMClient, error) {
@@ -111,22 +93,45 @@ func fallbackToOllama(cfg config.Config, logger *slog.Logger, cause error) (core
 	return client, nil
 }
 
-// compositeClient использует разных провайдеров для чата и эмбеддингов.
+// compositeClient выбирает провайдера per-request: primary для чата с
+// автоматическим fallback при ошибке, fallback (Gemini) для эмбеддингов.
 type compositeClient struct {
-	chat    core.LLM
+	primary  core.LLM
+	fallback core.LLM
 	embedder core.Embedder
+	logger   *slog.Logger
 }
 
-func newCompositeClient(chat core.LLM, embedder core.Embedder) core.LLMClient {
-	return &compositeClient{chat: chat, embedder: embedder}
+func newCompositeClient(primary core.LLM, fb core.LLMClient, logger *slog.Logger) core.LLMClient {
+	return &compositeClient{primary: primary, fallback: fb, embedder: fb, logger: logger}
 }
 
 func (c *compositeClient) Ask(ctx context.Context, prompt string) (string, error) {
-	return c.chat.Ask(ctx, prompt)
+	out, err := c.primary.Ask(ctx, prompt)
+	if err == nil {
+		return out, nil
+	}
+	if ctx.Err() != nil {
+		return "", err
+	}
+	if c.logger != nil {
+		c.logger.Warn("primary chat failed, retrying on fallback", "err", err)
+	}
+	return c.fallback.Ask(ctx, prompt)
 }
 
 func (c *compositeClient) AskWithSystem(ctx context.Context, systemAddition, userPrompt string) (string, error) {
-	return c.chat.AskWithSystem(ctx, systemAddition, userPrompt)
+	out, err := c.primary.AskWithSystem(ctx, systemAddition, userPrompt)
+	if err == nil {
+		return out, nil
+	}
+	if ctx.Err() != nil {
+		return "", err
+	}
+	if c.logger != nil {
+		c.logger.Warn("primary chat failed, retrying on fallback", "err", err)
+	}
+	return c.fallback.AskWithSystem(ctx, systemAddition, userPrompt)
 }
 
 func (c *compositeClient) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
