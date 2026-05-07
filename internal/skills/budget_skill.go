@@ -1200,7 +1200,78 @@ func (s *BudgetSkill) forecastAction(ctx context.Context, req budgetInput) (stri
 
 	now := time.Now()
 	next := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-	return formatForecastBlock(forecasts, next, rates), nil
+	out := formatForecastBlock(forecasts, next, rates)
+
+	if obligations := s.collectUpcomingObligations(ctx, next, rates); obligations != "" {
+		out += "\n" + obligations
+	}
+	return out, nil
+}
+
+// collectUpcomingObligations собирает блок известных обязательств следующего
+// месяца: enabled recurring expense с next_date в [nextMonthStart, nextMonthEnd]
+// и active owe-долги с monthly_payment > 0. Не складывается с прогнозом
+// автоматически — recurring может уже быть в исторических средних.
+func (s *BudgetSkill) collectUpcomingObligations(ctx context.Context, nextMonth time.Time, rates map[string]float64) string {
+	thbRate := rates["THB"]
+	if thbRate == 0 {
+		thbRate = rubRates["THB"]
+	}
+	if thbRate == 0 {
+		return ""
+	}
+
+	monthStart := time.Date(nextMonth.Year(), nextMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
+	monthEnd := monthStart.AddDate(0, 1, -1)
+	monthEnd = time.Date(monthEnd.Year(), monthEnd.Month(), monthEnd.Day(), 23, 59, 59, 0, time.UTC)
+
+	var recurringTHB float64
+	var recurringCnt int
+	if chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64); ok && chatID != 0 {
+		if list, err := s.store.ListRecurring(ctx, chatID); err == nil {
+			for _, r := range list {
+				if !r.Enabled || r.Type != "expense" {
+					continue
+				}
+				if r.NextDate.Before(monthStart) || r.NextDate.After(monthEnd) {
+					continue
+				}
+				recurringTHB += toRUB(r.Amount, r.Currency, rates) / thbRate
+				recurringCnt++
+			}
+		}
+	}
+
+	var debtTHB float64
+	var debtCnt int
+	if debts, err := s.store.ListDebts(ctx); err == nil {
+		for _, d := range debts {
+			if d.Status != "active" || d.Direction != "owe" {
+				continue
+			}
+			if d.MonthlyPayment == nil || *d.MonthlyPayment <= 0 {
+				continue
+			}
+			debtTHB += toRUB(*d.MonthlyPayment, "RUB", rates) / thbRate
+			debtCnt++
+		}
+	}
+
+	if recurringCnt == 0 && debtCnt == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📌 Известные обязательства:\n")
+	if recurringCnt > 0 {
+		fmt.Fprintf(&sb, "  🔁 Подписки/recurring: ~%.0f ฿  (%d)\n", recurringTHB, recurringCnt)
+	}
+	if debtCnt > 0 {
+		fmt.Fprintf(&sb, "  💳 Платежи по долгам: ~%.0f ฿  (%d)\n", debtTHB, debtCnt)
+	}
+	fmt.Fprintf(&sb, "  ──────────────────────\n  Итого обязательств: ~%.0f ฿\n", recurringTHB+debtTHB)
+	sb.WriteString("ℹ️ Прогноз выше — среднее по истории. Recurring мог уже учтён в нём.\n")
+	return sb.String()
 }
 
 // forecastItem — объединённая категория в THB для отображения.
