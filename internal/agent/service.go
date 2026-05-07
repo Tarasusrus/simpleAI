@@ -26,6 +26,7 @@ type Service struct {
 	tracer   *trace.Store
 	obs      *observability.Tracer
 	logger   *slog.Logger
+	llmModel string
 }
 
 func NewService(client core.LLM) *Service {
@@ -54,6 +55,13 @@ func (s *Service) WithObservability(o *observability.Tracer) *Service {
 	return s
 }
 
+// WithLLMModel задаёт имя модели для Langfuse generation. Должно совпадать
+// с записью модели в Langfuse settings, чтобы матчился pricing/cost.
+func (s *Service) WithLLMModel(model string) *Service {
+	s.llmModel = model
+	return s
+}
+
 // Ask отвечает на запрос пользователя.
 // Если registry содержит skills — запускает agentic loop:
 // LLM может вызвать один или несколько инструментов за итерацию,
@@ -76,7 +84,7 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 			userID = fmt.Sprintf("%d", *chatID)
 		}
 		obsTrace := s.obs.StartTrace("agent.ask", map[string]any{"input": input}, "", userID)
-		gen := obsTrace.StartGeneration("llm.ask", "", input)
+		gen := obsTrace.StartGeneration("llm.ask", s.llmModel, input)
 		resp, err := s.client.Ask(ctx, input)
 		gen.End(resp, err)
 		obsTrace.End(map[string]any{"answer": resp})
@@ -102,7 +110,7 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 
 	for range maxIterations {
 		iteration++
-		gen := obsTrace.StartGeneration(fmt.Sprintf("llm.iter%d", iteration), "", map[string]any{
+		gen := obsTrace.StartGeneration(fmt.Sprintf("llm.iter%d", iteration), s.llmModel, map[string]any{
 			"system": toolSystemPrompt,
 			"prompt": currentPrompt,
 		})
@@ -188,7 +196,7 @@ func (s *Service) AskWithMeta(ctx context.Context, input string, chatID *int64) 
 	}
 
 	// Превышен лимит итераций — финальный ответ без tool calling.
-	gen := obsTrace.StartGeneration("llm.final", "", currentPrompt)
+	gen := obsTrace.StartGeneration("llm.final", s.llmModel, currentPrompt)
 	resp, err := s.client.Ask(ctx, currentPrompt)
 	gen.End(resp, err)
 	finalAnswer = resp
