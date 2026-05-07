@@ -675,10 +675,32 @@ func (s *Store) DeleteRecurring(ctx context.Context, id uuid.UUID) error {
 
 // --- Прогнозирование ---
 
-// GetForecastData возвращает прогноз трат по категориям на основе последних months месяцев.
+// MonthlyCategoryExpense — сырая выборка трат по (категория, валюта, месяц).
+// Используется как вход для AggregateForecast: конвертация в THB и слияние
+// валют одной категории происходит до усреднения, чтобы один и тот же
+// платёж, оплаченный частично в RUB и THB в одном месяце, не попадал в
+// два бакета и не давал двойной счёт.
+type MonthlyCategoryExpense struct {
+	CategoryName string
+	Icon         string
+	Currency     string
+	Month        time.Time
+	Total        float64
+}
+
+// GetForecastData возвращает прогноз трат по категориям, усреднённый по месяцам.
+// Все суммы конвертируются в THB до усреднения (см. AggregateForecast).
 // Учитываются только расходы (type = 'expense').
 // Если months <= 0 — берёт все доступные данные.
-func (s *Store) GetForecastData(ctx context.Context, months int) ([]CategoryForecast, error) {
+func (s *Store) GetForecastData(ctx context.Context, months int, rates map[string]float64) ([]CategoryForecast, error) {
+	rows, err := s.getMonthlyExpenses(ctx, months)
+	if err != nil {
+		return nil, err
+	}
+	return AggregateForecast(rows, rates), nil
+}
+
+func (s *Store) getMonthlyExpenses(ctx context.Context, months int) ([]MonthlyCategoryExpense, error) {
 	var fromClause string
 	var args []any
 
@@ -687,64 +709,106 @@ func (s *Store) GetForecastData(ctx context.Context, months int) ([]CategoryFore
 		args = append(args, months)
 	}
 
-	// Агрегируем траты по (категория, валюта, месяц).
-	// Из этого считаем: среднее, last_month, prev_month.
 	query := fmt.Sprintf(`
-		WITH monthly AS (
-			SELECT
-				COALESCE(c.name, 'Прочее')                              AS category_name,
-				COALESCE(NULLIF(c.icon, ''), '📦')                   AS icon,
-				t.currency,
-				date_trunc('month', t.transaction_date)             AS month,
-				SUM(t.amount)                                       AS total
-			FROM budget_transaction t
-			LEFT JOIN budget_category c ON c.id = t.category_id
-			WHERE t.type = 'expense'
-			%s
-			GROUP BY category_name, icon, t.currency, month
-		),
-		ranked AS (
-			SELECT *,
-				ROW_NUMBER() OVER (PARTITION BY category_name, currency ORDER BY month DESC) AS rn,
-				AVG(total)   OVER (PARTITION BY category_name, currency)                     AS avg_total,
-				COUNT(*)     OVER (PARTITION BY category_name, currency)                     AS month_count
-			FROM monthly
-		)
 		SELECT
-			category_name,
-			icon,
-			currency,
-			avg_total,
-			MAX(CASE WHEN rn = 1 THEN total END) AS last_month,
-			MAX(CASE WHEN rn = 2 THEN total END) AS prev_month,
-			MAX(month_count)                      AS month_count
-		FROM ranked
-		GROUP BY category_name, icon, currency, avg_total
-		ORDER BY avg_total DESC
+			COALESCE(c.name, 'Прочее')                  AS category_name,
+			COALESCE(NULLIF(c.icon, ''), '📦')          AS icon,
+			t.currency,
+			date_trunc('month', t.transaction_date)     AS month,
+			SUM(t.amount)                               AS total
+		FROM budget_transaction t
+		LEFT JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = 'expense'
+		%s
+		GROUP BY category_name, icon, t.currency, month
 	`, fromClause)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("get forecast data: %w", err)
+		return nil, fmt.Errorf("get monthly expenses: %w", err)
 	}
 	defer rows.Close()
 
-	var out []CategoryForecast
+	var out []MonthlyCategoryExpense
 	for rows.Next() {
-		var f CategoryForecast
-		var lastMonth, prevMonth *float64
-		var monthCount int
-		if err := rows.Scan(&f.CategoryName, &f.Icon, &f.Currency, &f.ForecastAmount,
-			&lastMonth, &prevMonth, &monthCount); err != nil {
-			return nil, fmt.Errorf("scan forecast: %w", err)
+		var r MonthlyCategoryExpense
+		if err := rows.Scan(&r.CategoryName, &r.Icon, &r.Currency, &r.Month, &r.Total); err != nil {
+			return nil, fmt.Errorf("scan monthly expense: %w", err)
 		}
-		if monthCount >= 2 && lastMonth != nil && prevMonth != nil && *prevMonth > 0 {
-			f.TrendPct = (*lastMonth - *prevMonth) / *prevMonth * 100
-			f.HasTrend = true
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// AggregateForecast строит прогноз: для каждой категории сначала суммирует
+// траты за каждый месяц в THB (конвертируя из исходной валюты), затем
+// усредняет полученные месячные суммы. Тренд — отношение последнего месяца
+// к предыдущему (тоже в THB).
+//
+// rates — map[currency]rate_to_RUB; THB должен присутствовать. Строки с
+// отсутствующим курсом валюты пропускаются.
+//
+// Возвращает CategoryForecast с Currency="THB" и ForecastAmount в THB,
+// отсортированный по убыванию ForecastAmount.
+func AggregateForecast(rows []MonthlyCategoryExpense, rates map[string]float64) []CategoryForecast {
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return nil
+	}
+
+	// (category) -> (month) -> THB sum
+	perCat := map[string]map[time.Time]float64{}
+	icons := map[string]string{}
+	for _, r := range rows {
+		rubRate, ok := rates[r.Currency]
+		if !ok || rubRate == 0 {
+			continue
+		}
+		thb := r.Total * rubRate / thbRate
+		if _, ok := perCat[r.CategoryName]; !ok {
+			perCat[r.CategoryName] = map[time.Time]float64{}
+		}
+		perCat[r.CategoryName][r.Month] += thb
+		// Сохраняем первый встретившийся непустой icon.
+		if existing, ok := icons[r.CategoryName]; !ok || existing == "📦" {
+			if r.Icon != "" {
+				icons[r.CategoryName] = r.Icon
+			}
+		}
+	}
+
+	out := make([]CategoryForecast, 0, len(perCat))
+	for cat, monthly := range perCat {
+		months := make([]time.Time, 0, len(monthly))
+		for m := range monthly {
+			months = append(months, m)
+		}
+		sort.Slice(months, func(i, j int) bool { return months[i].After(months[j]) })
+
+		var sum float64
+		for _, v := range monthly {
+			sum += v
+		}
+		avg := sum / float64(len(monthly))
+
+		f := CategoryForecast{
+			CategoryName:   cat,
+			Icon:           icons[cat],
+			Currency:       "THB",
+			ForecastAmount: avg,
+		}
+		if len(months) >= 2 {
+			last := monthly[months[0]]
+			prev := monthly[months[1]]
+			if prev > 0 {
+				f.TrendPct = (last - prev) / prev * 100
+				f.HasTrend = true
+			}
 		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	sort.Slice(out, func(i, j int) bool { return out[i].ForecastAmount > out[j].ForecastAmount })
+	return out
 }
 
 // --- Курсы валют ---
