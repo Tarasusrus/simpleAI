@@ -33,3 +33,6 @@
 {"id":"r031","input":"итоги за апрель","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru","contrast_analyze"]}
 {"id":"r032","input":"покажи доходы за прошлый месяц","expected":{"skill":"budget","action":"summary"},"tags":["summary","prev_month","income","ru"]}
 {"id":"r033","input":"сколько я заработал в марте","expected":{"skill":"budget","action":"summary"},"tags":["summary","income","ru"]}
+{"id":"r034","input":"покажи доходы предыдущего месяца","expected":{"skill":"budget","action":"summary"},"tags":["summary","prev_month","income","ru","regression"]}
+{"id":"r035","input":"перечисли все доходы за апрель","expected":{"skill":"budget","action":"list_transactions"},"tags":["list_transactions","income","ru"]}
+{"id":"r036","input":"сколько я заработал в марте","expected":{"skill":"budget","action":"summary"},"tags":["summary","income","ru"]}
