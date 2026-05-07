@@ -24,3 +24,10 @@
 {"id":"r022","input":"хочу купить блендер за 5000","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","with_amount","ru"]}
 {"id":"r023","input":"сколько откладывать на машину","expected":{"skill":"advisor","action":"advice"},"tags":["advice","saving_plan","ru"]}
 {"id":"r024","input":"do we have enough money for vacation?","expected":{"skill":"advisor","action":"advice"},"tags":["future_purchase","en","no_amount"]}
+{"id":"r025","input":"проанализируй мои траты за этот месяц","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","month","ru"]}
+{"id":"r026","input":"найди аномалии в моих расходах","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","anomalies","ru"]}
+{"id":"r027","input":"дай советы по экономии","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","savings","ru"]}
+{"id":"r028","input":"analyze my spending this month","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","en"]}
+{"id":"r029","input":"какие тренды в моих тратах","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","trends","ru"]}
+{"id":"r030","input":"сколько я потратил в этом месяце","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru","contrast_analyze"]}
+{"id":"r031","input":"итоги за апрель","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru","contrast_analyze"]}

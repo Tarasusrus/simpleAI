@@ -20,7 +20,8 @@ import (
 // *budget.Store удовлетворяет его автоматически.
 type advisorStore interface {
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)
-	GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, rates map[string]float64) (*budget.AdvisorSnapshot, error)
+	GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, monthOffset int, rates map[string]float64) (*budget.AdvisorSnapshot, error)
+	GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset int, limit int, rates map[string]float64) ([]budget.TopExpense, error)
 	GetForecastData(ctx context.Context, months int) ([]budget.CategoryForecast, error)
 }
 
@@ -53,14 +54,16 @@ func (s *AdvisorSkill) Manifest() plugin.Manifest {
 		ID:      "advisor",
 		Name:    "Financial Advisor",
 		Version: "1.0.0",
-		Description: "Financial advisor for purchase decisions, affordability checks and expense prioritization. " +
-			"Use when user is CONSIDERING or PLANNING a purchase / asks whether they CAN afford something / asks what is more important. " +
-			"Triggers in English: 'can we afford X?', 'should I buy this now?', 'do we have enough money for X?', 'is it worth buying?', 'what should I prioritize?'. " +
-			"Triggers in Russian (примеры — выбирай advisor для ЛЮБЫХ обсуждений будущей покупки, даже без конкретной суммы): " +
-			"«планирую купить ...», «хочу купить ...», «думаю купить ...», «стоит ли покупать ...», «можем ли мы купить ...», " +
-			"«хватит ли денег на ...», «потянем ли ...», «что приоритетнее ...», «что важнее купить ...». " +
-			"Do NOT use this skill for RECORDING a completed purchase (use budget.add_expense — that is past tense: 'купил', 'потратил', 'заплатил'). " +
-			"Do NOT use for listing or summarizing transactions — use budget skill for those.",
+		Description: "Financial advisor for purchase decisions, affordability checks and expense prioritization. Two actions. " +
+			"action='advice' — affordability/purchase decision for a SPECIFIC item (planned purchase). " +
+			"Triggers EN: 'can we afford X?', 'should I buy this now?', 'do we have enough money for X?', 'is it worth buying?', 'what should I prioritize?'. " +
+			"Triggers RU: «планирую купить ...», «хочу купить ...», «думаю купить ...», «стоит ли покупать ...», «можем ли мы купить ...», «хватит ли денег на ...», «потянем ли ...», «что приоритетнее ...». " +
+			"action='analyze' — FREE-FORM overview of spending for a period: anomalies, trends, savings advice. NO specific item. " +
+			"Triggers EN: 'analyze my spending', 'spending overview', 'what are my spending anomalies?', 'how am I doing this month?', 'review my expenses'. " +
+			"Triggers RU: «проанализируй траты», «обзор трат», «что с моими расходами», «как я в этом месяце трачу», «найди аномалии в тратах», «дай советы по экономии». " +
+			"Do NOT use for RECORDING a completed purchase (past tense 'купил'/'потратил' → budget.add_expense). " +
+			"Do NOT use for plain numerical summary or transaction listing — use budget skill (budget.summary / budget.list_transactions / budget.forecast). " +
+			"Use 'advice' for a single planned item, 'analyze' for free-form analysis of the whole period.",
 		InputSchema: &plugin.Schema{
 			Name:    "AdvisorInput",
 			Version: "1.0.0",
@@ -69,32 +72,37 @@ func (s *AdvisorSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: advice",
-						"enum":        []string{"advice"},
+						"description": "Action to perform: 'advice' (specific purchase decision) or 'analyze' (free-form spending overview).",
+						"enum":        []string{"advice", "analyze"},
 					},
 					"question": map[string]any{
 						"type":        "string",
-						"description": "Original user question, verbatim. Required.",
+						"description": "Original user question verbatim. Required for action='advice', optional for 'analyze'.",
+					},
+					"period": map[string]any{
+						"type":        "string",
+						"description": "For action='analyze': period to analyze. 'month' (default) for current month, or 'YYYY-MM' for a specific month.",
 					},
 					"amount": map[string]any{
 						"type":        "number",
-						"description": "Optional amount mentioned in the question (e.g. price of item the user is asking about).",
+						"description": "For action='advice': amount mentioned in the question.",
 					},
 					"currency": map[string]any{
 						"type":        "string",
-						"description": "Optional ISO 4217 currency of the amount: THB, RUB, USD, EUR. Default: THB.",
+						"description": "ISO 4217 currency for amount: THB, RUB, USD, EUR. Default: THB.",
 					},
 				},
-				"required": []string{"action", "question"},
+				"required": []string{"action"},
 			},
 		},
 	}
 }
 
-// advisorInput — payload для action='advice'.
+// advisorInput — payload для AdvisorSkill (actions: advice, analyze).
 type advisorInput struct {
 	Action   string  `json:"action"`
-	Question string  `json:"question"`
+	Question string  `json:"question,omitempty"`
+	Period   string  `json:"period,omitempty"` // для action='analyze'
 	Amount   float64 `json:"amount,omitempty"`
 	Currency string  `json:"currency,omitempty"`
 }
@@ -145,16 +153,32 @@ const advisorPromptTemplate = `Ты — финансовый советник д
 - Числа — округлённые THB, без валютных символов.
 `
 
-// Run собирает финансовый снимок, вызывает LLM и возвращает Markdown-ответ.
+// Run диспатчит по action: 'advice' (default, для совместимости) или 'analyze'.
 func (s *AdvisorSkill) Run(ctx context.Context, input string) (string, error) {
-	start := time.Now()
-
 	var req advisorInput
 	if err := json.Unmarshal([]byte(input), &req); err != nil {
 		return "", fmt.Errorf("invalid advisor input: %w", err)
 	}
+	action := strings.TrimSpace(req.Action)
+	if action == "" {
+		action = "advice"
+	}
+	switch action {
+	case "advice":
+		return s.runAdvice(ctx, req)
+	case "analyze":
+		return s.runAnalyze(ctx, req)
+	default:
+		return "", fmt.Errorf("advisor: unknown action %q", action)
+	}
+}
+
+// runAdvice — старая логика action='advice': снимок + LLM-вердикт по конкретной покупке.
+func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string, error) {
+	start := time.Now()
+
 	if strings.TrimSpace(req.Question) == "" {
-		return "", fmt.Errorf("advisor: question is required")
+		return "", fmt.Errorf("advisor: question is required for action='advice'")
 	}
 
 	chatID, hasChatID := ctx.Value(agent.ChatIDKey{}).(int64)
@@ -187,7 +211,7 @@ func (s *AdvisorSkill) Run(ctx context.Context, input string) (string, error) {
 		amountTHB = origAmount * rubRate / rates["THB"]
 	}
 
-	snap, err := s.store.GetAdvisorSnapshot(ctx, chatID, time.Now(), rates)
+	snap, err := s.store.GetAdvisorSnapshot(ctx, chatID, time.Now(), 0, rates)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "advisor: get snapshot", "err", err, "chat_id", chatID)
 		return "Временная ошибка при сборе финансового снимка — попробуй позже.", nil
@@ -218,6 +242,7 @@ func (s *AdvisorSkill) Run(ctx context.Context, input string) (string, error) {
 	q := truncateRunes(req.Question, 200)
 	s.logger.InfoContext(ctx, "advisor",
 		"skill", "advisor",
+		"action", "advice",
 		"chat_id", chatID,
 		"question", q,
 		"verdict", parsed.Verdict,
@@ -356,6 +381,236 @@ func escapeTelegramMarkdown(s string) string {
 		"`", "\\`",
 	)
 	return r.Replace(s)
+}
+
+// analyzeLLMResponse — JSON-структура для action='analyze'.
+type analyzeLLMResponse struct {
+	Anomalies []string `json:"anomalies"` // 0..N коротких пунктов
+	Trends    []string `json:"trends"`    // 0..N коротких пунктов
+	Advice    []string `json:"advice"`    // 2..3 коротких пункта
+}
+
+const analyzePromptTemplate = `Ты — финансовый аналитик для семьи экспатов. Все суммы в батах (THB).
+
+Период анализа: %s
+%s
+
+Финансовый контекст текущего периода (THB):
+- Доходы − расходы: %.0f
+- Свободные деньги: %.0f
+- Транзакций: %d%s
+
+Расходы по категориям текущего периода (THB):
+%s
+
+Расходы по категориям предыдущего периода (THB) — для сравнения:
+%s
+
+Топ-%d самых дорогих расходов текущего периода (THB):
+%s
+
+Задача: проанализируй паттерны, найди аномалии и дай практические советы.
+
+Ответь СТРОГО валидным JSON без markdown по схеме:
+{
+  "anomalies": ["<короткий пункт по-русски>", ...],
+  "trends": ["<короткий пункт>", ...],
+  "advice": ["<совет 1>", "<совет 2>", "<совет 3>"]
+}
+
+Правила:
+- anomalies: 0-3 пункта, только реально отклоняющиеся факты (рост/падение категории > 30%%, единичная крупная покупка > 20%% бюджета).
+- trends: 0-3 пункта, общие наблюдения (распределение трат, доминирующая категория).
+- advice: 2-3 практических совета по оптимизации, конкретно к этому периоду.
+- Каждый пункт — одна строка, не длиннее 120 символов.
+- Не упоминай данные которых нет в контексте.
+`
+
+// parseAnalyzeLLMResponse — парсит JSON-ответ LLM для action='analyze'.
+//
+// Допускает обрамление ```json ... ```. Валидирует: advice непустой
+// (минимум 1 пункт), длина каждого пункта обрезается до 200 символов.
+func parseAnalyzeLLMResponse(raw string) (*analyzeLLMResponse, error) {
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimPrefix(s, "```")
+		s = strings.TrimSuffix(s, "```")
+		s = strings.TrimSpace(s)
+	}
+	var r analyzeLLMResponse
+	if err := json.Unmarshal([]byte(s), &r); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	if len(r.Advice) == 0 {
+		return nil, fmt.Errorf("advice is empty")
+	}
+	r.Anomalies = trimList(r.Anomalies, 200)
+	r.Trends = trimList(r.Trends, 200)
+	r.Advice = trimList(r.Advice, 200)
+	return &r, nil
+}
+
+func trimList(items []string, maxLen int) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		t := strings.TrimSpace(it)
+		if t == "" {
+			continue
+		}
+		out = append(out, truncateRunes(t, maxLen))
+	}
+	return out
+}
+
+// parseAnalyzePeriod разбирает строку period для action='analyze'.
+//
+//   - "" или "month" → текущий месяц (now, label "текущий месяц")
+//   - "YYYY-MM" → конкретный месяц (15-е число этого месяца, label "YYYY-MM")
+//
+// Возвращает дату для GetAdvisorSnapshot (monthOffset=0) и человекочитаемый label.
+func parseAnalyzePeriod(period string, now time.Time) (time.Time, string, error) {
+	p := strings.TrimSpace(strings.ToLower(period))
+	if p == "" || p == "month" {
+		return now, "текущий месяц", nil
+	}
+	t, err := time.Parse("2006-01", period)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid period %q (expected 'month' or 'YYYY-MM')", period)
+	}
+	return time.Date(t.Year(), t.Month(), 15, 0, 0, 0, 0, time.UTC), period, nil
+}
+
+// runAnalyze — action='analyze': обзорный анализ трат за период.
+//
+// Собирает: snapshot текущего и прошлого периода + top-20 расходов. Шлёт в LLM
+// единый prompt, парсит JSON {anomalies, trends, advice}, форматирует под Telegram.
+func (s *AdvisorSkill) runAnalyze(ctx context.Context, req advisorInput) (string, error) {
+	start := time.Now()
+
+	target, label, err := parseAnalyzePeriod(req.Period, time.Now())
+	if err != nil {
+		return fmt.Sprintf("Не понял period: %s. Используй 'month' или 'YYYY-MM'.", req.Period), nil
+	}
+
+	chatID, hasChatID := ctx.Value(agent.ChatIDKey{}).(int64)
+	if !hasChatID {
+		s.logger.WarnContext(ctx, "advisor.analyze: chatID missing — recurring будет пуст")
+		chatID = 0
+	}
+
+	rates, err := s.store.GetExchangeRates(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "advisor.analyze: get rates", "err", err, "chat_id", chatID)
+		return "Временная ошибка с курсами валют — попробуй позже.", nil
+	}
+	if _, ok := rates["THB"]; !ok || rates["THB"] == 0 {
+		s.logger.ErrorContext(ctx, "advisor.analyze: THB rate missing", "chat_id", chatID)
+		return "Не могу посчитать в THB — обнови курс валют командой /rates.", nil
+	}
+
+	curSnap, err := s.store.GetAdvisorSnapshot(ctx, chatID, target, 0, rates)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "advisor.analyze: cur snapshot", "err", err, "chat_id", chatID)
+		return "Временная ошибка при сборе финансового снимка — попробуй позже.", nil
+	}
+
+	prevSnap, err := s.store.GetAdvisorSnapshot(ctx, chatID, target, 1, rates)
+	if err != nil {
+		s.logger.WarnContext(ctx, "advisor.analyze: prev snapshot (continuing without)", "err", err, "chat_id", chatID)
+		prevSnap = &budget.AdvisorSnapshot{SpentByCategory: map[string]float64{}}
+	}
+
+	const topLimit = 20
+	top, err := s.store.GetTopExpenseTransactions(ctx, target, 0, topLimit, rates)
+	if err != nil {
+		s.logger.WarnContext(ctx, "advisor.analyze: top expenses (continuing without)", "err", err, "chat_id", chatID)
+		top = nil
+	}
+
+	if curSnap.TxCount == 0 {
+		return fmt.Sprintf("За %s нет транзакций — нечего анализировать.", label), nil
+	}
+
+	prompt := buildAnalyzePrompt(label, curSnap, prevSnap, top, topLimit)
+
+	raw, err := s.llm.Ask(ctx, prompt)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "advisor.analyze: llm call", "err", err, "chat_id", chatID)
+		return "Не удалось получить анализ — попробуй позже.", nil
+	}
+
+	parsed, err := parseAnalyzeLLMResponse(raw)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "advisor.analyze: parse llm response", "err", err, "raw", raw, "chat_id", chatID)
+		return "Не смог разобрать ответ аналитика — попробуй ещё раз.", nil
+	}
+
+	reply := formatAnalyzeReply(label, parsed)
+
+	s.logger.InfoContext(ctx, "advisor",
+		"skill", "advisor",
+		"action", "analyze",
+		"chat_id", chatID,
+		"period", label,
+		"anomalies", len(parsed.Anomalies),
+		"trends", len(parsed.Trends),
+		"advice", len(parsed.Advice),
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+	return reply, nil
+}
+
+func buildAnalyzePrompt(label string, cur, prev *budget.AdvisorSnapshot, top []budget.TopExpense, topLimit int) string {
+	lowDataNote := ""
+	if cur.LowData {
+		lowDataNote = fmt.Sprintf(" (low_data=true, порог=%d — данных может быть недостаточно)", budget.MinTxForConfidence)
+	}
+	return fmt.Sprintf(analyzePromptTemplate,
+		label,
+		"",
+		cur.BalanceMTD,
+		cur.FreeCash,
+		cur.TxCount,
+		lowDataNote,
+		formatSpentByCategory(cur.SpentByCategory),
+		formatSpentByCategory(prev.SpentByCategory),
+		topLimit,
+		formatTopExpenses(top),
+	)
+}
+
+func formatTopExpenses(top []budget.TopExpense) string {
+	if len(top) == 0 {
+		return "  (нет данных)"
+	}
+	var sb strings.Builder
+	for _, e := range top {
+		fmt.Fprintf(&sb, "  - %s · %s · %.0f THB\n", e.Date.Format("2006-01-02"), e.Category, e.AmountTHB)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func formatAnalyzeReply(label string, r *analyzeLLMResponse) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🧠 *Анализ за %s:*\n", escapeTelegramMarkdown(label))
+	if len(r.Anomalies) > 0 {
+		sb.WriteString("\n*Аномалии:*\n")
+		for _, a := range r.Anomalies {
+			fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(a))
+		}
+	}
+	if len(r.Trends) > 0 {
+		sb.WriteString("\n*Тренды:*\n")
+		for _, t := range r.Trends {
+			fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(t))
+		}
+	}
+	sb.WriteString("\n*Советы:*\n")
+	for _, a := range r.Advice {
+		fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(a))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // formatAdvisorReply форматирует ответ для Telegram (Markdown, русский).

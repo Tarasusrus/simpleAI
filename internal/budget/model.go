@@ -135,6 +135,17 @@ type AdvisorSnapshot struct {
 	LowData           bool               // TxCount < MinTxForConfidence (порог в пакете skills)
 }
 
+// TopExpense — одна из топ-N самых дорогих расходных транзакций за период,
+// сконвертированная в THB. Используется AdvisorSkill action='analyze' для
+// передачи LLM детализированного среза трат.
+type TopExpense struct {
+	Date      time.Time
+	Category  string
+	AmountTHB float64
+	OrigAmt   float64
+	Currency  string
+}
+
 // RecurringPayment — повторяющийся платёж, создающий транзакцию автоматически по расписанию.
 type RecurringPayment struct {
 	ID              uuid.UUID

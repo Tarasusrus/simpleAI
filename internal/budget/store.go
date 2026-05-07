@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -861,13 +862,15 @@ SELECT kind, subtype, currency, category, total, cnt FROM recurring_agg
 // GetAdvisorSnapshot собирает финансовый снимок для AdvisorSkill одним SQL CTE.
 // Все суммы конвертируются в THB через rates (map[currency]rate_to_rub).
 //
-//   - $1: today (определяет границы месяца)
-//   - $2: chat_id (фильтр для budget_recurring; budget_transaction и budget_debt — глобальные)
+//   - today: точка отсчёта (определяет границы месяца через date_trunc)
+//   - monthOffset: 0 — текущий месяц, 1 — прошлый, и т.д.
+//   - chatID: фильтр для budget_recurring; budget_transaction и budget_debt — глобальные
 //   - rates: map currency → rate_to_rub. Должна содержать "THB", иначе ошибка.
 //
 // ForecastRemaining не заполняется — это делает skill отдельным вызовом GetForecastData.
-func (s *Store) GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, rates map[string]float64) (*AdvisorSnapshot, error) {
-	rows, err := s.pool.Query(ctx, advisorSnapshotQuery, today, chatID)
+func (s *Store) GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, monthOffset int, rates map[string]float64) (*AdvisorSnapshot, error) {
+	target := today.AddDate(0, -monthOffset, 0)
+	rows, err := s.pool.Query(ctx, advisorSnapshotQuery, target, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("advisor snapshot query: %w", err)
 	}
@@ -885,6 +888,70 @@ func (s *Store) GetAdvisorSnapshot(ctx context.Context, chatID int64, today time
 		return nil, fmt.Errorf("advisor rows: %w", err)
 	}
 	return aggregateAdvisorSnapshot(collected, rates)
+}
+
+// topExpenseQuery — топ-N самых дорогих расходов за месяц (определённый через
+// date_trunc от $1::date), глобально по всем chat_id (как budget_transaction).
+// Сортировка по amount DESC в исходной валюте — не идеально для multi-currency,
+// поэтому финальный ORDER в Go-коде после конверсии в THB.
+const topExpenseQuery = `
+WITH params AS (
+    SELECT
+        date_trunc('month', $1::date)::date AS month_start,
+        (date_trunc('month', $1::date) + interval '1 month - 1 day')::date AS month_end
+)
+SELECT
+    t.transaction_date,
+    COALESCE(c.name, 'Прочее') AS category,
+    t.amount,
+    t.currency
+FROM budget_transaction t
+LEFT JOIN budget_category c ON c.id = t.category_id
+CROSS JOIN params p
+WHERE t.type = 'expense'
+  AND t.transaction_date >= p.month_start
+  AND t.transaction_date <= p.month_end
+`
+
+// GetTopExpenseTransactions — топ-N самых дорогих расходов за указанный месяц
+// (today, monthOffset аналогично GetAdvisorSnapshot), сконвертированных в THB.
+// Сортировка финальная по AmountTHB DESC в Go-коде (после конверсии).
+func (s *Store) GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset int, limit int, rates map[string]float64) ([]TopExpense, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return nil, fmt.Errorf("top expenses: THB exchange rate missing")
+	}
+	target := today.AddDate(0, -monthOffset, 0)
+	rows, err := s.pool.Query(ctx, topExpenseQuery, target)
+	if err != nil {
+		return nil, fmt.Errorf("top expenses query: %w", err)
+	}
+	defer rows.Close()
+
+	var all []TopExpense
+	for rows.Next() {
+		var e TopExpense
+		if err := rows.Scan(&e.Date, &e.Category, &e.OrigAmt, &e.Currency); err != nil {
+			return nil, fmt.Errorf("scan top expense: %w", err)
+		}
+		rubRate, hasRate := rates[e.Currency]
+		if !hasRate || rubRate == 0 {
+			continue
+		}
+		e.AmountTHB = e.OrigAmt * rubRate / thbRate
+		all = append(all, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("top expenses rows: %w", err)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].AmountTHB > all[j].AmountTHB })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }
 
 // aggregateAdvisorSnapshot — чистая агрегация: rows → AdvisorSnapshot в THB.
