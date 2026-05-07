@@ -31,3 +31,5 @@
 {"id":"r029","input":"какие тренды в моих тратах","expected":{"skill":"advisor","action":"analyze"},"tags":["advisor_analyze","trends","ru"]}
 {"id":"r030","input":"сколько я потратил в этом месяце","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru","contrast_analyze"]}
 {"id":"r031","input":"итоги за апрель","expected":{"skill":"budget","action":"summary"},"tags":["summary","month","ru","contrast_analyze"]}
+{"id":"r032","input":"покажи доходы за прошлый месяц","expected":{"skill":"budget","action":"summary"},"tags":["summary","prev_month","income","ru"]}
+{"id":"r033","input":"сколько я заработал в марте","expected":{"skill":"budget","action":"summary"},"tags":["summary","income","ru"]}

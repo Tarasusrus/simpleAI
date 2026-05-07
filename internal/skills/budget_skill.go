@@ -706,6 +706,15 @@ func summaryTotalRUB(s *budget.Summary, rates map[string]float64) float64 {
 	return total
 }
 
+// summaryIncomeRUB считает суммарные доходы сводки в RUB-эквиваленте.
+func summaryIncomeRUB(s *budget.Summary, rates map[string]float64) float64 {
+	var total float64
+	for _, cg := range s.Currencies {
+		total += toRUB(cg.TotalIncome, cg.Currency, rates)
+	}
+	return total
+}
+
 // summaryCategories собирает все категории сводки с конвертацией в RUB.
 func summaryCategories(s *budget.Summary, rates map[string]float64) map[string]float64 {
 	m := map[string]float64{}
@@ -719,7 +728,7 @@ func summaryCategories(s *budget.Summary, rates map[string]float64) map[string]f
 
 func formatSummary(s *budget.Summary, prev *budget.Summary, rates map[string]float64) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s — расходы\n", formatPeriodName(s.Period))
+	fmt.Fprintf(&sb, "%s — сводка\n", formatPeriodName(s.Period))
 
 	if len(s.Currencies) == 0 {
 		sb.WriteString("\nОпераций нет.")
@@ -727,8 +736,20 @@ func formatSummary(s *budget.Summary, prev *budget.Summary, rates map[string]flo
 	}
 
 	totalRUB := summaryTotalRUB(s, rates)
+	incomeRUB := summaryIncomeRUB(s, rates)
 
+	if incomeRUB > 0 {
+		fmt.Fprintf(&sb, "\n💰 Доходы: ~%.0f ₽ экв.\n", incomeRUB)
+	}
 	fmt.Fprintf(&sb, "\n💸 Всего потрачено: ~%.0f ₽ экв.\n", totalRUB)
+	if incomeRUB > 0 {
+		balance := incomeRUB - totalRUB
+		sign := "+"
+		if balance < 0 {
+			sign = ""
+		}
+		fmt.Fprintf(&sb, "📊 Баланс: %s%.0f ₽ экв.\n", sign, balance)
+	}
 
 	// Собираем категории из всех валют, конвертируем в RUB.
 	type catEntry struct {
