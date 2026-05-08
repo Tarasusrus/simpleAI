@@ -19,6 +19,21 @@ import (
 
 var ErrChatCompletion = errors.New("Completions.New.Err")
 
+// IsTransientUpstream возвращает true, если ошибка от провайдера временная
+// (503 service_unavailable, 429 rate limit, 5xx). На таких ошибках смысла
+// ретраить нет — caller должен сразу пробовать fallback.
+func IsTransientUpstream(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		sc := apiErr.StatusCode
+		return sc == 429 || sc == 503 || (sc >= 500 && sc < 600)
+	}
+	return false
+}
+
 type Client struct {
 	api           openai.Client
 	l             *slog.Logger
@@ -31,7 +46,7 @@ func NewClient(cfg config.Config, logger *slog.Logger) (*Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("DEEPSEEK_API_KEY not configured")
 	}
-	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(0)}
 	if baseURL := strings.TrimSpace(cfg.LLM.BaseURL); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -48,7 +63,7 @@ func NewFallbackClient(cfg config.Config, logger *slog.Logger) (*Client, error) 
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY not configured")
 	}
-	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(0)}
 	if baseURL := strings.TrimSpace(cfg.LLM.FallbackBaseURL); baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -104,6 +119,9 @@ func (c *Client) askWithCustomSystem(ctx context.Context, system, prompt string)
 			err = apperr.New(constants.ErrCodeLLMEmptyChoices, constants.ErrMsgLLMEmptyChoices, nil)
 		}
 		lastErr = err
+		if IsTransientUpstream(err) {
+			break
+		}
 		if attempt < retries {
 			c.sleepBackoff(attempt)
 		}

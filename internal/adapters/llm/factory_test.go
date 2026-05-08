@@ -2,8 +2,15 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"simpleAI/config"
+	openaiadapter "simpleAI/internal/adapters/llm/openai"
 )
 
 type stubLLM struct {
@@ -83,6 +90,59 @@ func TestCompositeAskWithSystem_FallbackUsed(t *testing.T) {
 	out, err := c.AskWithSystem(context.Background(), "sys", "u")
 	if err != nil || out != "fb" {
 		t.Fatalf("want fb,nil; got %q,%v", out, err)
+	}
+}
+
+// TestComposite_503Primary_FastFallback: реальный openai клиент против
+// httptest-сервера, отдающего 503. Должен фейлиться без ретраев и за <2s
+// прыгать на fallback.
+func TestComposite_503Primary_FastFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"message": "Service is too busy",
+				"type":    "service_unavailable_error",
+				"code":    "service_unavailable_error",
+			},
+		}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		LLM: config.LLMConfig{
+			APIKey:     "test",
+			BaseURL:    srv.URL,
+			ChatModel:  "deepseek-chat",
+			Timeout:    5 * time.Second,
+			RetryCount: 0,
+		},
+	}
+	primary, err := openaiadapter.NewClient(cfg, nil)
+	if err != nil {
+		t.Fatalf("primary build: %v", err)
+	}
+	fb := &stubLLM{askSys: func(ctx context.Context, s, u string) (string, error) { return "fb-ok", nil }}
+	c := newCompositeClient(primary, fb, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	out, err := c.AskWithSystem(ctx, "sys", "u")
+	elapsed := time.Since(start)
+
+	if err != nil || out != "fb-ok" {
+		t.Fatalf("want fb-ok,nil; got %q,%v", out, err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("fallback took too long: %v (expected <2s)", elapsed)
+	}
+	if fb.calls != 1 {
+		t.Fatalf("fallback calls=%d want 1", fb.calls)
 	}
 }
 
