@@ -30,7 +30,8 @@ import (
 	"simpleAI/internal/agent"
 	"simpleAI/internal/core"
 	"simpleAI/internal/plugin"
-	"simpleAI/internal/skills"
+	advisorskill "simpleAI/internal/skills/advisor"
+	budgetskill "simpleAI/internal/skills/budget"
 
 	"simpleAI/evals"
 )
@@ -123,8 +124,8 @@ func main() {
 // Skill-конструкторы вызываются с nil зависимостями — Manifest не дереференсит их.
 func buildManifests() []plugin.Manifest {
 	return []plugin.Manifest{
-		skills.NewBudgetSkill(nil).Manifest(),
-		skills.NewAdvisorSkill(nil, nil, nil).Manifest(),
+		budgetskill.NewBudgetSkill(nil).Manifest(),
+		advisorskill.NewAdvisorSkill(nil, nil, nil).Manifest(),
 	}
 }
 

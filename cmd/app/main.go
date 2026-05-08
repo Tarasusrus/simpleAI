@@ -34,6 +34,8 @@ import (
 	"simpleAI/internal/rag"
 	"simpleAI/internal/rates"
 	"simpleAI/internal/skills"
+	advisorskill "simpleAI/internal/skills/advisor"
+	budgetskill "simpleAI/internal/skills/budget"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
 	"simpleAI/internal/trace"
@@ -288,12 +290,12 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	budgetStore := budget.NewStore(pool)
-	budgetSkill := skills.NewBudgetSkill(budgetStore)
+	budgetSkill := budgetskill.NewBudgetSkill(budgetStore)
 	if err := registry.Register(budgetSkill); err != nil {
 		logger.Error("failed to register budget skill", "err", err)
 	}
 
-	advisorSkill := skills.NewAdvisorSkill(budgetStore, llmClient, logger)
+	advisorSkill := advisorskill.NewAdvisorSkill(budgetStore, llmClient, logger)
 	if err := registry.Register(advisorSkill); err != nil {
 		logger.Error("failed to register advisor skill", "err", err)
 	}

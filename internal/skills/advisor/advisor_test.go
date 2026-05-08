@@ -1,4 +1,4 @@
-package skills
+package advisorskill
 
 import (
 	"encoding/json"
@@ -90,7 +90,6 @@ func TestProperty_ParseLLMRoundtrip(t *testing.T) {
 func TestProperty_ParseLLMRejectsBadVerdict(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		bad := rapid.StringMatching(`[A-Za-z]{1,15}`).Draw(t, "bad")
-		// исключаем случайное совпадение
 		if bad == "Да" || bad == "Нет" || bad == "Условно" {
 			return
 		}
