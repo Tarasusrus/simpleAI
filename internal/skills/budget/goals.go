@@ -3,7 +3,6 @@ package budgetskill
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"simpleAI/internal/budget"
@@ -72,30 +71,5 @@ func (s *BudgetSkill) goalStatus(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list goals: %w", err)
 	}
-
-	if len(goals) == 0 {
-		return "Целей пока нет. Создайте цель, например: «хочу накопить 100000 на отпуск».", nil
-	}
-
-	var sb strings.Builder
-	sb.WriteString("🎯 Цели накоплений:\n\n")
-	for _, g := range goals {
-		pct := 0.0
-		if g.TargetAmount > 0 {
-			pct = g.CurrentAmount / g.TargetAmount * 100
-		}
-		status := ""
-		switch g.Status {
-		case "completed":
-			status = " ✅"
-		case "cancelled":
-			status = " ❌"
-		}
-		fmt.Fprintf(&sb, "• %s%s: %.0f / %.0f ₽ (%.0f%%)\n",
-			g.Name, status, g.CurrentAmount, g.TargetAmount, pct)
-		if g.Deadline != nil && g.Status == "active" {
-			fmt.Fprintf(&sb, "  Дедлайн: %s\n", g.Deadline.Format("02.01.2006"))
-		}
-	}
-	return sb.String(), nil
+	return renderGoalList(goals), nil
 }

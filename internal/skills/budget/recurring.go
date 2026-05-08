@@ -3,7 +3,6 @@ package budgetskill
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"simpleAI/internal/agent"
@@ -91,26 +90,7 @@ func (s *BudgetSkill) listRecurring(ctx context.Context) (string, error) {
 	if err != nil {
 		return fmt.Sprintf("Не удалось загрузить список: %v", err), nil
 	}
-	if len(list) == 0 {
-		return "Повторяющихся платежей нет. Чтобы добавить, скажи: «каждое 1-е число списывай аренду 30000 THB».", nil
-	}
-
-	var sb strings.Builder
-	sb.WriteString("🔄 *Повторяющиеся платежи:*\n\n")
-	for _, r := range list {
-		status := "✅"
-		if !r.Enabled {
-			status = "⏸"
-		}
-		day := "?"
-		if r.DayOfMonth != nil {
-			day = fmt.Sprintf("%d-е", *r.DayOfMonth)
-		}
-		fmt.Fprintf(&sb, "%s %s — %.0f %s | каждое %s | след. %s | ID: %s\n",
-			status, r.Name, r.Amount, r.Currency, day,
-			r.NextDate.Format("02.01"), r.ID.String()[:8])
-	}
-	return sb.String(), nil
+	return renderRecurringList(list), nil
 }
 
 func (s *BudgetSkill) disableRecurring(ctx context.Context, req budgetInput) (string, error) {

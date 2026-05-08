@@ -258,6 +258,106 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	return result, nil
 }
 
+func renderTransactionList(periodLabel string, txs []budget.Transaction) string {
+	if len(txs) == 0 {
+		return fmt.Sprintf("Транзакций за %s нет.", periodLabel)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Транзакции за %s:\n\n", periodLabel)
+	for _, t := range txs {
+		icon, sign := "🔴", "-"
+		if t.Type == "income" {
+			icon, sign = "🟢", "+"
+		}
+		cat := t.CategoryName
+		if cat == "" {
+			cat = "без категории"
+		}
+		desc := t.Description
+		if desc != "" {
+			desc = " — " + desc
+		}
+		fmt.Fprintf(&sb, "[%s] %s %s%.0f %s | %s%s | %s\n",
+			t.ID.String()[:8], icon, sign, t.Amount, currencySymbol(t.Currency), cat, desc, t.Date.Format("02.01"))
+	}
+	return sb.String()
+}
+
+func renderGoalList(goals []budget.Goal) string {
+	if len(goals) == 0 {
+		return "Целей пока нет. Создайте цель, например: «хочу накопить 100000 на отпуск»."
+	}
+	var sb strings.Builder
+	sb.WriteString("🎯 Цели накоплений:\n\n")
+	for _, g := range goals {
+		pct := 0.0
+		if g.TargetAmount > 0 {
+			pct = g.CurrentAmount / g.TargetAmount * 100
+		}
+		status := ""
+		switch g.Status {
+		case "completed":
+			status = " ✅"
+		case "cancelled":
+			status = " ❌"
+		}
+		fmt.Fprintf(&sb, "• %s%s: %.0f / %.0f ₽ (%.0f%%)\n",
+			g.Name, status, g.CurrentAmount, g.TargetAmount, pct)
+		if g.Deadline != nil && g.Status == "active" {
+			fmt.Fprintf(&sb, "  Дедлайн: %s\n", g.Deadline.Format("02.01.2006"))
+		}
+	}
+	return sb.String()
+}
+
+func renderDebtList(debts []budget.Debt) string {
+	if len(debts) == 0 {
+		return "Долгов нет 🎉"
+	}
+	var sb strings.Builder
+	sb.WriteString("📋 Долги:\n\n")
+	for _, d := range debts {
+		remaining := d.TotalAmount - d.PaidAmount
+		pct := 0.0
+		if d.TotalAmount > 0 {
+			pct = d.PaidAmount / d.TotalAmount * 100
+		}
+		dir := "я должен"
+		if d.Direction == "owed" {
+			dir = "мне должны"
+		}
+		status := ""
+		if d.Status == "paid" {
+			status = " ✅"
+		}
+		fmt.Fprintf(&sb, "• %s%s: осталось %.0f ₽ из %.0f ₽ (%.0f%% погашено) — %s\n",
+			d.Name, status, remaining, d.TotalAmount, pct, dir)
+	}
+	return sb.String()
+}
+
+func renderRecurringList(list []budget.RecurringPayment) string {
+	if len(list) == 0 {
+		return "Повторяющихся платежей нет. Чтобы добавить, скажи: «каждое 1-е число списывай аренду 30000 THB»."
+	}
+	var sb strings.Builder
+	sb.WriteString("🔄 *Повторяющиеся платежи:*\n\n")
+	for _, r := range list {
+		status := "✅"
+		if !r.Enabled {
+			status = "⏸"
+		}
+		day := "?"
+		if r.DayOfMonth != nil {
+			day = fmt.Sprintf("%d-е", *r.DayOfMonth)
+		}
+		fmt.Fprintf(&sb, "%s %s — %.0f %s | каждое %s | след. %s | ID: %s\n",
+			status, r.Name, r.Amount, r.Currency, day,
+			r.NextDate.Format("02.01"), r.ID.String()[:8])
+	}
+	return sb.String()
+}
+
 func formatPeriodName(p budget.Period) string {
 	months := []string{
 		"", "январь", "февраль", "март", "апрель", "май", "июнь",

@@ -179,31 +179,7 @@ func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (st
 		return "", fmt.Errorf("list transactions: %w", err)
 	}
 
-	if len(txs) == 0 {
-		return fmt.Sprintf("Транзакций за %s нет.", periodLabel), nil
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Транзакции за %s:\n\n", periodLabel)
-	for _, t := range txs {
-		icon := "🔴"
-		sign := "-"
-		if t.Type == "income" {
-			icon = "🟢"
-			sign = "+"
-		}
-		cat := t.CategoryName
-		if cat == "" {
-			cat = "без категории"
-		}
-		desc := t.Description
-		if desc != "" {
-			desc = " — " + desc
-		}
-		fmt.Fprintf(&sb, "[%s] %s %s%.0f %s | %s%s | %s\n",
-			t.ID.String()[:8], icon, sign, t.Amount, currencySymbol(t.Currency), cat, desc, t.Date.Format("02.01"))
-	}
-	return sb.String(), nil
+	return renderTransactionList(periodLabel, txs), nil
 }
 
 func formatTransaction(t budget.Transaction, typ string) string {

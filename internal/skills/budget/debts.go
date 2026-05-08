@@ -3,7 +3,6 @@ package budgetskill
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"simpleAI/internal/budget"
 
@@ -72,29 +71,5 @@ func (s *BudgetSkill) debtStatus(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list debts: %w", err)
 	}
-
-	if len(debts) == 0 {
-		return "Долгов нет 🎉", nil
-	}
-
-	var sb strings.Builder
-	sb.WriteString("📋 Долги:\n\n")
-	for _, d := range debts {
-		remaining := d.TotalAmount - d.PaidAmount
-		pct := 0.0
-		if d.TotalAmount > 0 {
-			pct = d.PaidAmount / d.TotalAmount * 100
-		}
-		dir := "я должен"
-		if d.Direction == "owed" {
-			dir = "мне должны"
-		}
-		status := ""
-		if d.Status == "paid" {
-			status = " ✅"
-		}
-		fmt.Fprintf(&sb, "• %s%s: осталось %.0f ₽ из %.0f ₽ (%.0f%% погашено) — %s\n",
-			d.Name, status, remaining, d.TotalAmount, pct, dir)
-	}
-	return sb.String(), nil
+	return renderDebtList(debts), nil
 }
