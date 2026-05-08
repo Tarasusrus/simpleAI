@@ -301,10 +301,21 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 	summary, err := s.store.GetSummary(ctx, p)
 	if err != nil {
 		// Транзакция записана, но сводка не получена — не критично.
-		return formatTransaction(t, typ, nil), nil
+		return formatTransaction(t, typ, nil, nil), nil
 	}
 
-	return formatTransaction(t, typ, summary), nil
+	rates, err := s.store.GetExchangeRates(ctx)
+	if err != nil || len(rates) == 0 {
+		rates = rubRates
+	} else {
+		for k, v := range rubRates {
+			if _, ok := rates[k]; !ok {
+				rates[k] = v
+			}
+		}
+	}
+
+	return formatTransaction(t, typ, summary, rates), nil
 }
 
 func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, error) {
@@ -689,7 +700,7 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 
 // --- Форматирование ---
 
-func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary) string {
+func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary, rates map[string]float64) string {
 	icon := "🔴"
 	label := "Расход"
 	if typ == "income" {
@@ -707,12 +718,15 @@ func formatTransaction(t budget.Transaction, typ string, summary *budget.Summary
 		result += fmt.Sprintf(" (%s)", t.Description)
 	}
 	if summary != nil && len(summary.Currencies) > 0 {
-		result += "\n"
-		for _, cg := range summary.Currencies {
-			sym := currencySymbol(cg.Currency)
-			result += fmt.Sprintf("\nБаланс месяца (%s): %.0f %s (доходы %.0f, расходы %.0f)",
-				cg.Currency, cg.Balance, sym, cg.TotalIncome, cg.TotalExpense)
+		incomeRUB := summaryIncomeRUB(summary, rates)
+		expenseRUB := summaryTotalRUB(summary, rates)
+		balance := incomeRUB - expenseRUB
+		sign := "+"
+		if balance < 0 {
+			sign = ""
 		}
+		result += fmt.Sprintf("\n\nБаланс месяца: %s%.0f ₽ экв. (доходы ~%.0f, расходы ~%.0f)",
+			sign, balance, incomeRUB, expenseRUB)
 	}
 	return result
 }
