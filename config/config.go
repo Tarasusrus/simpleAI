@@ -165,7 +165,7 @@ func loadLLMConfig() LLMConfig {
 		BaseURL:    getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
 		ChatModel:  getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
 		Timeout:    parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
-		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 2),
+		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 0),
 		RetryBase:  parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
 
 		FallbackAPIKey:    os.Getenv("GEMINI_API_KEY"),

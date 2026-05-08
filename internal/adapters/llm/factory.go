@@ -3,6 +3,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -111,12 +112,10 @@ func (c *compositeClient) Ask(ctx context.Context, prompt string) (string, error
 	if err == nil {
 		return out, nil
 	}
-	if ctx.Err() != nil {
+	if !c.shouldFallback(ctx, err) {
 		return "", err
 	}
-	if c.logger != nil {
-		c.logger.Warn("primary chat failed, retrying on fallback", "err", err)
-	}
+	c.logFallback(err)
 	return c.fallback.Ask(ctx, prompt)
 }
 
@@ -125,13 +124,33 @@ func (c *compositeClient) AskWithSystem(ctx context.Context, systemAddition, use
 	if err == nil {
 		return out, nil
 	}
-	if ctx.Err() != nil {
+	if !c.shouldFallback(ctx, err) {
 		return "", err
 	}
-	if c.logger != nil {
-		c.logger.Warn("primary chat failed, retrying on fallback", "err", err)
-	}
+	c.logFallback(err)
 	return c.fallback.AskWithSystem(ctx, systemAddition, userPrompt)
+}
+
+// shouldFallback решает, имеет ли смысл пробовать fallback после ошибки primary.
+// Не пробуем если parent-ctx уже отменён — fallback всё равно отвалится.
+// Всегда пробуем на transient upstream (503/429/5xx) — это ровно тот случай,
+// под который fallback и нужен.
+func (c *compositeClient) shouldFallback(ctx context.Context, err error) bool {
+	if openaiadapter.IsTransientUpstream(err) {
+		return ctx.Err() == nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return ctx.Err() == nil
+	}
+	return ctx.Err() == nil
+}
+
+func (c *compositeClient) logFallback(err error) {
+	if c.logger == nil {
+		return
+	}
+	transient := openaiadapter.IsTransientUpstream(err)
+	c.logger.Warn("primary llm failed, switching to fallback", "err", err, "transient_upstream", transient)
 }
 
 func (c *compositeClient) Embed(ctx context.Context, inputs []string) ([][]float32, error) {

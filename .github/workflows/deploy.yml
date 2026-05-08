@@ -44,7 +44,7 @@ jobs:
               echo "LLM_BASE_URL=https://api.deepseek.com/v1"
               echo "LLM_CHAT_MODEL=deepseek-v4-flash"
               echo "LLM_TIMEOUT_SECONDS=30"
-              echo "LLM_RETRY_COUNT=2"
+              echo "LLM_RETRY_COUNT=0"
               echo "LLM_RETRY_BASE_MS=500"
               echo "LLM_FALLBACK_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/"
               echo "LLM_FALLBACK_MODEL=gemini-2.0-flash"
