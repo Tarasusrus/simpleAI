@@ -9,6 +9,8 @@ import (
 
 	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
+	botformat "simpleAI/internal/bot/format"
+	"simpleAI/internal/prompts"
 )
 
 // advisorLLMResponse — JSON-структура которую обязана вернуть LLM.
@@ -23,39 +25,6 @@ type advisorLLMResponse struct {
 	Recommendation string `json:"recommendation,omitempty"`
 }
 
-const advisorPromptTemplate = `Ты — финансовый советник для семьи экспатов. Все суммы в батах (THB).
-
-Вопрос пользователя: %s
-%s
-
-Финансовый контекст (THB):
-- Баланс месяца к дате (доходы − расходы): %.0f
-- Прогноз остатка до конца месяца: %.0f
-- Свободные деньги (баланс − обязательства): %.0f
-- Предстоящие повторяющиеся платежи до конца месяца: %.0f
-- Активные долги к погашению до конца месяца: %.0f
-- Транзакций в этом месяце: %d%s
-
-Расходы по категориям этого месяца (THB):
-%s
-
-Ответь СТРОГО валидным JSON без markdown-форматирования по схеме:
-{
-  "verdict": "Да" | "Нет" | "Условно",
-  "numbers": {
-    "free_cash_thb": <число>,
-    "forecast_remaining_thb": <число>,
-    "obligations_thb": <число — recurring + долги>
-  },
-  "explanation": "<2-3 предложения по-русски: почему такой вердикт>",
-  "recommendation": "<опционально: альтернатива или предупреждение если verdict не 'Да'>"
-}
-
-Правила:
-- Если verdict не 'Да' — recommendation обязательна.
-- Если low_data=true — verdict должен быть 'Условно' с явным упоминанием недостатка данных.
-- Числа — округлённые THB, без валютных символов.
-`
 
 func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string, error) {
 	start := time.Now()
@@ -119,7 +88,19 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 		return "Не смог разобрать ответ советника — попробуй переформулировать вопрос.", nil
 	}
 
-	reply := formatAdvisorReply(parsed, origAmount, origCurrency, amountTHB)
+	reply := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
+		Verdict: parsed.Verdict,
+		Numbers: botformat.AdvisorNumbers{
+			FreeCashTHB:          parsed.Numbers.FreeCashTHB,
+			ForecastRemainingTHB: parsed.Numbers.ForecastRemainingTHB,
+			ObligationsTHB:       parsed.Numbers.ObligationsTHB,
+		},
+		Explanation:    parsed.Explanation,
+		Recommendation: parsed.Recommendation,
+		OrigAmount:     origAmount,
+		OrigCurrency:   origCurrency,
+		AmountTHB:      amountTHB,
+	})
 
 	q := truncateRunes(req.Question, 200)
 	s.logger.InfoContext(ctx, "advisor",
@@ -173,7 +154,7 @@ func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, amountTH
 		lowDataNote = fmt.Sprintf(" (low_data=true, порог=%d — данных недостаточно для уверенного прогноза)", budget.MinTxForConfidence)
 	}
 
-	return fmt.Sprintf(advisorPromptTemplate,
+	return fmt.Sprintf(prompts.Get("advisor/advice.tmpl"),
 		strings.TrimSpace(req.Question),
 		amountLine,
 		snap.BalanceMTD,
@@ -207,19 +188,3 @@ func parseAdvisorLLMResponse(raw string) (*advisorLLMResponse, error) {
 	return &r, nil
 }
 
-func formatAdvisorReply(r *advisorLLMResponse, origAmount float64, origCurrency string, amountTHB float64) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "*Вердикт:* %s\n", escapeTelegramMarkdown(r.Verdict))
-	if origAmount > 0 && origCurrency != "" && origCurrency != "THB" {
-		fmt.Fprintf(&sb, "_Сумма_: %.0f %s ≈ %.0f THB\n", origAmount, origCurrency, amountTHB)
-	}
-	sb.WriteString("\n*Ключевые цифры (THB):*\n")
-	fmt.Fprintf(&sb, "• Свободно: %.0f\n", r.Numbers.FreeCashTHB)
-	fmt.Fprintf(&sb, "• Прогноз остатка месяца: %.0f\n", r.Numbers.ForecastRemainingTHB)
-	fmt.Fprintf(&sb, "• Обязательства: %.0f\n", r.Numbers.ObligationsTHB)
-	fmt.Fprintf(&sb, "\n%s\n", escapeTelegramMarkdown(strings.TrimSpace(r.Explanation)))
-	if rec := strings.TrimSpace(r.Recommendation); rec != "" {
-		fmt.Fprintf(&sb, "\n*Рекомендация:* %s\n", escapeTelegramMarkdown(rec))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}

@@ -10,6 +10,8 @@ import (
 	"simpleAI/internal/budget"
 )
 
+
+
 func unmarshalJSON(s string, v any) error {
 	return json.Unmarshal([]byte(s), v)
 }
@@ -43,18 +45,6 @@ func trimList(items []string, maxLen int) []string {
 		out = append(out, truncateRunes(t, maxLen))
 	}
 	return out
-}
-
-// escapeTelegramMarkdown экранирует символы Telegram legacy Markdown.
-func escapeTelegramMarkdown(s string) string {
-	r := strings.NewReplacer(
-		`\`, `\\`,
-		"*", `\*`,
-		"_", `\_`,
-		"[", `\[`,
-		"`", "\\`",
-	)
-	return r.Replace(s)
 }
 
 func formatSpentByCategory(m map[string]float64) string {

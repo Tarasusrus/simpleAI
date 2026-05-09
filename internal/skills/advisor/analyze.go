@@ -8,6 +8,8 @@ import (
 
 	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
+	botformat "simpleAI/internal/bot/format"
+	"simpleAI/internal/prompts"
 )
 
 // analyzeLLMResponse — JSON-структура для action='analyze'.
@@ -17,41 +19,6 @@ type analyzeLLMResponse struct {
 	Advice    []string `json:"advice"`
 }
 
-const analyzePromptTemplate = `Ты — финансовый аналитик для семьи экспатов. Все суммы в батах (THB).
-
-Период анализа: %s
-%s
-
-Финансовый контекст текущего периода (THB):
-- Доходы − расходы: %.0f
-- Свободные деньги: %.0f
-- Транзакций: %d%s
-
-Расходы по категориям текущего периода (THB):
-%s
-
-Расходы по категориям предыдущего периода (THB) — для сравнения:
-%s
-
-Топ-%d самых дорогих расходов текущего периода (THB):
-%s
-
-Задача: проанализируй паттерны, найди аномалии и дай практические советы.
-
-Ответь СТРОГО валидным JSON без markdown по схеме:
-{
-  "anomalies": ["<короткий пункт по-русски>", ...],
-  "trends": ["<короткий пункт>", ...],
-  "advice": ["<совет 1>", "<совет 2>", "<совет 3>"]
-}
-
-Правила:
-- anomalies: 0-3 пункта, только реально отклоняющиеся факты (рост/падение категории > 30%%, единичная крупная покупка > 20%% бюджета).
-- trends: 0-3 пункта, общие наблюдения (распределение трат, доминирующая категория).
-- advice: 2-3 практических совета по оптимизации, конкретно к этому периоду.
-- Каждый пункт — одна строка, не длиннее 120 символов.
-- Не упоминай данные которых нет в контексте.
-`
 
 func parseAnalyzePeriod(period string, now time.Time) (time.Time, string, error) {
 	p := strings.TrimSpace(strings.ToLower(period))
@@ -126,7 +93,12 @@ func (s *AdvisorSkill) runAnalyze(ctx context.Context, req advisorInput) (string
 		return "Не смог разобрать ответ аналитика — попробуй ещё раз.", nil
 	}
 
-	reply := formatAnalyzeReply(label, parsed)
+	reply := botformat.FormatAnalyzeReply(botformat.AnalyzeReplyData{
+		Label:     label,
+		Anomalies: parsed.Anomalies,
+		Trends:    parsed.Trends,
+		Advice:    parsed.Advice,
+	})
 
 	s.logger.InfoContext(ctx, "advisor",
 		"skill", "advisor",
@@ -146,7 +118,7 @@ func buildAnalyzePrompt(label string, cur, prev *budget.AdvisorSnapshot, top []b
 	if cur.LowData {
 		lowDataNote = fmt.Sprintf(" (low_data=true, порог=%d — данных может быть недостаточно)", budget.MinTxForConfidence)
 	}
-	return fmt.Sprintf(analyzePromptTemplate,
+	return fmt.Sprintf(prompts.Get("advisor/analyze.tmpl"),
 		label,
 		"",
 		cur.BalanceMTD,
@@ -175,24 +147,3 @@ func parseAnalyzeLLMResponse(raw string) (*analyzeLLMResponse, error) {
 	return &r, nil
 }
 
-func formatAnalyzeReply(label string, r *analyzeLLMResponse) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "🧠 *Анализ за %s:*\n", escapeTelegramMarkdown(label))
-	if len(r.Anomalies) > 0 {
-		sb.WriteString("\n*Аномалии:*\n")
-		for _, a := range r.Anomalies {
-			fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(a))
-		}
-	}
-	if len(r.Trends) > 0 {
-		sb.WriteString("\n*Тренды:*\n")
-		for _, t := range r.Trends {
-			fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(t))
-		}
-	}
-	sb.WriteString("\n*Советы:*\n")
-	for _, a := range r.Advice {
-		fmt.Fprintf(&sb, "• %s\n", escapeTelegramMarkdown(a))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}

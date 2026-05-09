@@ -341,7 +341,7 @@ func renderRecurringList(list []budget.RecurringPayment) string {
 		return "Повторяющихся платежей нет. Чтобы добавить, скажи: «каждое 1-е число списывай аренду 30000 THB»."
 	}
 	var sb strings.Builder
-	sb.WriteString("🔄 *Повторяющиеся платежи:*\n\n")
+	sb.WriteString("🔄 Повторяющиеся платежи:\n\n")
 	for _, r := range list {
 		status := "✅"
 		if !r.Enabled {

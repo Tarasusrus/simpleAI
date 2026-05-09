@@ -9,6 +9,7 @@ import (
 	"pgregory.net/rapid"
 
 	"simpleAI/internal/budget"
+	botformat "simpleAI/internal/bot/format"
 )
 
 // Manifest description всегда содержит positive triggers и negative phrase.
@@ -133,7 +134,19 @@ func TestProperty_FormatReplyContract(t *testing.T) {
 			origCur = "THB"
 		}
 
-		out := formatAdvisorReply(r, origAmt, origCur, amtTHB)
+		out := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
+			Verdict: r.Verdict,
+			Numbers: botformat.AdvisorNumbers{
+				FreeCashTHB:          r.Numbers.FreeCashTHB,
+				ForecastRemainingTHB: r.Numbers.ForecastRemainingTHB,
+				ObligationsTHB:       r.Numbers.ObligationsTHB,
+			},
+			Explanation:    r.Explanation,
+			Recommendation: r.Recommendation,
+			OrigAmount:     origAmt,
+			OrigCurrency:   origCur,
+			AmountTHB:      amtTHB,
+		})
 		if !strings.Contains(out, "*Вердикт:* "+verdict) {
 			t.Fatalf("verdict missing in output: %s", out)
 		}
@@ -215,7 +228,12 @@ func TestFormatAnalyzeReply(t *testing.T) {
 		Trends:    []string{"топ-3 категории = 70% бюджета"},
 		Advice:    []string{"совет 1", "совет 2"},
 	}
-	out := formatAnalyzeReply("март", r)
+	out := botformat.FormatAnalyzeReply(botformat.AnalyzeReplyData{
+		Label:     "март",
+		Anomalies: r.Anomalies,
+		Trends:    r.Trends,
+		Advice:    r.Advice,
+	})
 	for _, want := range []string{"Анализ за март", "Аномалии", "Тренды", "Советы", "совет 1", "совет 2", "еда"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q: %s", want, out)
