@@ -6,7 +6,7 @@ run:
 
 linters:
   enable:
-    # Базовые (были)
+    # Базовые
     - errcheck
     - gocritic
     - govet
@@ -46,7 +46,7 @@ linters:
         - G703  # path traversal — PROMPTS_DIR env var контролируется оператором
     revive:
       rules:
-        # exported: намеренно отключено — внутренние пакеты проекта не требуют godoc
+        # exported отключено — внутренние пакеты проекта не требуют godoc
         - name: var-naming
         - name: error-return
         - name: error-strings
@@ -64,22 +64,19 @@ linters:
         - style
         - performance
       disabled-checks:
-        # Value-copy semantics для domain DTO — architectural decision, не баг.
-        # Переход на указатели — отдельная задача.
-        - hugeParam
-        - rangeValCopy
-        # paramTypeCombine — cosmetic, нарушает читаемость типов в сигнатурах.
-        - paramTypeCombine
-        # commentedOutCode — inline calculation notes в тестах.
-        - commentedOutCode
-        # unnamedResult — стиль проекта не требует именованных возвратов.
-        - unnamedResult
+        - hugeParam       # value semantics для domain DTO — architectural decision
+        - rangeValCopy    # pre-existing, не bottleneck
+        - paramTypeCombine  # нарушает читаемость типов в сигнатурах
+        - commentedOutCode  # inline calculation notes в тестах
+        - unnamedResult     # стиль проекта не требует именованных возвратов
+
+  exclusions:
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - gosec
+          - unparam
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: "_test\\.go"
-      linters:
-        - gosec
-        - unparam
