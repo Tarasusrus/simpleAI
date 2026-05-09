@@ -17,16 +17,22 @@
 Ответь СТРОГО валидным JSON без markdown-форматирования по схеме:
 {
   "verdict": "Да" | "Нет" | "Условно",
-  "numbers": {
-    "free_cash_thb": <число>,
-    "forecast_remaining_thb": <число>,
-    "obligations_thb": <число — recurring + долги>
+  "flow": {
+    "balance_now": <число — баланс сейчас (BalanceMTD)>,
+    "obligations_remaining": <число — обязательные платежи до конца месяца (recurring + долги)>,
+    "after_obligations": <число — balance_now минус obligations_remaining>,
+    "expected_spend": <число — ожидаемые повседневные расходы до конца месяца на основе истории>,
+    "forecast_remaining": <число — after_obligations минус expected_spend>,
+    "after_purchase": <число — forecast_remaining минус сумма покупки; если покупки нет — равно forecast_remaining>
   },
-  "explanation": "<2-3 предложения по-русски: почему такой вердикт>",
+  "assumptions": ["<краткое предположение о расчёте>", ...],
+  "risk": "<оценка: низкий/средний/высокий — одно предложение о последствиях>",
   "recommendation": "<опционально: альтернатива или предупреждение если verdict не 'Да'>"
 }
 
 Правила:
-- Если verdict не 'Да' — recommendation обязательна.
-- Если low_data=true — verdict должен быть 'Условно' с явным упоминанием недостатка данных.
+- verdict не 'Да' → recommendation обязательна.
+- low_data=true → verdict='Условно' с явным упоминанием недостатка данных.
 - Числа — округлённые THB, без валютных символов.
+- assumptions — только нетривиальные предположения (что не очевидно из вопроса).
+- risk — всегда заполнять.

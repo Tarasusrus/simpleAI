@@ -8,8 +8,8 @@ import (
 
 	"pgregory.net/rapid"
 
-	"simpleAI/internal/budget"
 	botformat "simpleAI/internal/bot/format"
+	"simpleAI/internal/budget"
 )
 
 // Manifest description всегда содержит positive triggers и negative phrase.
@@ -58,19 +58,23 @@ func TestProperty_ForecastRemainingUpperBound(t *testing.T) {
 func TestProperty_ParseLLMRoundtrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		verdict := rapid.SampledFrom([]string{"Да", "Нет", "Условно"}).Draw(t, "verdict")
-		expl := rapid.StringMatching(`[a-zA-Zа-яА-Я]{1,50}`).Draw(t, "expl")
+		risk := rapid.StringMatching(`[a-zA-Zа-яА-Я]{1,50}`).Draw(t, "risk")
 		rec := ""
 		if verdict != "Да" {
 			rec = rapid.StringMatching(`[a-zA-Zа-яА-Я]{1,50}`).Draw(t, "rec")
 		}
 		obj := map[string]any{
 			"verdict": verdict,
-			"numbers": map[string]any{
-				"free_cash_thb":          rapid.Float64Range(-1e6, 1e6).Draw(t, "fc"),
-				"forecast_remaining_thb": rapid.Float64Range(-1e6, 1e6).Draw(t, "fr"),
-				"obligations_thb":        rapid.Float64Range(0, 1e6).Draw(t, "ob"),
+			"flow": map[string]any{
+				"balance_now":           rapid.Float64Range(-1e6, 1e6).Draw(t, "bn"),
+				"obligations_remaining": rapid.Float64Range(0, 1e6).Draw(t, "ob"),
+				"after_obligations":     rapid.Float64Range(-1e6, 1e6).Draw(t, "ao"),
+				"expected_spend":        rapid.Float64Range(0, 1e6).Draw(t, "es"),
+				"forecast_remaining":    rapid.Float64Range(-1e6, 1e6).Draw(t, "fr"),
+				"after_purchase":        rapid.Float64Range(-1e6, 1e6).Draw(t, "ap"),
 			},
-			"explanation":    expl,
+			"assumptions":    []string{"предположение"},
+			"risk":           risk,
 			"recommendation": rec,
 		}
 		raw, err := json.Marshal(obj)
@@ -96,10 +100,8 @@ func TestProperty_ParseLLMRejectsBadVerdict(t *testing.T) {
 		}
 		obj := map[string]any{
 			"verdict": bad,
-			"numbers": map[string]any{
-				"free_cash_thb": 1.0, "forecast_remaining_thb": 1.0, "obligations_thb": 1.0,
-			},
-			"explanation": "x",
+			"flow":    map[string]any{"balance_now": 1.0, "obligations_remaining": 1.0, "after_obligations": 1.0, "expected_spend": 1.0, "forecast_remaining": 1.0, "after_purchase": 1.0},
+			"risk":    "x",
 		}
 		raw, err := json.Marshal(obj)
 		if err != nil {
@@ -115,13 +117,16 @@ func TestProperty_ParseLLMRejectsBadVerdict(t *testing.T) {
 func TestProperty_FormatReplyContract(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		verdict := rapid.SampledFrom([]string{"Да", "Нет", "Условно"}).Draw(t, "verdict")
-		r := &advisorLLMResponse{Verdict: verdict, Explanation: "expl"}
+		r := &advisorLLMResponse{Verdict: verdict, Risk: "средний — буфер снизится"}
 		if verdict != "Да" {
 			r.Recommendation = "alt"
 		}
-		r.Numbers.FreeCashTHB = rapid.Float64Range(-1e5, 1e5).Draw(t, "fc")
-		r.Numbers.ForecastRemainingTHB = rapid.Float64Range(-1e5, 1e5).Draw(t, "fr")
-		r.Numbers.ObligationsTHB = rapid.Float64Range(0, 1e5).Draw(t, "ob")
+		r.Flow.BalanceNow = rapid.Float64Range(-1e5, 1e5).Draw(t, "bn")
+		r.Flow.ObligationsRemaining = rapid.Float64Range(0, 1e5).Draw(t, "ob")
+		r.Flow.AfterObligations = rapid.Float64Range(-1e5, 1e5).Draw(t, "ao")
+		r.Flow.ExpectedSpend = rapid.Float64Range(0, 1e5).Draw(t, "es")
+		r.Flow.ForecastRemaining = rapid.Float64Range(-1e5, 1e5).Draw(t, "fr")
+		r.Flow.AfterPurchase = rapid.Float64Range(-1e5, 1e5).Draw(t, "ap")
 
 		nonTHB := rapid.Bool().Draw(t, "nonTHB")
 		var origAmt, amtTHB float64
@@ -136,12 +141,15 @@ func TestProperty_FormatReplyContract(t *testing.T) {
 
 		out := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
 			Verdict: r.Verdict,
-			Numbers: botformat.AdvisorNumbers{
-				FreeCashTHB:          r.Numbers.FreeCashTHB,
-				ForecastRemainingTHB: r.Numbers.ForecastRemainingTHB,
-				ObligationsTHB:       r.Numbers.ObligationsTHB,
+			Flow: botformat.AdvisorFlow{
+				BalanceNow:           r.Flow.BalanceNow,
+				ObligationsRemaining: r.Flow.ObligationsRemaining,
+				AfterObligations:     r.Flow.AfterObligations,
+				ExpectedSpend:        r.Flow.ExpectedSpend,
+				ForecastRemaining:    r.Flow.ForecastRemaining,
+				AfterPurchase:        r.Flow.AfterPurchase,
 			},
-			Explanation:    r.Explanation,
+			Risk:           r.Risk,
 			Recommendation: r.Recommendation,
 			OrigAmount:     origAmt,
 			OrigCurrency:   origCur,

@@ -8,23 +8,26 @@ import (
 	"context"
 
 	"simpleAI/internal/agent"
-	"simpleAI/internal/budget"
 	botformat "simpleAI/internal/bot/format"
+	"simpleAI/internal/budget"
 	"simpleAI/internal/prompts"
 )
 
 // advisorLLMResponse — JSON-структура которую обязана вернуть LLM.
 type advisorLLMResponse struct {
 	Verdict string `json:"verdict"` // "Да" | "Нет" | "Условно"
-	Numbers struct {
-		FreeCashTHB          float64 `json:"free_cash_thb"`
-		ForecastRemainingTHB float64 `json:"forecast_remaining_thb"`
-		ObligationsTHB       float64 `json:"obligations_thb"`
-	} `json:"numbers"`
-	Explanation    string `json:"explanation"`
-	Recommendation string `json:"recommendation,omitempty"`
+	Flow    struct {
+		BalanceNow           float64 `json:"balance_now"`
+		ObligationsRemaining float64 `json:"obligations_remaining"`
+		AfterObligations     float64 `json:"after_obligations"`
+		ExpectedSpend        float64 `json:"expected_spend"`
+		ForecastRemaining    float64 `json:"forecast_remaining"`
+		AfterPurchase        float64 `json:"after_purchase"`
+	} `json:"flow"`
+	Assumptions    []string `json:"assumptions"`
+	Risk           string   `json:"risk"`
+	Recommendation string   `json:"recommendation,omitempty"`
 }
-
 
 func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string, error) {
 	start := time.Now()
@@ -90,12 +93,16 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 
 	reply := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
 		Verdict: parsed.Verdict,
-		Numbers: botformat.AdvisorNumbers{
-			FreeCashTHB:          parsed.Numbers.FreeCashTHB,
-			ForecastRemainingTHB: parsed.Numbers.ForecastRemainingTHB,
-			ObligationsTHB:       parsed.Numbers.ObligationsTHB,
+		Flow: botformat.AdvisorFlow{
+			BalanceNow:           parsed.Flow.BalanceNow,
+			ObligationsRemaining: parsed.Flow.ObligationsRemaining,
+			AfterObligations:     parsed.Flow.AfterObligations,
+			ExpectedSpend:        parsed.Flow.ExpectedSpend,
+			ForecastRemaining:    parsed.Flow.ForecastRemaining,
+			AfterPurchase:        parsed.Flow.AfterPurchase,
 		},
-		Explanation:    parsed.Explanation,
+		Assumptions:    parsed.Assumptions,
+		Risk:           parsed.Risk,
 		Recommendation: parsed.Recommendation,
 		OrigAmount:     origAmount,
 		OrigCurrency:   origCurrency,
@@ -109,7 +116,7 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 		"chat_id", chatID,
 		"question", q,
 		"verdict", parsed.Verdict,
-		"free_cash_thb", parsed.Numbers.FreeCashTHB,
+		"forecast_remaining_thb", parsed.Flow.ForecastRemaining,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	return reply, nil
@@ -179,12 +186,11 @@ func parseAdvisorLLMResponse(raw string) (*advisorLLMResponse, error) {
 	default:
 		return nil, fmt.Errorf("invalid verdict: %q", r.Verdict)
 	}
-	if strings.TrimSpace(r.Explanation) == "" {
-		return nil, fmt.Errorf("explanation is empty")
+	if strings.TrimSpace(r.Risk) == "" {
+		return nil, fmt.Errorf("risk is empty")
 	}
 	if r.Verdict != "Да" && strings.TrimSpace(r.Recommendation) == "" {
 		return nil, fmt.Errorf("recommendation required when verdict=%q", r.Verdict)
 	}
 	return &r, nil
 }
-
