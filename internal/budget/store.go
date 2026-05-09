@@ -821,7 +821,7 @@ func (s *Store) GetExchangeRates(ctx context.Context) (map[string]float64, error
 	}
 	defer rows.Close()
 
-	rates := map[string]float64{}
+	rates := map[string]float64{"RUB": 1.0}
 	for rows.Next() {
 		var currency string
 		var rate float64
