@@ -114,72 +114,17 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
-	var p budget.Period
-	var periodLabel string
-
-	// LLM иногда кладёт конкретную дату в period вместо date — исправляем.
-	if req.Date == "" && req.Period != "" {
-		for _, layout := range []string{"2006-01-02", "02.01.2006"} {
-			if _, err := time.Parse(layout, req.Period); err == nil {
-				req.Date = req.Period
-				req.Period = ""
-				break
-			}
-		}
+	q, err := NormalizeBudgetInput(req)
+	if err != nil {
+		return "", err
 	}
 
-	rangeMode := false
-	switch {
-	case req.Date != "":
-		day := parseFlexibleDate(req.Date)
-		if day.IsZero() {
-			return "", fmt.Errorf("неверный формат даты %q, используй YYYY-MM-DD или DD.MM.YYYY", req.Date)
-		}
-		p = budget.Period{
-			From: time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC),
-			To:   time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 59, 0, time.UTC),
-		}
-		periodLabel = day.Format("02.01.2006")
-	case req.DateFrom != "" || req.DateTo != "":
-		from := parseFlexibleDate(req.DateFrom)
-		to := parseFlexibleDate(req.DateTo)
-		if from.IsZero() || to.IsZero() {
-			return "", fmt.Errorf("неверный формат date_from/date_to, используй YYYY-MM-DD или DD.MM.YYYY")
-		}
-		if to.Before(from) {
-			from, to = to, from
-		}
-		p = budget.Period{
-			From: time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC),
-			To:   time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, time.UTC),
-		}
-		periodLabel = fmt.Sprintf("%s — %s", from.Format("02.01.2006"), to.Format("02.01.2006"))
-		rangeMode = true
-	default:
-		p = parsePeriod(req.Period)
-		periodLabel = formatPeriodName(p)
-	}
-
-	limit := 20
-	if rangeMode {
-		limit = 200
-	}
-	f := budget.TransactionFilter{
-		Period:  &p,
-		Keyword: req.Keyword,
-		Type:    strings.ToLower(strings.TrimSpace(req.TransactionType)),
-		Limit:   limit,
-	}
-	if f.Type != "income" && f.Type != "expense" {
-		f.Type = ""
-	}
-
-	txs, err := s.store.ListTransactions(ctx, f)
+	txs, err := s.store.ListTransactions(ctx, &q.Filter)
 	if err != nil {
 		return "", fmt.Errorf("list transactions: %w", err)
 	}
 
-	return renderTransactionList(periodLabel, txs), nil
+	return renderTransactionList(q.Display.PeriodLabel, txs), nil
 }
 
 func formatTransaction(t budget.Transaction, typ string) string {

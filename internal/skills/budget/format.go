@@ -358,6 +358,18 @@ func renderRecurringList(list []budget.RecurringPayment) string {
 	return sb.String()
 }
 
+func buildPeriodLabel(f *budget.TransactionFilter) string {
+	if f.DateRange == nil {
+		return "за всё время"
+	}
+	dr := f.DateRange
+	// Один день.
+	if dr.From.Year() == dr.To.Year() && dr.From.Month() == dr.To.Month() && dr.From.Day() == dr.To.Day() {
+		return dr.From.Format("02.01.2006")
+	}
+	return formatPeriodName(budget.Period{From: dr.From, To: dr.To})
+}
+
 func formatPeriodName(p budget.Period) string {
 	months := []string{
 		"", "январь", "февраль", "март", "апрель", "май", "июнь",

@@ -6,17 +6,80 @@ run:
 
 linters:
   enable:
+    # Базовые (были)
     - errcheck
     - gocritic
     - govet
     - ineffassign
     - staticcheck
     - unused
+    # Безопасность
+    - gosec
+    # Корректность
+    - bodyclose
+    - nilerr
+    - nilnil
+    - reassign
+    - unconvert
+    - unparam
+    - exhaustive
+    # Стиль
+    - misspell
+    - revive
+    - whitespace
+    - predeclared
+    - usestdlibvars
+    # Перформанс
+    - prealloc
+
   settings:
     errcheck:
       check-type-assertions: true
       check-blank: true
+    gosec:
+      excludes:
+        - G104  # unhandled defer errors — покрыто errcheck
+        - G118  # goroutine context — намеренное использование background ctx
+        - G301  # directory perms 0755 — приемлемо для этого CLI
+        - G304  # file inclusion via variable — контролируемые пути
+        - G306  # file write perms 0644 — приемлемо для data files
+        - G703  # path traversal — PROMPTS_DIR env var контролируется оператором
+    revive:
+      rules:
+        # exported: намеренно отключено — внутренние пакеты проекта не требуют godoc
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: if-return
+        - name: increment-decrement
+        - name: range
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        # Value-copy semantics для domain DTO — architectural decision, не баг.
+        # Переход на указатели — отдельная задача.
+        - hugeParam
+        - rangeValCopy
+        # paramTypeCombine — cosmetic, нарушает читаемость типов в сигнатурах.
+        - paramTypeCombine
+        # commentedOutCode — inline calculation notes в тестах.
+        - commentedOutCode
+        # unnamedResult — стиль проекта не требует именованных возвратов.
+        - unnamedResult
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - gosec
+        - unparam

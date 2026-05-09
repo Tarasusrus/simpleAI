@@ -55,7 +55,7 @@ func (s *BudgetSkill) getReminder(ctx context.Context) (string, error) {
 
 	r, err := s.store.GetReminder(ctx, chatID)
 	if err != nil {
-		return "Напоминания не настроены. Скажи «включи напоминания в 21:00» чтобы настроить.", nil
+		return "Напоминания не настроены. Скажи «включи напоминания в 21:00» чтобы настроить.", nil //nolint:nilerr // intentional: any GetReminder error = "not configured"
 	}
 
 	if !r.Enabled {

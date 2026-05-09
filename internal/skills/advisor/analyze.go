@@ -37,7 +37,7 @@ func (s *AdvisorSkill) runAnalyze(ctx context.Context, req advisorInput) (string
 
 	target, label, err := parseAnalyzePeriod(req.Period, time.Now())
 	if err != nil {
-		return fmt.Sprintf("Не понял period: %s. Используй 'month' или 'YYYY-MM'.", req.Period), nil
+		return fmt.Sprintf("Не понял period: %s. Используй 'month' или 'YYYY-MM'.", req.Period), nil //nolint:nilerr // intentional: parse error → user-facing message
 	}
 
 	chatID, hasChatID := ctx.Value(agent.ChatIDKey{}).(int64)

@@ -88,11 +88,11 @@ func (c *Client) askWithSystem(ctx context.Context, prompt, system string) (stri
 			if c.logger != nil {
 				c.logger.Warn("ollama fallback triggered", "from_model", c.model, "to_model", c.fallback, "err", err)
 			}
-			if text, fbErr := c.askWithModelAndSystem(ctx, prompt, c.fallback, system); fbErr == nil {
+			text, fbErr := c.askWithModelAndSystem(ctx, prompt, c.fallback, system)
+			if fbErr == nil {
 				return text, nil
-			} else {
-				err = fbErr
 			}
+			err = fbErr
 		}
 		lastErr = err
 		if attempt < retries {

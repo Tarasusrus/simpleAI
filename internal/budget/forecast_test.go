@@ -30,8 +30,7 @@ func TestAggregateForecast_CrossCurrencySameCategory(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("want 1 forecast, got %d", len(out))
 	}
-	// март: 50000/2.5 + 241 = 20241; апрель: 18000; avg = 19120.5
-	near(t, out[0].ForecastAmount, 19120.5, 0.5, "ForecastAmount")
+	near(t, out[0].ForecastAmount, 19120.5, 0.5, "ForecastAmount") // март: 50000/2.5+241=20241; апрель: 18000; avg=19120.5
 	if out[0].Currency != "THB" {
 		t.Fatalf("want Currency=THB, got %s", out[0].Currency)
 	}

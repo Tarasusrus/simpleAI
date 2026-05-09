@@ -157,7 +157,7 @@ func formatTelegramDigest(account Account, digest string) string {
 }
 
 func maxProviderUID(messages []FetchedMessage) string {
-	var max uint64
+	var maxUID uint64
 	for _, msg := range messages {
 		if msg.ProviderUID == "" {
 			continue
@@ -166,14 +166,14 @@ func maxProviderUID(messages []FetchedMessage) string {
 		if _, err := fmt.Sscanf(msg.ProviderUID, "%d", &uid); err != nil {
 			continue
 		}
-		if uid > max {
-			max = uid
+		if uid > maxUID {
+			maxUID = uid
 		}
 	}
-	if max == 0 {
+	if maxUID == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d", max)
+	return fmt.Sprintf("%d", maxUID)
 }
 
 func errorText(err error) string {

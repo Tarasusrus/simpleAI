@@ -165,9 +165,10 @@ func (t *Tracer) send(batch []event) {
 			t.logger.Debug("langfuse body close", "err", err)
 		}
 	}()
-	// 207 — Multi-Status (часть событий могла не пройти, но это нормально).
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusMultiStatus {
 		t.logger.Warn("langfuse non-2xx", "status", resp.StatusCode, "events", len(batch))
+	} else {
+		t.logger.Debug("langfuse batch sent", "status", resp.StatusCode, "events", len(batch))
 	}
 }
 

@@ -48,7 +48,7 @@ func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 }
 
 // FindCategoryByName ищет категорию по имени (case-insensitive) и типу.
-func (s *Store) FindCategoryByName(ctx context.Context, name string, typ string) (*Category, error) {
+func (s *Store) FindCategoryByName(ctx context.Context, name, typ string) (*Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, name, type, icon, sort_order
@@ -62,7 +62,7 @@ func (s *Store) FindCategoryByName(ctx context.Context, name string, typ string)
 }
 
 // AddCategory создаёт пользовательскую категорию.
-func (s *Store) AddCategory(ctx context.Context, name string, typ string) (*Category, error) {
+func (s *Store) AddCategory(ctx context.Context, name, typ string) (*Category, error) {
 	c := Category{
 		ID:   uuid.New(),
 		Name: strings.TrimSpace(name),
@@ -122,52 +122,104 @@ func (s *Store) AddTransaction(ctx context.Context, t Transaction) error {
 }
 
 // ListTransactions возвращает транзакции по фильтру.
-func (s *Store) ListTransactions(ctx context.Context, f TransactionFilter) ([]Transaction, error) {
-	var conditions []string
+// Фильтр должен быть провалидирован вызывающим кодом (f.Validate()).
+func (s *Store) ListTransactions(ctx context.Context, f *TransactionFilter) ([]Transaction, error) {
+	var conds []string
 	var args []any
-	argN := 1
+	n := 1
 
-	if f.Period != nil {
-		conditions = append(conditions, fmt.Sprintf("t.transaction_date >= $%d AND t.transaction_date <= $%d", argN, argN+1))
-		args = append(args, f.Period.From, f.Period.To)
-		argN += 2
+	if f.DateRange != nil {
+		conds = append(conds, fmt.Sprintf("t.transaction_date >= $%d AND t.transaction_date <= $%d", n, n+1))
+		args = append(args, f.DateRange.From, f.DateRange.To)
+		n += 2
 	}
-	if f.CategoryID != nil {
-		conditions = append(conditions, fmt.Sprintf("t.category_id = $%d", argN))
-		args = append(args, *f.CategoryID)
-		argN++
+
+	if len(f.Directions) == 1 {
+		conds = append(conds, fmt.Sprintf("t.type = $%d", n))
+		args = append(args, string(f.Directions[0]))
+		n++
+	} else if len(f.Directions) > 1 {
+		placeholders := make([]string, len(f.Directions))
+		for i, d := range f.Directions {
+			placeholders[i] = fmt.Sprintf("$%d", n)
+			args = append(args, string(d))
+			n++
+		}
+		conds = append(conds, "t.type IN ("+strings.Join(placeholders, ", ")+")")
 	}
-	if f.Type != "" {
-		conditions = append(conditions, fmt.Sprintf("t.type = $%d", argN))
-		args = append(args, f.Type)
-		argN++
+
+	if len(f.CategoryIDs) == 1 {
+		conds = append(conds, fmt.Sprintf("t.category_id = $%d", n))
+		args = append(args, f.CategoryIDs[0])
+		n++
+	} else if len(f.CategoryIDs) > 1 {
+		placeholders := make([]string, len(f.CategoryIDs))
+		for i, id := range f.CategoryIDs {
+			placeholders[i] = fmt.Sprintf("$%d", n)
+			args = append(args, id)
+			n++
+		}
+		conds = append(conds, "t.category_id IN ("+strings.Join(placeholders, ", ")+")")
 	}
-	if f.Keyword != "" {
-		conditions = append(conditions, fmt.Sprintf("t.description ILIKE $%d", argN))
-		args = append(args, "%"+f.Keyword+"%")
-		argN++
+
+	if len(f.Currencies) == 1 {
+		conds = append(conds, fmt.Sprintf("t.currency = $%d", n))
+		args = append(args, string(f.Currencies[0]))
+		n++
+	} else if len(f.Currencies) > 1 {
+		placeholders := make([]string, len(f.Currencies))
+		for i, c := range f.Currencies {
+			placeholders[i] = fmt.Sprintf("$%d", n)
+			args = append(args, string(c))
+			n++
+		}
+		conds = append(conds, "t.currency IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	if f.AmountRange != nil {
+		conds = append(conds, fmt.Sprintf("t.amount >= $%d AND t.amount <= $%d", n, n+1))
+		args = append(args, f.AmountRange.Min, f.AmountRange.Max)
+		n += 2
+	}
+
+	if f.Search != nil {
+		conds = append(conds, fmt.Sprintf("t.description ILIKE $%d", n))
+		args = append(args, "%"+*f.Search+"%")
+		n++
 	}
 
 	where := ""
-	if len(conditions) > 0 {
-		where = "WHERE " + strings.Join(conditions, " AND ")
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
 
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 50
+	sortBy := SortByDate
+	switch f.SortBy {
+	case SortByDate, "":
+		// default
+	case SortByAmount, SortByCreatedAt:
+		sortBy = f.SortBy
 	}
-	limitClause := fmt.Sprintf("LIMIT $%d", argN)
-	args = append(args, limit)
+	sortDir := SortDesc
+	if f.SortDir == SortAsc {
+		sortDir = SortAsc
+	}
+	orderBy := fmt.Sprintf("ORDER BY t.%s %s", string(sortBy), string(sortDir))
+	if sortBy != SortByDate {
+		orderBy += fmt.Sprintf(", t.%s %s", SortByDate, SortDesc)
+	}
+
+	args = append(args, f.Pagination.Limit, f.Pagination.Offset)
+	limitOffsetClause := fmt.Sprintf("LIMIT $%d OFFSET $%d", n, n+1)
 
 	query := fmt.Sprintf(`
 		SELECT t.id, t.type, t.amount, t.currency, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		%s
-		ORDER BY t.transaction_date DESC, t.created_at DESC
 		%s
-	`, where, limitClause)
+		%s
+	`, where, orderBy, limitOffsetClause)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -598,7 +650,7 @@ func (s *Store) CreateRecurringTransaction(ctx context.Context, t Transaction, r
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback error is irrelevant after commit or on failed begin
 
 	// Dedup-guard: не создаём дубль если уже есть такая же транзакция за последние 60 секунд.
 	var exists bool
@@ -980,7 +1032,7 @@ WHERE t.type = 'expense'
 // GetTopExpenseTransactions — топ-N самых дорогих расходов за указанный месяц
 // (today, monthOffset аналогично GetAdvisorSnapshot), сконвертированных в THB.
 // Сортировка финальная по AmountTHB DESC в Go-коде (после конверсии).
-func (s *Store) GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset int, limit int, rates map[string]float64) ([]TopExpense, error) {
+func (s *Store) GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset, limit int, rates map[string]float64) ([]TopExpense, error) {
 	if limit <= 0 {
 		limit = 20
 	}

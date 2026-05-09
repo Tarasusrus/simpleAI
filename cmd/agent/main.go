@@ -32,7 +32,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Err while read diff from stdin: ", err)
 	}
-	if len(diff) == 0 {
+	if diff == "" {
 		log.Fatal("no diff provided on stdin")
 	}
 

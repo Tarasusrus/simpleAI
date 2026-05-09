@@ -134,7 +134,7 @@ func (a *Adapter) FetchAttachment(ctx context.Context, attachment core.Attachmen
 		return nil, "", err
 	}
 	url := file.Link(a.bot.Token)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, "", err
 	}
@@ -161,7 +161,7 @@ func toCoreUpdate(update tgbotapi.Update) core.Update {
 		ChatID:      msg.Chat.ID,
 		UserID:      msg.From.ID,
 		UserName:    msg.From.UserName,
-		DisplayName: strings.TrimSpace(strings.Join([]string{msg.From.FirstName, msg.From.LastName}, " ")),
+		DisplayName: strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName),
 		Text:        strings.TrimSpace(msg.Text),
 		MessageID:   msg.MessageID,
 	}

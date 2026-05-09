@@ -1,0 +1,257 @@
+plan:
+  name: "Debt Payoff Planner"
+  description: >
+    Adds extended debt management to the budget skill: per-debt monthly interest,
+    min-vs-max payoff scenarios for one debt, portfolio plan (avalanche/snowball),
+    plan fixation on the Debt row, and progress check. Stateless dialog; recommendations
+    use forecast-derived free cashflow.
+
+  phases:
+
+    - id: phase-1
+      name: "Schema & domain model"
+      description: >
+        Land the additive migration and bring `Debt` plus its store CRUD into sync
+        with the new fields. After this phase the codebase compiles and existing
+        debt actions still work; new fields are persisted but unused.
+      tasks:
+        - id: task-1.1
+          name: "Migration 00014 — debt payoff fields"
+          description: >
+            Create `internal/db/migrations/00014_debt_payoff_planner.sql` adding columns
+            `interest_rate REAL`, `planned_monthly REAL`, `target_payoff_date TEXT`,
+            `currency TEXT NOT NULL DEFAULT 'RUB'` to `debts` per DSC-2.
+          artifact: "internal/db/migrations/00014_debt_payoff_planner.sql"
+          depends_on: []
+          validation: >
+            Migration runs cleanly on a DB with existing rows; existing rows read
+            back with new columns NULL (or default 'RUB' for currency). AC-A1.
+        - id: task-1.2
+          name: "Extend Debt struct"
+          description: >
+            Add `InterestRate *float64`, `PlannedMonthly *float64`, `TargetPayoffDate *time.Time`,
+            `Currency string` to `internal/budget.Debt`. Update field comments to
+            disambiguate `MonthlyPayment` vs `PlannedMonthly` (STY-7).
+          artifact: "internal/budget/model.go"
+          depends_on: ["task-1.1"]
+          validation: "Package compiles; existing debt tests still pass."
+        - id: task-1.3
+          name: "Update Debt store CRUD"
+          description: >
+            Update `AddDebt`, `ListDebts`, and any other `rows.Scan` site for `Debt`
+            to read/write the new columns. Add `Store.UpdateDebtPlan(ctx, id, monthly, targetDate)`
+            and `Store.UpdateDebtRate(ctx, id, rate)` per CMP-5.
+          artifact: "internal/budget/store.go"
+          depends_on: ["task-1.2"]
+          validation: >
+            `go test ./internal/budget/...` green. New round-trip test asserts
+            UpdateDebtPlan persists fields (TST-2, AC-A1, AC-A3).
+        - id: task-1.4
+          name: "Update db_schema docs"
+          description: "Reflect the new columns in `docs/db_schema.md` and `docs/db_schema.sql`."
+          artifact: "docs/db_schema.md, docs/db_schema.sql"
+          depends_on: ["task-1.1"]
+          validation: "Docs match migration; review by eye."
+      checkpoint:
+        description: "Schema + model coherence."
+        criteria:
+          - "Migration applied on a fresh DB and on a DB with seeded debts; no errors."
+          - "Existing budget skill actions (`add_debt`, `pay_debt`, `debt_status`) still pass their tests (AC-A2)."
+          - "go vet and gofmt -l clean."
+
+    - id: phase-2
+      name: "Pure calculation engine"
+      description: >
+        Implement the math in isolation — no DB, no skill plumbing. This is the riskiest
+        logic; isolating lets table-driven tests cover all AC group B and C cases.
+      tasks:
+        - id: task-2.1
+          name: "PlanSingleDebt + sentinel errors"
+          description: >
+            Create `internal/budget/payoff.go` with `Strategy` type, sentinel errors
+            (`ErrPaymentBelowAccrual`, `ErrPayoffTooLong`, `ErrInsufficientCashflow`,
+            `ErrInvalidRate`, `ErrMultiCurrencyNotSupported`), and
+            `PlanSingleDebt(balance, monthlyRate, payment) (PlanSingleResult, error)`
+            with 600-iteration cap. Per CMP-1..3, FR2.
+          artifact: "internal/budget/payoff.go"
+          depends_on: []
+          validation: >
+            Unit tests cover AC-B1..B4 (normal, payment_below_accrual, zero-rate,
+            payoff_too_long).
+        - id: task-2.2
+          name: "PlanPortfolio (avalanche & snowball)"
+          description: >
+            In the same file: `PlanPortfolio(debts []PortfolioDebt, free float64, strategy Strategy)
+            (PortfolioResult, error)`. Direct surplus to priority debt; on close
+            redirect freed cash to next. Reject `free < Σ min` with `ErrInsufficientCashflow`
+            including `deficit` field. Sort deterministically (stable). Per FR3.
+          artifact: "internal/budget/payoff.go"
+          depends_on: ["task-2.1"]
+          validation: "Unit tests cover AC-C1..C5 incl. avalanche/snowball ordering and deficit."
+        - id: task-2.3
+          name: "FreeCashflowThisMonth"
+          description: >
+            Create `internal/budget/forecast_free.go` exporting
+            `FreeCashflowThisMonth(income, expense float64, activeDebts []Debt) float64`.
+            Rule: `max(income - expense - Σ min_payments, 0)`. Min-payment per debt
+            uses the same default rule as AC-D2.
+          artifact: "internal/budget/forecast_free.go"
+          depends_on: ["task-2.1"]
+          validation: "Unit tests cover AC-G1, AC-G3."
+      checkpoint:
+        description: "Calculation engine review."
+        criteria:
+          - "All Group B and Group C ACs map to a green test."
+          - "No DB import in payoff.go / forecast_free.go (CMP-1)."
+          - "Sentinel errors exported and wrapped at call sites only."
+
+    - id: phase-3
+      name: "Forecast integration"
+      description: >
+        Wire the new calc engine to data: monthly-averaged income/expense from the store,
+        with the `Платёж по долгу` sentinel category excluded.
+      tasks:
+        - id: task-3.1
+          name: "Sentinel category constant"
+          description: >
+            Add `BudgetDebtPaymentCategory = \"Платёж по долгу\"` to `internal/constants`.
+            Per FR7.1 and constraints OQ1.
+          artifact: "internal/constants/*.go (extend or new file)"
+          depends_on: []
+          validation: "Constant referenced from store and tests; go vet clean."
+        - id: task-3.2
+          name: "EstimateMonthlyIncomeExpense"
+          description: >
+            Add `Store.EstimateMonthlyIncomeExpense(ctx, lookbackMonths int, rates map[string]float64)
+            (income, expense float64, err error)` to `store.go` per CMP-6. Excludes the
+            sentinel category from expense aggregation. Reuses existing per-month-then-average
+            shape from `getMonthlyExpenses`.
+          artifact: "internal/budget/store.go"
+          depends_on: ["task-3.1"]
+          validation: "Store test asserts AC-G2 — sentinel-category transaction is excluded."
+      checkpoint:
+        description: "Free cashflow plumbing."
+        criteria:
+          - "AC-G1, AC-G2, AC-G3 covered by store + unit tests."
+          - "Existing `GetForecastData` signature unchanged (CMP-6)."
+
+    - id: phase-4
+      name: "Skill actions & routing"
+      description: >
+        Surface the new behaviour through the budget skill so the LLM router and the
+        bot can invoke it. Stateless; no telegram-specific UI.
+      tasks:
+        - id: task-4.1
+          name: "Manifest extension"
+          description: >
+            Extend the action enum in `budget_skill.go` Manifest with `debt_plan`,
+            `debt_fix_plan`, `debt_progress`. Add `min_payment`, `max_payment`,
+            `strategy`, `monthly` to the args schema. Verb-rich descriptions per
+            RTG-1, RTG-2 (avoid the simpleAI-399 collision class).
+          artifact: "internal/skills/budget_skill.go"
+          depends_on: ["task-1.3"]
+          validation: "Manifest validated; existing manifest test (if any) updated."
+        - id: task-4.2
+          name: "Action `debt_plan`"
+          description: >
+            New case in skill switch. Read-only. Resolves debt by name (CI substring),
+            computes free cashflow via task-2.3 + task-3.2, runs PlanSingleDebt or
+            PlanPortfolio, formats Russian text reply with error tag in parens on errors.
+            Per FR4, AC-D1..D8.
+          artifact: "internal/skills/budget_skill.go"
+          depends_on: ["task-2.2", "task-2.3", "task-3.2", "task-4.1"]
+          validation: "Skill tests cover AC-D1, AC-D6, AC-D7 (no DB write), AC-D8."
+        - id: task-4.3
+          name: "Action `debt_fix_plan`"
+          description: >
+            New case. Validates monthly via PlanSingleDebt, computes
+            `target_payoff_date = time.Now().UTC() + months` (CMP-8), persists via
+            `Store.UpdateDebtPlan`. Last-write-wins. Per FR5, AC-E1..E4.
+          artifact: "internal/skills/budget_skill.go"
+          depends_on: ["task-1.3", "task-2.1", "task-4.1"]
+          validation: "Skill tests cover AC-E1, AC-E2, AC-E4."
+        - id: task-4.4
+          name: "Action `debt_progress`"
+          description: >
+            New case. For each debt with plan, compares current `total - paid_amount`
+            against expected balance derived purely from `planned_monthly`,
+            `interest_rate` and elapsed months since plan (no per-payment history).
+            Returns delta + projected_payoff_date. Per FR6, AC-F1..F5.
+          artifact: "internal/skills/budget_skill.go"
+          depends_on: ["task-2.1", "task-4.1"]
+          validation: "Skill tests cover AC-F1, AC-F4, AC-F5."
+        - id: task-4.5
+          name: "Multi-currency guard"
+          description: >
+            Before running portfolio plan, assert all active debts share one currency
+            (CUR-1). On mismatch, return `multi_currency_not_supported` with the list.
+          artifact: "internal/skills/budget_skill.go"
+          depends_on: ["task-4.2"]
+          validation: "Skill test with two debts in different currencies returns the structured error."
+      checkpoint:
+        description: "End-to-end skill behaviour."
+        criteria:
+          - "All Group D, E, F skill ACs green."
+          - "Existing `add_debt`/`pay_debt`/`debt_status` tests still green (AC-A2)."
+          - "Manifest router test (or eval) shows AC-I1..I4 paths chosen correctly OR is filed as a follow-up bd if no test pattern exists today (per MINOR-8)."
+
+    - id: phase-5
+      name: "Polish, docs, verification"
+      description: >
+        Last mile: vet/format, docs, ADR if needed, and the global Definition of Done check.
+      tasks:
+        - id: task-5.1
+          name: "Run full test suite & lints"
+          description: >
+            `go test ./internal/budget/... ./internal/skills/...`, `go vet ./...`,
+            `gofmt -l .`. Fix any issues.
+          artifact: "test output captured in PR description"
+          depends_on: ["task-4.4", "task-4.5"]
+          validation: "All green; no diff from gofmt."
+        - id: task-5.2
+          name: "ADR — flat-% interest model and stateless plan"
+          description: >
+            Write `docs/adr/NNNN-debt-payoff-planner.md` covering decisions D1, D2,
+            D4, D5, D6, D7 (links to constraints.md). Lightweight; references the
+            spec directory rather than duplicating it.
+          artifact: "docs/adr/NNNN-debt-payoff-planner.md"
+          depends_on: []
+          validation: "ADR linked from `docs/architecture.puml` or index; reviewed."
+        - id: task-5.3
+          name: "Manual smoke via bot"
+          description: >
+            Add a sample debt locally; run /budget queries that exercise debt_plan
+            single-debt, debt_plan portfolio, debt_fix_plan, debt_progress.
+            Confirm Russian output and error formatting.
+          artifact: "checklist run; screenshots optional"
+          depends_on: ["task-5.1"]
+          validation: "Smoke checklist passes."
+        - id: task-5.4
+          name: "/review and bd close"
+          description: >
+            Run `/review` on the branch; address findings until PASS. Close the bd
+            tasks created from this plan (one per task above) with reason summarising
+            what was implemented and which tests cover it.
+          artifact: "bd issues closed; review PASS"
+          depends_on: ["task-5.3"]
+          validation: "/review → PASS; bd issues all status=closed."
+      checkpoint:
+        description: "Ship readiness."
+        criteria:
+          - "All AC groups have at least one passing test."
+          - "Docs (db_schema, ADR) reflect changes."
+          - "/review PASS, bd issues closed."
+
+  # ---------------- Notes for the executor ----------------
+  notes:
+    - "Beads epic parent: simpleAI-f94 (Бюджет-трекер). Create one bd per task above; mark `in_progress` one at a time per CLAUDE.md."
+    - "Currency on Debt is new — verify every existing `rows.Scan` for Debt receives the new column, otherwise sqlite scan will misalign."
+    - "When in doubt about output text style, mirror the existing `debt_status` handler — that's the conventions anchor."
+    - "If routing tests for AC-I1..I4 require infra not yet present, file a follow-up bd `simpleAI-debt-routing-eval` and proceed without blocking."
+
+  open_followups:
+    - "Per-payment history table for true progress projection (currently AC-F2/F3 reduce to plan-derived expected balance)."
+    - "Reminders epic for upcoming debt payments."
+    - "Auto-create `transaction` row when `pay_debt` runs (closes the loop with FR7.1 sentinel category)."
+    - "Multi-currency portfolios with rates from `internal/rates`."
+    - "Annuity amortization model alongside flat %."

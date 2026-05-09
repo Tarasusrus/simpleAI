@@ -148,7 +148,7 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 			Input: openai.EmbeddingNewParamsInputUnion{
 				OfArrayOfStrings: inputs,
 			},
-			Model: openai.EmbeddingModel(c.cfg.RAG.EmbeddingModel),
+			Model: c.cfg.RAG.EmbeddingModel,
 		})
 		cancel()
 
@@ -179,13 +179,13 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 
 func (c *Client) chatModel() openai.ChatModel {
 	if c.modelOverride != "" {
-		return openai.ChatModel(c.modelOverride)
+		return c.modelOverride
 	}
 	model := strings.TrimSpace(c.cfg.LLM.ChatModel)
 	if model == "" {
-		return openai.ChatModel("deepseek-chat")
+		return "deepseek-chat"
 	}
-	return openai.ChatModel(model)
+	return model
 }
 
 func (c *Client) timeout() time.Duration {

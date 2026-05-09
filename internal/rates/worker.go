@@ -78,7 +78,7 @@ func fetchRates(ctx context.Context) (map[string]float64, error) {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet,
-		"https://open.er-api.com/v6/latest/RUB", nil)
+		"https://open.er-api.com/v6/latest/RUB", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

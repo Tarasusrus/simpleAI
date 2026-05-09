@@ -112,7 +112,7 @@ func (g *GmailProvider) listMessages(ctx context.Context, accessToken string, la
 	}
 
 	endpoint := fmt.Sprintf("%s/users/me/messages?%s", g.baseURL, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return gmailListResponse{}, err
 	}
@@ -159,7 +159,7 @@ func (g *GmailProvider) getMessageMetadata(ctx context.Context, accessToken, mes
 		return FetchedMessage{}, fmt.Errorf("gmail access token is required")
 	}
 	endpoint := fmt.Sprintf("%s/users/me/messages/%s?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date", g.baseURL, messageID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return FetchedMessage{}, err
 	}
