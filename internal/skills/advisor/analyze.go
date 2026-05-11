@@ -81,9 +81,11 @@ func (s *AdvisorSkill) runAnalyze(ctx context.Context, req advisorInput) (string
 
 	prompt := buildAnalyzePrompt(label, curSnap, prevSnap, top, topLimit)
 
-	raw, err := s.llm.Ask(ctx, prompt)
+	llmCtx, llmCancel := context.WithTimeout(context.Background(), s.llmTimeout)
+	defer llmCancel()
+	raw, err := s.llm.Ask(llmCtx, prompt)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "advisor.analyze: llm call", "err", err, "chat_id", chatID)
+		s.logger.ErrorContext(ctx, "advisor.analyze: llm call", "err", err, "chat_id", chatID, "timeout", s.llmTimeout)
 		return "Не удалось получить анализ — попробуй позже.", nil
 	}
 

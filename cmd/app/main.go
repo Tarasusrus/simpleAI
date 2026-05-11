@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// Единый реестр skills для всех компонентов.
-	registry := buildRegistry(llmClient, logger, pool)
+	registry := buildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
 
 	// Контекст с graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -280,7 +280,7 @@ func runWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, pool
 	}
 }
 
-func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool) *plugin.Registry {
+func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration) *plugin.Registry {
 	registry := plugin.NewRegistry()
 
 	retriever := rag.NewRetriever(pool)
@@ -295,7 +295,8 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 		logger.Error("failed to register budget skill", "err", err)
 	}
 
-	advisorSkill := advisorskill.NewAdvisorSkill(budgetStore, llmClient, logger)
+	advisorSkill := advisorskill.NewAdvisorSkill(budgetStore, llmClient, logger).
+		WithLLMTimeout(advisorLLMTimeout)
 	if err := registry.Register(advisorSkill); err != nil {
 		logger.Error("failed to register advisor skill", "err", err)
 	}

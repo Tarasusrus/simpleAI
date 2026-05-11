@@ -13,6 +13,7 @@ import (
 	"simpleAI/internal/plugin"
 )
 
+
 // advisorStore — узкий интерфейс store-зависимостей AdvisorSkill (для тестируемости).
 type advisorStore interface {
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)
@@ -21,11 +22,15 @@ type advisorStore interface {
 	GetForecastData(ctx context.Context, months int, rates map[string]float64) ([]budget.CategoryForecast, error)
 }
 
+// defaultAdvisorLLMTimeout — used when no timeout is configured.
+const defaultAdvisorLLMTimeout = 45 * time.Second
+
 // AdvisorSkill — LLM-reasoning skill для советов по покупкам и приоритезации (ADR-002).
 type AdvisorSkill struct {
-	store  advisorStore
-	llm    core.LLM
-	logger *slog.Logger
+	store      advisorStore
+	llm        core.LLM
+	logger     *slog.Logger
+	llmTimeout time.Duration // independent from Telegram handler context
 }
 
 // NewAdvisorSkill создаёт AdvisorSkill.
@@ -33,7 +38,15 @@ func NewAdvisorSkill(store advisorStore, llm core.LLM, logger *slog.Logger) *Adv
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AdvisorSkill{store: store, llm: llm, logger: logger}
+	return &AdvisorSkill{store: store, llm: llm, logger: logger, llmTimeout: defaultAdvisorLLMTimeout}
+}
+
+// WithLLMTimeout overrides the LLM call timeout for advisor skill.
+func (s *AdvisorSkill) WithLLMTimeout(d time.Duration) *AdvisorSkill {
+	if d > 0 {
+		s.llmTimeout = d
+	}
+	return s
 }
 
 // Manifest описывает skill для LLM-роутера.

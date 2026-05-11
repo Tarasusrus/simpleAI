@@ -82,9 +82,11 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 
 	prompt := buildAdvisorPrompt(req, snap, yesFund, amountTHB, origAmount, origCurrency)
 
-	raw, err := s.llm.Ask(ctx, prompt)
+	llmCtx, llmCancel := context.WithTimeout(context.Background(), s.llmTimeout)
+	defer llmCancel()
+	raw, err := s.llm.Ask(llmCtx, prompt)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "advisor: llm call", "err", err, "chat_id", chatID)
+		s.logger.ErrorContext(ctx, "advisor: llm call", "err", err, "chat_id", chatID, "timeout", s.llmTimeout)
 		return "Не удалось получить совет — попробуй позже.", nil
 	}
 

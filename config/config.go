@@ -38,9 +38,10 @@ type LLMConfig struct {
 	APIKey     string
 	BaseURL    string
 	ChatModel  string
-	Timeout    time.Duration
-	RetryCount int
-	RetryBase  time.Duration
+	Timeout           time.Duration
+	RetryCount        int
+	RetryBase         time.Duration
+	AdvisorLLMTimeout time.Duration // independent timeout for advisor skill LLM calls
 
 	// Fallback OpenAI-compatible provider (e.g. Gemini)
 	FallbackAPIKey    string
@@ -164,9 +165,10 @@ func loadLLMConfig() LLMConfig {
 		APIKey:     os.Getenv("DEEPSEEK_API_KEY"),
 		BaseURL:    getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
 		ChatModel:  getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
-		Timeout:    parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
-		RetryCount: parseInt(os.Getenv("LLM_RETRY_COUNT"), 0),
-		RetryBase:  parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		Timeout:           parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
+		RetryCount:        parseInt(os.Getenv("LLM_RETRY_COUNT"), 0),
+		RetryBase:         parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
+		AdvisorLLMTimeout: parseDurationSeconds(os.Getenv("ADVISOR_LLM_TIMEOUT_SECONDS"), 45),
 
 		FallbackAPIKey:    os.Getenv("GEMINI_API_KEY"),
 		FallbackBaseURL:   getenvOrDefault("LLM_FALLBACK_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
