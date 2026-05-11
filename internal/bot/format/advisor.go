@@ -71,9 +71,9 @@ func FormatAdvisorReply(r AdvisorReplyData) string {
 	if r.Flow.ExpectedSpend > 0 {
 		fmt.Fprintf(&sb, "• Ожидаемые расходы \\(\\+10%% буфер\\): %.0f THB\n", r.Flow.ExpectedSpend)
 	}
-	fmt.Fprintf(&sb, "• Прогноз остатка: %.0f THB\n", r.Flow.ForecastRemaining)
+	fmt.Fprintf(&sb, "• Прогноз остатка: %.0f THB\n", r.Flow.YesFundNow)
 	if r.AmountTHB > 0 {
-		fmt.Fprintf(&sb, "• После покупки: %.0f THB\n", r.Flow.AfterPurchase)
+		fmt.Fprintf(&sb, "• После покупки: %.0f THB\n", r.Flow.YesFundAfterPurchase)
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
