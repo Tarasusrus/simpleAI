@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// Единый реестр skills для всех компонентов.
-	registry := buildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	registry, budgetSkill := buildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
 
 	// Контекст с graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -87,7 +87,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer); err != nil {
+		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -149,7 +149,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer) error {
+func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -191,6 +191,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 	router.HandleCommand("forecast", telegram.HandleForecast)
 	router.HandleCommand("reminders", telegram.HandleReminders)
 	router.HandleDefault(telegram.HandleDefault)
+	router.HandleCallback(budgetskill.CallbackPrefix, telegram.NewHandleBudgetCallback(budgetSkill))
 
 	updates, err := adapter.Updates(ctx)
 	if err != nil {
@@ -280,7 +281,7 @@ func runWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, pool
 	}
 }
 
-func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration) *plugin.Registry {
+func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration) (*plugin.Registry, *budgetskill.BudgetSkill) {
 	registry := plugin.NewRegistry()
 
 	retriever := rag.NewRetriever(pool)
@@ -290,8 +291,8 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	budgetStore := budget.NewStore(pool)
-	budgetSkill := budgetskill.NewBudgetSkill(budgetStore)
-	if err := registry.Register(budgetSkill); err != nil {
+	bs := budgetskill.NewBudgetSkill(budgetStore)
+	if err := registry.Register(bs); err != nil {
 		logger.Error("failed to register budget skill", "err", err)
 	}
 
@@ -302,7 +303,7 @@ func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	logger.Info("registry ready", "skills", len(registry.List()))
-	return registry
+	return registry, bs
 }
 
 func buildHelpText(commands []telegramadapter.Command) string {

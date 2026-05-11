@@ -122,6 +122,48 @@ func (a *Adapter) SendTyping(ctx context.Context, chatID int64) error {
 	return err
 }
 
+func (a *Adapter) SendWithButtons(ctx context.Context, chatID int64, text string, rows [][]core.Button) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = toInlineKeyboard(rows)
+	_, err := a.bot.Send(msg)
+	return err
+}
+
+func (a *Adapter) EditWithButtons(ctx context.Context, chatID int64, messageID int, text string, rows [][]core.Button) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	kb := toInlineKeyboard(rows)
+	edit.ReplyMarkup = &kb
+	_, err := a.bot.Send(edit)
+	return err
+}
+
+func (a *Adapter) AnswerCallback(ctx context.Context, callbackID string) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	cfg := tgbotapi.NewCallback(callbackID, "")
+	_, err := a.bot.Request(cfg)
+	return err
+}
+
+func toInlineKeyboard(rows [][]core.Button) tgbotapi.InlineKeyboardMarkup {
+	keyboard := make([][]tgbotapi.InlineKeyboardButton, 0, len(rows))
+	for _, row := range rows {
+		kbRow := make([]tgbotapi.InlineKeyboardButton, 0, len(row))
+		for _, btn := range row {
+			kbRow = append(kbRow, tgbotapi.NewInlineKeyboardButtonData(btn.Text, btn.Data))
+		}
+		keyboard = append(keyboard, kbRow)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+}
+
 func (a *Adapter) FetchAttachment(ctx context.Context, attachment core.Attachment) (io.ReadCloser, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -152,6 +194,20 @@ func (a *Adapter) FetchAttachment(ctx context.Context, attachment core.Attachmen
 }
 
 func toCoreUpdate(update tgbotapi.Update) core.Update {
+	if update.CallbackQuery != nil {
+		cb := update.CallbackQuery
+		return core.Update{
+			ID:           update.UpdateID,
+			ChatID:       cb.Message.Chat.ID,
+			UserID:       cb.From.ID,
+			UserName:     cb.From.UserName,
+			DisplayName:  strings.TrimSpace(cb.From.FirstName + " " + cb.From.LastName),
+			MessageID:    cb.Message.MessageID,
+			IsCallback:   true,
+			CallbackID:   cb.ID,
+			CallbackData: cb.Data,
+		}
+	}
 	if update.Message == nil {
 		return core.Update{}
 	}

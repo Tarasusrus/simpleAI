@@ -51,6 +51,38 @@ func (c *Context) Reply(text string) error {
 	return sendWithRetry(c, chatID, text)
 }
 
+// ReplyWithButtons отправляет новое сообщение с inline-кнопками.
+// Если Bot не реализует ButtonSender — отправляет текст без кнопок.
+func (c *Context) ReplyWithButtons(ctx context.Context, text string, rows [][]core.Button) error {
+	chatID, err := c.ChatID()
+	if err != nil {
+		return err
+	}
+	if bs, ok := c.Bot.(core.ButtonSender); ok {
+		return bs.SendWithButtons(ctx, chatID, text, rows)
+	}
+	return sendWithRetry(c, chatID, text)
+}
+
+// EditWithButtons редактирует исходное сообщение callback-а и обновляет кнопки.
+// Если Bot не реализует ButtonSender — отправляет новое сообщение.
+func (c *Context) EditWithButtons(ctx context.Context, text string, rows [][]core.Button) error {
+	chatID, err := c.ChatID()
+	if err != nil {
+		return err
+	}
+	if bs, ok := c.Bot.(core.ButtonSender); ok {
+		if c.Update.IsCallback && c.Update.MessageID > 0 {
+			if err := bs.AnswerCallback(ctx, c.Update.CallbackID); err != nil {
+				slog.Default().WarnContext(ctx, "answer callback failed", "err", err, "callback_id", c.Update.CallbackID)
+			}
+			return bs.EditWithButtons(ctx, chatID, c.Update.MessageID, text, rows)
+		}
+		return bs.SendWithButtons(ctx, chatID, text, rows)
+	}
+	return sendWithRetry(c, chatID, text)
+}
+
 func (c *Context) Replyf(format string, args ...any) error {
 	return c.Reply(fmt.Sprintf(format, args...))
 }

@@ -12,12 +12,22 @@ import (
 
 // BudgetSkill управляет личными финансами: транзакции, сводка, цели, долги.
 type BudgetSkill struct {
-	store *budget.Store
+	store   *budget.Store
+	buckets BucketConfig
 }
 
-// NewBudgetSkill создаёт BudgetSkill.
+// NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
 func NewBudgetSkill(store *budget.Store) *BudgetSkill {
-	return &BudgetSkill{store: store}
+	return &BudgetSkill{store: store, buckets: defaultBuckets()}
+}
+
+// WithBuckets заменяет конфигурацию корзин. Возвращает ошибку если config невалиден.
+func (s *BudgetSkill) WithBuckets(cfg BucketConfig) (*BudgetSkill, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	s.buckets = cfg
+	return s, nil
 }
 
 // Manifest возвращает описание скилла для registry и LLM.

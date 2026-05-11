@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"simpleAI/internal/constants"
+	"simpleAI/internal/core"
+	budgetskill "simpleAI/internal/skills/budget"
 )
 
 func HandleStart(ctx context.Context, tctx *Context) error {
@@ -46,6 +48,22 @@ func HandleForecast(ctx context.Context, tctx *Context) error {
 
 func HandleReminders(ctx context.Context, tctx *Context) error {
 	return tctx.Reply(constants.MsgHelpReminders)
+}
+
+// BudgetCallbackSkill — минимальный интерфейс для обработки budget callbacks.
+type BudgetCallbackSkill interface {
+	HandleCallbackData(ctx context.Context, data string) (core.CallbackResult, error)
+}
+
+// NewHandleBudgetCallback возвращает handler для inline-кнопок budget skill.
+func NewHandleBudgetCallback(skill BudgetCallbackSkill) Handler {
+	return func(ctx context.Context, tctx *Context) error {
+		result, err := skill.HandleCallbackData(ctx, tctx.Update.CallbackData)
+		if err != nil {
+			return tctx.Reply(fmt.Sprintf("Ошибка: %v", err))
+		}
+		return tctx.EditWithButtons(ctx, result.Text, result.Buttons)
+	}
 }
 
 func HandleDefault(ctx context.Context, tctx *Context) error {
@@ -88,15 +106,21 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		prompt = fmt.Sprintf("%s\n\n[Вложения: %s]", prompt, summary)
 	}
 
+	sink := &budgetskill.ButtonSink{}
+	agentCtx := budgetskill.WithButtonSink(ctx, sink)
+
 	stopTyping := tctx.StartTyping(ctx)
 	chatID := tctx.Update.ChatID
-	reply, err := tctx.Agent.AskWithMeta(ctx, prompt, &chatID)
+	reply, err := tctx.Agent.AskWithMeta(agentCtx, prompt, &chatID)
 	stopTyping()
 	if err != nil {
 		return tctx.Reply(fmt.Sprintf("Ошибка агента: %v", err))
 	}
 	if strings.TrimSpace(reply) == "" {
 		reply = "Нет ответа от агента."
+	}
+	if rows, ok := budgetskill.ButtonsFromContext(agentCtx); ok {
+		return tctx.ReplyWithButtons(ctx, reply, rows)
 	}
 	return tctx.Reply(reply)
 }

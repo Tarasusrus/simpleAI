@@ -41,17 +41,26 @@ func LogUpdates() Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
 			if tctx.Logger != nil && tctx.Update.ChatID != 0 {
-				text := tctx.Update.Text
-				if len(text) > 80 {
-					text = text[:80] + "…"
+				if tctx.Update.IsCallback {
+					tctx.Logger.Info("telegram callback",
+						"request_id", tctx.RequestID,
+						"chat_id", tctx.Update.ChatID,
+						"from", tctx.Update.UserName,
+						"callback_data", tctx.Update.CallbackData,
+					)
+				} else {
+					text := tctx.Update.Text
+					if len(text) > 80 {
+						text = text[:80] + "…"
+					}
+					tctx.Logger.Info("telegram update",
+						"request_id", tctx.RequestID,
+						"chat_id", tctx.Update.ChatID,
+						"from", tctx.Update.UserName,
+						"command", commandForLog(tctx.Update.Text),
+						"text", text,
+					)
 				}
-				tctx.Logger.Info("telegram update",
-					"request_id", tctx.RequestID,
-					"chat_id", tctx.Update.ChatID,
-					"from", tctx.Update.UserName,
-					"command", commandForLog(tctx.Update.Text),
-					"text", text,
-				)
 			}
 			return next(ctx, tctx)
 		}
@@ -100,6 +109,9 @@ func RateLimit(minInterval time.Duration) Middleware {
 
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
+			if tctx.Update.IsCallback {
+				return next(ctx, tctx)
+			}
 			chatID, err := tctx.ChatID()
 			if err != nil {
 				return err

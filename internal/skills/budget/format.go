@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"simpleAI/internal/budget"
+	"simpleAI/internal/core"
 )
 
 var rubRates = map[string]float64{
@@ -244,6 +245,17 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	if filter != "income" && filter != "expense" {
 		filter = ""
 	}
+
+	// L1 hierarchy view для общей сводки (без filter).
+	// Всегда кодируем конкретный период YYYY-MM чтобы callback_data не зависел от времени открытия.
+	if filter == "" {
+		period := p.From.Format("2006-01")
+		avg := s.threeMonthAvg(ctx, p, rates)
+		text, buttons := formatSummaryL1(curr, avg, rates, period)
+		StoreButtons(ctx, buttons)
+		return text, nil
+	}
+
 	result := formatSummaryFiltered(curr, prev, rates, filter)
 
 	next := time.Date(p.To.Year(), p.To.Month()+1, 1, 0, 0, 0, 0, time.UTC)
@@ -439,4 +451,113 @@ func monthsUntil(deadline time.Time) int {
 		return 1
 	}
 	return months
+}
+
+// formatSummaryL1 форматирует Level 1: income, balance, 3-month avg + кнопки drill-down.
+func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, rates map[string]float64, period string) (string, [][]core.Button) {
+	incomeRUB := summaryIncomeRUB(s, rates)
+	totalRUB := summaryTotalRUB(s, rates)
+	balance := incomeRUB - totalRUB
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📊 Итоги %s\n\n", formatPeriodName(s.Period))
+	if incomeRUB > 0 {
+		fmt.Fprintf(&sb, "💰 Доходы: ~%.0f ₽\n", incomeRUB)
+	}
+	sign := "+"
+	if balance < 0 {
+		sign = ""
+	}
+	fmt.Fprintf(&sb, "📊 Остаток (Фонд Да): %s%.0f ₽", sign, balance)
+	if balance >= 0 {
+		sb.WriteString(" ✅")
+	} else {
+		sb.WriteString(" ⚠️")
+	}
+	sb.WriteString("\n")
+	if avgThreeMonths > 0 {
+		fmt.Fprintf(&sb, "📉 Средний расход (3 мес): ~%.0f ₽\n", avgThreeMonths)
+	}
+
+	rows := [][]core.Button{
+		{
+			{Text: "📂 По корзинам", Data: "budget:buckets:" + period},
+		},
+	}
+	return sb.String(), rows
+}
+
+// formatBucketsL2 форматирует Level 2: три корзины с суммами.
+func formatBucketsL2(s *budget.Summary, rates map[string]float64, period string, cfg BucketConfig) (string, [][]core.Button) {
+	cats := summaryCategories(s, rates)
+	totalRUB := summaryTotalRUB(s, rates)
+	buckets := GroupByBuckets(cats, cfg)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📦 Расходы %s по корзинам:\n\n", formatPeriodName(s.Period))
+
+	for i, bt := range buckets {
+		pct := 0.0
+		if totalRUB > 0 {
+			pct = bt.RUBTotal / totalRUB * 100
+		}
+		fmt.Fprintf(&sb, "%d. %s %s (%.0f%%): %.0f ₽\n",
+			i+1, bt.Bucket.Icon, bt.Bucket.Name, pct, bt.RUBTotal)
+	}
+
+	btnRows := make([][]core.Button, 0, len(buckets)+1)
+	for _, bt := range buckets {
+		btnRows = append(btnRows, []core.Button{
+			{Text: "🔍 " + bt.Bucket.Name, Data: "budget:detail:" + period + ":" + bt.Bucket.ID},
+		})
+	}
+	btnRows = append(btnRows, []core.Button{
+		{Text: "🔙 Назад", Data: "budget:summary:" + period},
+	})
+
+	return sb.String(), btnRows
+}
+
+// formatBucketDetailL3 форматирует Level 3: категории внутри одной корзины.
+func formatBucketDetailL3(s *budget.Summary, rates map[string]float64, period string, bucketID string, cfg BucketConfig) (string, [][]core.Button) {
+	cats := summaryCategories(s, rates)
+	buckets := GroupByBuckets(cats, cfg)
+
+	var bt *BucketTotal
+	for i := range buckets {
+		if buckets[i].Bucket.ID == bucketID {
+			bt = &buckets[i]
+			break
+		}
+	}
+
+	var sb strings.Builder
+	if bt == nil {
+		sb.WriteString("Корзина не найдена.")
+	} else {
+		fmt.Fprintf(&sb, "%s %s — детали (%s):\n\n", bt.Bucket.Icon, bt.Bucket.Name, formatPeriodName(s.Period))
+
+		type entry struct {
+			name string
+			amt  float64
+		}
+		entries := make([]entry, 0, len(bt.Categories))
+		for name, amt := range bt.Categories {
+			entries = append(entries, entry{name, amt})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].amt > entries[j].amt })
+
+		for _, e := range entries {
+			pct := 0.0
+			if bt.RUBTotal > 0 {
+				pct = e.amt / bt.RUBTotal * 100
+			}
+			fmt.Fprintf(&sb, "• %s: %.0f ₽ (%.0f%%)\n", e.name, e.amt, pct)
+		}
+	}
+
+	rows := [][]core.Button{
+		{{Text: "🔙 Назад к корзинам", Data: "budget:buckets:" + period}},
+	}
+	return sb.String(), rows
 }

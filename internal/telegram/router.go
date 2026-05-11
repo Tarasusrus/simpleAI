@@ -12,9 +12,15 @@ type Handler func(ctx context.Context, tctx *Context) error
 type Middleware func(next Handler) Handler
 
 type Router struct {
-	commands       map[string]Handler
-	defaultHandler Handler
-	middlewares    []Middleware
+	commands         map[string]Handler
+	callbackPrefixes []callbackRoute
+	defaultHandler   Handler
+	middlewares      []Middleware
+}
+
+type callbackRoute struct {
+	prefix  string
+	handler Handler
 }
 
 func NewRouter() *Router {
@@ -35,19 +41,34 @@ func (r *Router) HandleDefault(handler Handler) {
 	r.defaultHandler = handler
 }
 
+// HandleCallback регистрирует handler для callback_data с заданным префиксом.
+func (r *Router) HandleCallback(prefix string, handler Handler) {
+	r.callbackPrefixes = append(r.callbackPrefixes, callbackRoute{prefix: prefix, handler: handler})
+}
+
 func (r *Router) HandleUpdate(ctx context.Context, tctx *Context) error {
 	if tctx.Update.ChatID == 0 {
 		return nil
 	}
 
-	handler := r.defaultHandler
-	if cmd, ok := parseCommand(tctx.Update.Text); ok {
-		if h, exists := r.commands[cmd]; exists {
-			handler = h
-		} else {
-			handler = r.defaultHandler
+	var handler Handler
+
+	if tctx.Update.IsCallback {
+		for _, route := range r.callbackPrefixes {
+			if strings.HasPrefix(tctx.Update.CallbackData, route.prefix) {
+				handler = route.handler
+				break
+			}
+		}
+	} else {
+		handler = r.defaultHandler
+		if cmd, ok := parseCommand(tctx.Update.Text); ok {
+			if h, exists := r.commands[cmd]; exists {
+				handler = h
+			}
 		}
 	}
+
 	if handler == nil {
 		return fmt.Errorf("no handler configured")
 	}
