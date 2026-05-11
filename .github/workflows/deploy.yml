@@ -42,7 +42,7 @@ jobs:
               echo ""
               echo "LLM_PROVIDER=openai"
               echo "LLM_BASE_URL=https://api.deepseek.com/v1"
-              echo "LLM_CHAT_MODEL=deepseek-v4-flash"
+              echo "LLM_CHAT_MODEL=deepseek-chat"
               echo "LLM_TIMEOUT_SECONDS=30"
               echo "ADVISOR_LLM_TIMEOUT_SECONDS=45"
               echo "LLM_RETRY_COUNT=0"
