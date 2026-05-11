@@ -215,7 +215,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 			sem <- struct{}{}
 			go func(u core.Update) {
 				defer func() { <-sem }()
-				hctx, hcancel := context.WithTimeout(context.Background(), 60*time.Second)
+				hctx, hcancel := context.WithTimeout(context.Background(), 150*time.Second)
 				defer hcancel()
 				err := router.HandleUpdate(hctx, &telegram.Context{
 					Bot:       adapter,
