@@ -66,12 +66,14 @@ func TestProperty_ParseLLMRoundtrip(t *testing.T) {
 		obj := map[string]any{
 			"verdict": verdict,
 			"flow": map[string]any{
-				"balance_now":           rapid.Float64Range(-1e6, 1e6).Draw(t, "bn"),
-				"obligations_remaining": rapid.Float64Range(0, 1e6).Draw(t, "ob"),
-				"after_obligations":     rapid.Float64Range(-1e6, 1e6).Draw(t, "ao"),
-				"expected_spend":        rapid.Float64Range(0, 1e6).Draw(t, "es"),
-				"forecast_remaining":    rapid.Float64Range(-1e6, 1e6).Draw(t, "fr"),
-				"after_purchase":        rapid.Float64Range(-1e6, 1e6).Draw(t, "ap"),
+				"yes_fund_now":            rapid.Float64Range(-1e6, 1e6).Draw(t, "yfn"),
+				"yes_fund_after_purchase": rapid.Float64Range(-1e6, 1e6).Draw(t, "yfap"),
+				"balance_now":             rapid.Float64Range(-1e6, 1e6).Draw(t, "bn"),
+				"obligations_remaining":   rapid.Float64Range(0, 1e6).Draw(t, "ob"),
+				"after_obligations":       rapid.Float64Range(-1e6, 1e6).Draw(t, "ao"),
+				"expected_spend":          rapid.Float64Range(0, 1e6).Draw(t, "es"),
+				"forecast_remaining":      rapid.Float64Range(-1e6, 1e6).Draw(t, "fr"),
+				"after_purchase":          rapid.Float64Range(-1e6, 1e6).Draw(t, "ap"),
 			},
 			"assumptions":    []string{"предположение"},
 			"risk":           risk,
@@ -100,7 +102,7 @@ func TestProperty_ParseLLMRejectsBadVerdict(t *testing.T) {
 		}
 		obj := map[string]any{
 			"verdict": bad,
-			"flow":    map[string]any{"balance_now": 1.0, "obligations_remaining": 1.0, "after_obligations": 1.0, "expected_spend": 1.0, "forecast_remaining": 1.0, "after_purchase": 1.0},
+			"flow":    map[string]any{"yes_fund_now": 1.0, "yes_fund_after_purchase": 1.0, "balance_now": 1.0, "obligations_remaining": 1.0, "after_obligations": 1.0, "expected_spend": 1.0, "forecast_remaining": 1.0, "after_purchase": 1.0},
 			"risk":    "x",
 		}
 		raw, err := json.Marshal(obj)
@@ -121,6 +123,8 @@ func TestProperty_FormatReplyContract(t *testing.T) {
 		if verdict != "Да" {
 			r.Recommendation = "alt"
 		}
+		r.Flow.YesFundNow = rapid.Float64Range(-1e5, 1e5).Draw(t, "yfn")
+		r.Flow.YesFundAfterPurchase = rapid.Float64Range(-1e5, 1e5).Draw(t, "yfap")
 		r.Flow.BalanceNow = rapid.Float64Range(-1e5, 1e5).Draw(t, "bn")
 		r.Flow.ObligationsRemaining = rapid.Float64Range(0, 1e5).Draw(t, "ob")
 		r.Flow.AfterObligations = rapid.Float64Range(-1e5, 1e5).Draw(t, "ao")
@@ -142,6 +146,8 @@ func TestProperty_FormatReplyContract(t *testing.T) {
 		out := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
 			Verdict: r.Verdict,
 			Flow: botformat.AdvisorFlow{
+				YesFundNow:           r.Flow.YesFundNow,
+				YesFundAfterPurchase: r.Flow.YesFundAfterPurchase,
 				BalanceNow:           r.Flow.BalanceNow,
 				ObligationsRemaining: r.Flow.ObligationsRemaining,
 				AfterObligations:     r.Flow.AfterObligations,
@@ -157,6 +163,9 @@ func TestProperty_FormatReplyContract(t *testing.T) {
 		})
 		if !strings.Contains(out, "*Вердикт:* "+verdict) {
 			t.Fatalf("verdict missing in output: %s", out)
+		}
+		if !strings.Contains(out, "Фонд") {
+			t.Fatalf("Yes Fund section missing in output: %s", out)
 		}
 		if nonTHB {
 			if !strings.Contains(out, origCur) || !strings.Contains(out, "THB") {

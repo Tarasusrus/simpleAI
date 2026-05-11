@@ -264,14 +264,15 @@ const MinTxForConfidence = 5
 // (chat-scoped, enabled). ForecastRemaining заполняется skill'ом отдельным
 // вызовом Store.GetForecastData (не входит в CTE).
 type AdvisorSnapshot struct {
-	BalanceMTD        float64            // доходы − расходы текущего месяца, THB
-	SpentByCategory   map[string]float64 // расходы MTD по категориям, THB
-	ForecastRemaining float64            // прогнозный остаток до конца месяца, THB (заполняется skill'ом)
-	UpcomingRecurring float64            // сумма enabled recurring с next_date <= конец месяца, THB
-	ActiveDebtDue     float64            // активные долги (owe) с due_date <= конец месяца, THB
-	FreeCash          float64            // BalanceMTD − UpcomingRecurring − ActiveDebtDue, THB
-	TxCount           int                // число транзакций в текущем месяце
-	LowData           bool               // TxCount < MinTxForConfidence (порог в пакете skills)
+	BalanceMTD               float64            // доходы − расходы текущего месяца, THB
+	SpentByCategory          map[string]float64 // расходы MTD по категориям, THB
+	ForecastRemaining        float64            // прогнозный остаток до конца месяца, THB (заполняется skill'ом)
+	UpcomingRecurring        float64            // сумма enabled expense recurring с next_date <= конец месяца, THB
+	UpcomingRecurringIncome  float64            // сумма enabled income recurring с next_date <= конец месяца, THB
+	ActiveDebtDue            float64            // активные долги (owe) с due_date <= конец месяца, THB
+	FreeCash                 float64            // BalanceMTD − UpcomingRecurring − ActiveDebtDue, THB
+	TxCount                  int                // число транзакций в текущем месяце
+	LowData                  bool               // TxCount < MinTxForConfidence (порог в пакете skills)
 }
 
 // TopExpense — одна из топ-N самых дорогих расходных транзакций за период,

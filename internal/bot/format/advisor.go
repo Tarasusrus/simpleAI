@@ -7,6 +7,8 @@ import (
 
 // AdvisorFlow holds the step-by-step financial transition for advisor reply.
 type AdvisorFlow struct {
+	YesFundNow           float64
+	YesFundAfterPurchase float64
 	BalanceNow           float64
 	ObligationsRemaining float64
 	AfterObligations     float64
@@ -27,7 +29,8 @@ type AdvisorReplyData struct {
 	AmountTHB      float64
 }
 
-// FormatAdvisorReply renders a Telegram-formatted advisor reply as a financial flow simulation.
+// FormatAdvisorReply renders a Telegram-formatted advisor reply.
+// Primary answer: verdict + Yes Fund. Details section contains full flow for the curious.
 func FormatAdvisorReply(r AdvisorReplyData) string {
 	var sb strings.Builder
 
@@ -35,21 +38,25 @@ func FormatAdvisorReply(r AdvisorReplyData) string {
 		fmt.Fprintf(&sb, "_Сумма_: %.0f %s ≈ %.0f THB\n\n", r.OrigAmount, r.OrigCurrency, r.AmountTHB)
 	}
 
-	sb.WriteString("*Сейчас:*\n")
-	fmt.Fprintf(&sb, "• Баланс месяца: %.0f THB\n", r.Flow.BalanceNow)
-	fmt.Fprintf(&sb, "• Обязательства до конца месяца: %.0f THB\n", r.Flow.ObligationsRemaining)
-	fmt.Fprintf(&sb, "• После обязательств: %.0f THB\n", r.Flow.AfterObligations)
+	// Verdict first
+	fmt.Fprintf(&sb, "*Вердикт:* %s\n\n", EscapeTelegramMarkdown(r.Verdict))
 
-	if r.Flow.ExpectedSpend > 0 {
-		fmt.Fprintf(&sb, "• Ожидаемые повседневные расходы: %.0f THB\n", r.Flow.ExpectedSpend)
-	}
-
-	fmt.Fprintf(&sb, "\n*Прогноз остатка:* %.0f THB\n", r.Flow.ForecastRemaining)
-
+	// Yes Fund — main answer
+	sb.WriteString("*Фонд «Да» (свободные деньги):*\n")
+	fmt.Fprintf(&sb, "• Сейчас: %.0f THB\n", r.Flow.YesFundNow)
 	if r.AmountTHB > 0 {
-		fmt.Fprintf(&sb, "*После покупки:* %.0f THB\n", r.Flow.AfterPurchase)
+		fmt.Fprintf(&sb, "• После покупки: %.0f THB\n", r.Flow.YesFundAfterPurchase)
 	}
 
+	// Risk
+	fmt.Fprintf(&sb, "\n*Риск:* %s\n", EscapeTelegramMarkdown(r.Risk))
+
+	// Recommendation (when verdict != Да)
+	if rec := strings.TrimSpace(r.Recommendation); rec != "" {
+		fmt.Fprintf(&sb, "\n*Рекомендация:* %s\n", EscapeTelegramMarkdown(rec))
+	}
+
+	// Assumptions (non-obvious only)
 	if len(r.Assumptions) > 0 {
 		sb.WriteString("\n*Предположения:*\n")
 		for _, a := range r.Assumptions {
@@ -57,12 +64,16 @@ func FormatAdvisorReply(r AdvisorReplyData) string {
 		}
 	}
 
-	fmt.Fprintf(&sb, "\n*Риск:* %s\n", EscapeTelegramMarkdown(r.Risk))
-
-	fmt.Fprintf(&sb, "\n*Вердикт:* %s\n", EscapeTelegramMarkdown(r.Verdict))
-
-	if rec := strings.TrimSpace(r.Recommendation); rec != "" {
-		fmt.Fprintf(&sb, "\n*Рекомендация:* %s\n", EscapeTelegramMarkdown(rec))
+	// Details section — full flow for the curious
+	sb.WriteString("\n_Детали:_\n")
+	fmt.Fprintf(&sb, "• Баланс месяца: %.0f THB\n", r.Flow.BalanceNow)
+	fmt.Fprintf(&sb, "• Обязательства: %.0f THB\n", r.Flow.ObligationsRemaining)
+	if r.Flow.ExpectedSpend > 0 {
+		fmt.Fprintf(&sb, "• Ожидаемые расходы \\(\\+10%% буфер\\): %.0f THB\n", r.Flow.ExpectedSpend)
+	}
+	fmt.Fprintf(&sb, "• Прогноз остатка: %.0f THB\n", r.Flow.ForecastRemaining)
+	if r.AmountTHB > 0 {
+		fmt.Fprintf(&sb, "• После покупки: %.0f THB\n", r.Flow.AfterPurchase)
 	}
 
 	return strings.TrimRight(sb.String(), "\n")

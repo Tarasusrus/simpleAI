@@ -17,6 +17,8 @@ import (
 type advisorLLMResponse struct {
 	Verdict string `json:"verdict"` // "Да" | "Нет" | "Условно"
 	Flow    struct {
+		YesFundNow          float64 `json:"yes_fund_now"`
+		YesFundAfterPurchase float64 `json:"yes_fund_after_purchase"`
 		BalanceNow           float64 `json:"balance_now"`
 		ObligationsRemaining float64 `json:"obligations_remaining"`
 		AfterObligations     float64 `json:"after_obligations"`
@@ -76,8 +78,9 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 		s.logger.WarnContext(ctx, "advisor: get forecast (continuing without)", "err", err, "chat_id", chatID)
 	}
 	snap.ForecastRemaining = computeForecastRemaining(snap, forecasts, rates)
+	yesFund := computeYesFund(snap)
 
-	prompt := buildAdvisorPrompt(req, snap, amountTHB, origAmount, origCurrency)
+	prompt := buildAdvisorPrompt(req, snap, yesFund, amountTHB, origAmount, origCurrency)
 
 	raw, err := s.llm.Ask(ctx, prompt)
 	if err != nil {
@@ -94,6 +97,8 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 	reply := botformat.FormatAdvisorReply(botformat.AdvisorReplyData{
 		Verdict: parsed.Verdict,
 		Flow: botformat.AdvisorFlow{
+			YesFundNow:           parsed.Flow.YesFundNow,
+			YesFundAfterPurchase: parsed.Flow.YesFundAfterPurchase,
 			BalanceNow:           parsed.Flow.BalanceNow,
 			ObligationsRemaining: parsed.Flow.ObligationsRemaining,
 			AfterObligations:     parsed.Flow.AfterObligations,
@@ -122,6 +127,8 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 	return reply, nil
 }
 
+const murphyFactor = 1.10 // +10% buffer on projected remaining spend
+
 func computeForecastRemaining(snap *budget.AdvisorSnapshot, forecasts []budget.CategoryForecast, rates map[string]float64) float64 {
 	thbRate := rates["THB"]
 	if thbRate == 0 {
@@ -143,10 +150,18 @@ func computeForecastRemaining(snap *budget.AdvisorSnapshot, forecasts []budget.C
 	if remainingExpected < 0 {
 		remainingExpected = 0
 	}
-	return snap.BalanceMTD - remainingExpected
+	return snap.BalanceMTD - remainingExpected*murphyFactor
 }
 
-func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, amountTHB, origAmount float64, origCurrency string) string {
+// computeYesFund returns the amount freely spendable this month after all
+// commitments (upcoming recurring expenses and active debts) are covered,
+// including income still expected to arrive (upcoming recurring income).
+// Goals are not yet subtracted (no monthly contribution data available).
+func computeYesFund(snap *budget.AdvisorSnapshot) float64 {
+	return snap.BalanceMTD + snap.UpcomingRecurringIncome - snap.UpcomingRecurring - snap.ActiveDebtDue
+}
+
+func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, yesFund, amountTHB, origAmount float64, origCurrency string) string {
 	var amountLine string
 	if origAmount > 0 {
 		if origCurrency == "THB" {
@@ -164,6 +179,8 @@ func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, amountTH
 	return fmt.Sprintf(prompts.Get("advisor/advice.tmpl"),
 		strings.TrimSpace(req.Question),
 		amountLine,
+		yesFund,
+		snap.UpcomingRecurringIncome,
 		snap.BalanceMTD,
 		snap.ForecastRemaining,
 		snap.FreeCash,

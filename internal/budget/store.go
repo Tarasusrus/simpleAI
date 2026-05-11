@@ -1105,8 +1105,11 @@ func aggregateAdvisorSnapshot(rows []advisorRow, rates map[string]float64) (*Adv
 		case "debt":
 			snap.ActiveDebtDue += thb
 		case "recurring":
-			if r.Subtype == "expense" {
+			switch r.Subtype {
+			case "expense":
 				snap.UpcomingRecurring += thb
+			case "income":
+				snap.UpcomingRecurringIncome += thb
 			}
 		}
 	}
