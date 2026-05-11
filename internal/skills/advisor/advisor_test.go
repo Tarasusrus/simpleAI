@@ -46,10 +46,13 @@ func TestProperty_ForecastRemainingUpperBound(t *testing.T) {
 				ForecastAmount: rapid.Float64Range(0, 50000).Draw(t, "fcAmt"),
 			})
 		}
-		snap := &budget.AdvisorSnapshot{BalanceMTD: balance, SpentByCategory: spent}
-		got := computeForecastRemaining(snap, forecasts, rates)
-		if got > snap.BalanceMTD+1e-6 {
-			t.Fatalf("ForecastRemaining %.6f must be <= BalanceMTD %.6f", got, snap.BalanceMTD)
+		incomeAvg := rapid.Float64Range(0, 100000).Draw(t, "incomeAvg")
+		snap := &budget.AdvisorSnapshot{BalanceMTD: balance, IncomeMTD: rapid.Float64Range(0, 100000).Draw(t, "incomeMTD"), SpentByCategory: spent}
+		got := computeForecastRemaining(snap, forecasts, incomeAvg, rates)
+		// ForecastRemaining can exceed BalanceMTD when remaining income > remaining expenses
+		maxExpected := snap.BalanceMTD + incomeAvg
+		if got > maxExpected+1e-6 {
+			t.Fatalf("ForecastRemaining %.6f must be <= BalanceMTD+incomeAvg %.6f", got, maxExpected)
 		}
 	})
 }

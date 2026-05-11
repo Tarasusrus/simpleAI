@@ -752,6 +752,55 @@ func (s *Store) GetForecastData(ctx context.Context, months int, rates map[strin
 	return AggregateForecast(rows, rates), nil
 }
 
+// GetMonthlyIncomeAvg возвращает среднемесячный доход в THB по завершённым прошлым месяцам.
+// Текущий (неполный) месяц исключается, чтобы не занижать среднее.
+// Если данных нет — возвращает 0 без ошибки.
+func (s *Store) GetMonthlyIncomeAvg(ctx context.Context, rates map[string]float64) (float64, error) {
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return 0, fmt.Errorf("GetMonthlyIncomeAvg: THB rate missing")
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.currency, date_trunc('month', t.transaction_date) AS month, SUM(t.amount) AS total
+		FROM budget_transaction t
+		WHERE t.type = 'income'
+		  AND t.transaction_date < date_trunc('month', NOW())
+		GROUP BY t.currency, month
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("GetMonthlyIncomeAvg: %w", err)
+	}
+	defer rows.Close()
+
+	// month → THB sum
+	byMonth := map[time.Time]float64{}
+	for rows.Next() {
+		var currency string
+		var month time.Time
+		var total float64
+		if err := rows.Scan(&currency, &month, &total); err != nil {
+			return 0, fmt.Errorf("GetMonthlyIncomeAvg scan: %w", err)
+		}
+		rubRate, ok := rates[currency]
+		if !ok || rubRate == 0 {
+			continue
+		}
+		byMonth[month] += total * rubRate / thbRate
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("GetMonthlyIncomeAvg rows: %w", err)
+	}
+	if len(byMonth) == 0 {
+		return 0, nil
+	}
+	var sum float64
+	for _, v := range byMonth {
+		sum += v
+	}
+	return sum / float64(len(byMonth)), nil
+}
+
 func (s *Store) getMonthlyExpenses(ctx context.Context, months int) ([]MonthlyCategoryExpense, error) {
 	var fromClause string
 	var args []any
@@ -1115,6 +1164,7 @@ func aggregateAdvisorSnapshot(rows []advisorRow, rates map[string]float64) (*Adv
 	}
 
 	snap.BalanceMTD = income - expense
+	snap.IncomeMTD = income
 	snap.FreeCash = snap.BalanceMTD - snap.UpcomingRecurring - snap.ActiveDebtDue
 	snap.LowData = snap.TxCount < MinTxForConfidence
 

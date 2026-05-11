@@ -20,6 +20,7 @@ type advisorStore interface {
 	GetAdvisorSnapshot(ctx context.Context, chatID int64, today time.Time, monthOffset int, rates map[string]float64) (*budget.AdvisorSnapshot, error)
 	GetTopExpenseTransactions(ctx context.Context, today time.Time, monthOffset int, limit int, rates map[string]float64) ([]budget.TopExpense, error)
 	GetForecastData(ctx context.Context, months int, rates map[string]float64) ([]budget.CategoryForecast, error)
+	GetMonthlyIncomeAvg(ctx context.Context, rates map[string]float64) (float64, error)
 }
 
 // defaultAdvisorLLMTimeout — used when no timeout is configured.

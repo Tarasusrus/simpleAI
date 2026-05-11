@@ -75,12 +75,16 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 
 	forecasts, err := s.store.GetForecastData(ctx, 0, rates)
 	if err != nil {
-		s.logger.WarnContext(ctx, "advisor: get forecast (continuing without)", "err", err, "chat_id", chatID)
+		s.logger.WarnContext(ctx, "advisor: get forecast expenses (continuing without)", "err", err, "chat_id", chatID)
 	}
-	snap.ForecastRemaining = computeForecastRemaining(snap, forecasts, rates)
+	monthlyIncomeAvg, err := s.store.GetMonthlyIncomeAvg(ctx, rates)
+	if err != nil {
+		s.logger.WarnContext(ctx, "advisor: get income avg (continuing without)", "err", err, "chat_id", chatID)
+	}
+	snap.ForecastRemaining = computeForecastRemaining(snap, forecasts, monthlyIncomeAvg, rates)
 	yesFund := computeYesFund(snap)
 
-	prompt := buildAdvisorPrompt(req, snap, yesFund, amountTHB, origAmount, origCurrency)
+	prompt := buildAdvisorPrompt(req, snap, yesFund, monthlyIncomeAvg, amountTHB, origAmount, origCurrency)
 
 	llmCtx, llmCancel := context.WithTimeout(context.Background(), s.llmTimeout)
 	defer llmCancel()
@@ -131,39 +135,51 @@ func (s *AdvisorSkill) runAdvice(ctx context.Context, req advisorInput) (string,
 
 const murphyFactor = 1.10 // +10% buffer on projected remaining spend
 
-func computeForecastRemaining(snap *budget.AdvisorSnapshot, forecasts []budget.CategoryForecast, rates map[string]float64) float64 {
+// computeForecastRemaining projects the month-end balance using historical
+// averages for both expenses and income, symmetric with each other.
+// remainingExpectedIncome = max(0, avgMonthlyIncome - IncomeMTD)
+// remainingExpectedExpenses = max(0, avgMonthlyExpenses - spentSoFar) * murphyFactor
+func computeForecastRemaining(snap *budget.AdvisorSnapshot, forecasts []budget.CategoryForecast, monthlyIncomeAvg float64, rates map[string]float64) float64 {
 	thbRate := rates["THB"]
 	if thbRate == 0 {
 		return snap.BalanceMTD
 	}
-	var projectedTotal float64
+
+	var projectedExpenses float64
 	for _, f := range forecasts {
 		rubRate, ok := rates[f.Currency]
 		if !ok || rubRate == 0 {
 			continue
 		}
-		projectedTotal += f.ForecastAmount * rubRate / thbRate
+		projectedExpenses += f.ForecastAmount * rubRate / thbRate
 	}
 	var spentSoFar float64
 	for _, v := range snap.SpentByCategory {
 		spentSoFar += v
 	}
-	remainingExpected := projectedTotal - spentSoFar
-	if remainingExpected < 0 {
-		remainingExpected = 0
+	remainingExpenses := projectedExpenses - spentSoFar
+	if remainingExpenses < 0 {
+		remainingExpenses = 0
 	}
-	return snap.BalanceMTD - remainingExpected*murphyFactor
+
+	remainingIncome := monthlyIncomeAvg - snap.IncomeMTD
+	if remainingIncome < 0 {
+		remainingIncome = 0
+	}
+
+	return snap.BalanceMTD + remainingIncome - remainingExpenses*murphyFactor
 }
 
-// computeYesFund returns the amount freely spendable this month after all
-// commitments (upcoming recurring expenses and active debts) are covered,
-// including income still expected to arrive (upcoming recurring income).
+// computeYesFund returns the amount freely spendable this month.
+// Uses ForecastRemaining (which already includes historical income projection)
+// minus committed outflows. UpcomingRecurringIncome is intentionally excluded
+// to avoid double-counting with the historical income forecast.
 // Goals are not yet subtracted (no monthly contribution data available).
 func computeYesFund(snap *budget.AdvisorSnapshot) float64 {
-	return snap.BalanceMTD + snap.UpcomingRecurringIncome - snap.UpcomingRecurring - snap.ActiveDebtDue
+	return snap.ForecastRemaining - snap.UpcomingRecurring - snap.ActiveDebtDue
 }
 
-func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, yesFund, amountTHB, origAmount float64, origCurrency string) string {
+func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, yesFund, monthlyIncomeAvg, amountTHB, origAmount float64, origCurrency string) string {
 	var amountLine string
 	if origAmount > 0 {
 		if origCurrency == "THB" {
@@ -182,7 +198,8 @@ func buildAdvisorPrompt(req advisorInput, snap *budget.AdvisorSnapshot, yesFund,
 		strings.TrimSpace(req.Question),
 		amountLine,
 		yesFund,
-		snap.UpcomingRecurringIncome,
+		snap.IncomeMTD,
+		monthlyIncomeAvg,
 		snap.BalanceMTD,
 		snap.ForecastRemaining,
 		snap.FreeCash,
