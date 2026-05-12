@@ -1,6 +1,9 @@
 package budgetskill
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Bucket описывает корзину расходов.
 type Bucket struct {
@@ -85,7 +88,7 @@ func GroupByBuckets(cats map[string]float64, cfg BucketConfig) []BucketTotal {
 	}
 
 	for catName, amount := range cats {
-		idx, ok := catIndex[catName]
+		idx, ok := catIndex[strings.ToLower(catName)]
 		if !ok {
 			idx = defaultIdx
 		}
