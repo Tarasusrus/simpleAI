@@ -25,7 +25,7 @@ type TransactionQuery struct {
 // Вся грязь LLM (mutation period→date, flexible date formats, pagination policy,
 // defaults) изолирована здесь. После успешного возврата Filter гарантированно
 // проходит Filter.Validate().
-func NormalizeBudgetInput(req budgetInput) (TransactionQuery, error) {
+func NormalizeBudgetInput(req budgetInput, chatID int64) (TransactionQuery, error) {
 	// LLM иногда кладёт конкретную дату в поле period — исправляем.
 	if req.Date == "" && req.Period != "" {
 		for _, layout := range []string{"2006-01-02", "02.01.2006"} {
@@ -74,6 +74,7 @@ func NormalizeBudgetInput(req budgetInput) (TransactionQuery, error) {
 	}
 
 	f := budget.TransactionFilter{
+		ChatID:     &chatID,
 		DateRange:  dateRange,
 		Pagination: budget.Pagination{Limit: limit},
 	}

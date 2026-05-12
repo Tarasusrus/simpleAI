@@ -251,7 +251,7 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	if filter == "" {
 		period := p.From.Format("2006-01")
 		avg := s.threeMonthAvg(ctx, p, rates)
-		text, buttons := formatSummaryL1(curr, avg, rates, period)
+		text, buttons := formatSummaryL1(curr, avg, pendingForecast{}, rates, period)
 		StoreButtons(ctx, buttons)
 		return text, nil
 	}
@@ -454,7 +454,7 @@ func monthsUntil(deadline time.Time) int {
 }
 
 // formatSummaryL1 форматирует Level 1: income, balance, 3-month avg + кнопки drill-down.
-func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, rates map[string]float64, period string) (string, [][]core.Button) {
+func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, pending pendingForecast, rates map[string]float64, period string) (string, [][]core.Button) {
 	incomeRUB := summaryIncomeRUB(s, rates)
 	totalRUB := summaryTotalRUB(s, rates)
 	balance := incomeRUB - totalRUB
@@ -464,17 +464,48 @@ func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, rates map[string
 	if incomeRUB > 0 {
 		fmt.Fprintf(&sb, "💰 Доходы: ~%.0f ₽\n", incomeRUB)
 	}
+
 	sign := "+"
 	if balance < 0 {
 		sign = ""
 	}
-	fmt.Fprintf(&sb, "📊 Остаток (Фонд Да): %s%.0f ₽", sign, balance)
-	if balance >= 0 {
-		sb.WriteString(" ✅")
-	} else {
-		sb.WriteString(" ⚠️")
+
+	switch {
+	case !pending.Available:
+		fmt.Fprintf(&sb, "📊 Фонд Да: %s%.0f ₽", sign, balance)
+		if balance >= 0 {
+			sb.WriteString(" ✅")
+		} else {
+			sb.WriteString(" ⚠️")
+		}
+		sb.WriteString("\n")
+		sb.WriteString("📈 Прогноз временно недоступен\n")
+
+	case pending.IncomeRUB > 0 || pending.ExpenseRUB > 0:
+		forecastBalance := incomeRUB + pending.IncomeRUB - totalRUB - pending.ExpenseRUB
+		fmt.Fprintf(&sb, "📊 Сейчас: %s%.0f ₽\n", sign, balance)
+		fsign := "+"
+		if forecastBalance < 0 {
+			fsign = ""
+		}
+		fmt.Fprintf(&sb, "📈 Фонд Да (до конца месяца): %s%.0f ₽", fsign, forecastBalance)
+		if forecastBalance >= 0 {
+			sb.WriteString(" ✅")
+		} else {
+			sb.WriteString(" ⚠️")
+		}
+		sb.WriteString("\n")
+
+	default:
+		fmt.Fprintf(&sb, "📊 Фонд Да: %s%.0f ₽", sign, balance)
+		if balance >= 0 {
+			sb.WriteString(" ✅")
+		} else {
+			sb.WriteString(" ⚠️")
+		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n")
+
 	if avgThreeMonths > 0 {
 		fmt.Fprintf(&sb, "📉 Средний расход (3 мес): ~%.0f ₽\n", avgThreeMonths)
 	}
@@ -487,22 +518,32 @@ func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, rates map[string
 	return sb.String(), rows
 }
 
-// formatBucketsL2 форматирует Level 2: три корзины с суммами.
-func formatBucketsL2(s *budget.Summary, rates map[string]float64, period string, cfg BucketConfig) (string, [][]core.Button) {
+// formatBucketsL2 форматирует Level 2: три корзины с суммами (факт + план из recurring).
+func formatBucketsL2(s *budget.Summary, pending pendingForecast, rates map[string]float64, period string, cfg BucketConfig) (string, [][]core.Button) {
 	cats := summaryCategories(s, rates)
 	totalRUB := summaryTotalRUB(s, rates)
+	totalWithPending := totalRUB + pending.ExpenseRUB
 	buckets := GroupByBuckets(cats, cfg)
+	pendingBuckets := GroupByBuckets(pending.ByCategory, cfg)
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "📦 Расходы %s по корзинам:\n\n", formatPeriodName(s.Period))
 
+	hasPending := pending.ExpenseRUB > 0
 	for i, bt := range buckets {
+		pendingRUB := pendingBuckets[i].RUBTotal
+		combinedRUB := bt.RUBTotal + pendingRUB
 		pct := 0.0
-		if totalRUB > 0 {
-			pct = bt.RUBTotal / totalRUB * 100
+		if totalWithPending > 0 {
+			pct = combinedRUB / totalWithPending * 100
 		}
-		fmt.Fprintf(&sb, "%d. %s %s (%.0f%%): %.0f ₽\n",
-			i+1, bt.Bucket.Icon, bt.Bucket.Name, pct, bt.RUBTotal)
+		if hasPending && pendingRUB > 0 {
+			fmt.Fprintf(&sb, "%d. %s %s (%.0f%%): %.0f ₽ + 📅%.0f ₽\n",
+				i+1, bt.Bucket.Icon, bt.Bucket.Name, pct, bt.RUBTotal, pendingRUB)
+		} else {
+			fmt.Fprintf(&sb, "%d. %s %s (%.0f%%): %.0f ₽\n",
+				i+1, bt.Bucket.Icon, bt.Bucket.Name, pct, bt.RUBTotal)
+		}
 	}
 
 	btnRows := make([][]core.Button, 0, len(buckets)+1)

@@ -213,7 +213,7 @@ func (s *Store) ListTransactions(ctx context.Context, f *TransactionFilter) ([]T
 	limitOffsetClause := fmt.Sprintf("LIMIT $%d OFFSET $%d", n, n+1)
 
 	query := fmt.Sprintf(`
-		SELECT t.id, t.type, t.amount, t.currency, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
+		SELECT t.id, t.recurring_id, t.type, t.amount, t.currency, t.category_id, COALESCE(c.name, ''), t.description, t.transaction_date, t.created_at
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		%s
@@ -230,7 +230,7 @@ func (s *Store) ListTransactions(ctx context.Context, f *TransactionFilter) ([]T
 	var out []Transaction
 	for rows.Next() {
 		var t Transaction
-		if err := rows.Scan(&t.ID, &t.Type, &t.Amount, &t.Currency, &t.CategoryID, &t.CategoryName, &t.Description, &t.Date, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.RecurringID, &t.Type, &t.Amount, &t.Currency, &t.CategoryID, &t.CategoryName, &t.Description, &t.Date, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan transaction: %w", err)
 		}
 		out = append(out, t)
@@ -668,9 +668,9 @@ func (s *Store) CreateRecurringTransaction(ctx context.Context, t Transaction, r
 	}
 	if !exists {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, t.ID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date); err != nil {
+			INSERT INTO budget_transaction (id, recurring_id, type, amount, currency, category_id, description, transaction_date)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, t.ID, recurringID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date); err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}
 	}
@@ -723,6 +723,36 @@ func (s *Store) DeleteRecurring(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("recurring %s not found", id)
 	}
 	return nil
+}
+
+// GetExecutedRecurringIDs возвращает множество recurring_id, для которых уже есть
+// транзакция в заданном периоде. Используется для set-difference при расчёте прогноза.
+func (s *Store) GetExecutedRecurringIDs(ctx context.Context, recurringIDs []uuid.UUID, p Period) (map[uuid.UUID]struct{}, error) {
+	if len(recurringIDs) == 0 {
+		return map[uuid.UUID]struct{}{}, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT recurring_id
+		FROM budget_transaction
+		WHERE recurring_id = ANY($1)
+		  AND transaction_date >= $2
+		  AND transaction_date <= $3
+	`, recurringIDs, p.From, p.To)
+	if err != nil {
+		return nil, fmt.Errorf("get executed recurring ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]struct{})
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan recurring id: %w", err)
+		}
+		result[id] = struct{}{}
+	}
+	return result, rows.Err()
 }
 
 // --- Прогнозирование ---

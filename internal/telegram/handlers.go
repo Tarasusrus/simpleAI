@@ -52,13 +52,13 @@ func HandleReminders(ctx context.Context, tctx *Context) error {
 
 // BudgetCallbackSkill — минимальный интерфейс для обработки budget callbacks.
 type BudgetCallbackSkill interface {
-	HandleCallbackData(ctx context.Context, data string) (core.CallbackResult, error)
+	HandleCallbackData(ctx context.Context, chatID int64, data string) (core.CallbackResult, error)
 }
 
 // NewHandleBudgetCallback возвращает handler для inline-кнопок budget skill.
 func NewHandleBudgetCallback(skill BudgetCallbackSkill) Handler {
 	return func(ctx context.Context, tctx *Context) error {
-		result, err := skill.HandleCallbackData(ctx, tctx.Update.CallbackData)
+		result, err := skill.HandleCallbackData(ctx, tctx.Update.ChatID, tctx.Update.CallbackData)
 		if err != nil {
 			return tctx.Reply(fmt.Sprintf("Ошибка: %v", err))
 		}

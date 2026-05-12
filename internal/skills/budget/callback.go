@@ -3,8 +3,11 @@ package budgetskill
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
@@ -18,7 +21,7 @@ const CallbackPrefix = "budget:"
 //	budget:summary:YYYY-MM   → L1
 //	budget:buckets:YYYY-MM   → L2
 //	budget:detail:YYYY-MM:bucketID → L3
-func (s *BudgetSkill) HandleCallbackData(ctx context.Context, data string) (core.CallbackResult, error) {
+func (s *BudgetSkill) HandleCallbackData(ctx context.Context, chatID int64, data string) (core.CallbackResult, error) {
 	parts := strings.SplitN(data, ":", 4)
 	if len(parts) < 3 || parts[0] != "budget" {
 		return core.CallbackResult{}, fmt.Errorf("unexpected callback data: %s", data)
@@ -44,14 +47,24 @@ func (s *BudgetSkill) HandleCallbackData(ctx context.Context, data string) (core
 		return core.CallbackResult{}, fmt.Errorf("get summary: %w", err)
 	}
 
+	pending, err := s.pendingRecurring(ctx, chatID, p, rates)
+	if err != nil {
+		slog.WarnContext(ctx, "pending recurring forecast unavailable",
+			"chat_id", chatID,
+			"period", period,
+			"err", err,
+		)
+		pending = pendingForecast{Available: false}
+	}
+
 	switch action {
 	case "summary":
 		avg := s.threeMonthAvg(ctx, p, rates)
-		text, buttons := formatSummaryL1(curr, avg, rates, period)
+		text, buttons := formatSummaryL1(curr, avg, pending, rates, period)
 		return core.CallbackResult{Text: text, Buttons: buttons}, nil
 
 	case "buckets":
-		text, buttons := formatBucketsL2(curr, rates, period, s.buckets)
+		text, buttons := formatBucketsL2(curr, pending, rates, period, s.buckets)
 		return core.CallbackResult{Text: text, Buttons: buttons}, nil
 
 	case "detail":
@@ -65,6 +78,65 @@ func (s *BudgetSkill) HandleCallbackData(ctx context.Context, data string) (core
 	default:
 		return core.CallbackResult{}, fmt.Errorf("unknown budget callback action: %s", action)
 	}
+}
+
+// pendingForecast — агрегированные суммы ещё не исполненных recurring на текущий месяц.
+type pendingForecast struct {
+	Available  bool // false = ошибка при расчёте, данные ненадёжны
+	IncomeRUB  float64
+	ExpenseRUB float64
+	// суммы по категориям (lowercase) для bucket-overlay
+	ByCategory map[string]float64
+}
+
+// pendingRecurring вычисляет прогнозные суммы из enabled recurring,
+// которые ещё не исполнились в периоде p.
+func (s *BudgetSkill) pendingRecurring(ctx context.Context, chatID int64, p budget.Period, rates map[string]float64) (pendingForecast, error) {
+	allRecurring, err := s.store.ListRecurring(ctx, chatID)
+	if err != nil {
+		return pendingForecast{}, fmt.Errorf("list recurring: %w", err)
+	}
+
+	endOfMonth := time.Date(p.From.Year(), p.From.Month()+1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+
+	// Кандидаты: enabled + next_date в пределах месяца.
+	candidates := make([]uuid.UUID, 0, len(allRecurring))
+	for _, r := range allRecurring {
+		if r.Enabled && !r.NextDate.After(endOfMonth) {
+			candidates = append(candidates, r.ID)
+		}
+	}
+
+	executed, err := s.store.GetExecutedRecurringIDs(ctx, candidates, p)
+	if err != nil {
+		return pendingForecast{}, fmt.Errorf("get executed recurring ids: %w", err)
+	}
+
+	result := pendingForecast{Available: true, ByCategory: make(map[string]float64)}
+	for _, r := range allRecurring {
+		if !r.Enabled {
+			continue
+		}
+		if r.NextDate.After(endOfMonth) {
+			continue
+		}
+		if _, ok := executed[r.ID]; ok {
+			continue
+		}
+
+		amountRUB := toRUB(r.Amount, r.Currency, rates)
+		catKey := strings.ToLower(r.CategoryName)
+
+		switch r.Type {
+		case "income":
+			result.IncomeRUB += amountRUB
+		case "expense":
+			result.ExpenseRUB += amountRUB
+			result.ByCategory[catKey] += amountRUB
+		}
+	}
+
+	return result, nil
 }
 
 // threeMonthAvg считает средний расход за 3 предыдущих месяца.

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
 
 	"github.com/google/uuid"
@@ -114,7 +115,8 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {
-	q, err := NormalizeBudgetInput(req)
+	chatID, _ := ctx.Value(agent.ChatIDKey{}).(int64) //nolint:errcheck // type assertion, not error
+	q, err := NormalizeBudgetInput(req, chatID)
 	if err != nil {
 		return "", err
 	}

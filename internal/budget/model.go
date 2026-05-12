@@ -87,6 +87,7 @@ type Category struct {
 // Transaction — одна финансовая операция (доход или расход).
 type Transaction struct {
 	ID           uuid.UUID
+	RecurringID  *uuid.UUID
 	Type         string // "income" | "expense"
 	Amount       float64
 	Currency     string // ISO 4217: RUB, USD, EUR, THB, ...
@@ -157,6 +158,7 @@ type Period struct {
 // Все поля опциональны кроме Pagination.Limit.
 // Вызови Validate() перед передачей в Store.
 type TransactionFilter struct {
+	ChatID      *int64 // обязателен — nil запрещён Validate()
 	DateRange   *DateRange
 	Directions  []TransactionDirection // пусто = оба направления
 	CategoryIDs []uuid.UUID
@@ -171,6 +173,10 @@ type TransactionFilter struct {
 // Validate проверяет инварианты фильтра. Возвращает ошибку с перечислением всех нарушений.
 func (f *TransactionFilter) Validate() error {
 	var errs []string
+
+	if f.ChatID == nil {
+		errs = append(errs, "ChatID is required")
+	}
 
 	if f.DateRange != nil && f.DateRange.From.After(f.DateRange.To) {
 		errs = append(errs, "DateRange.From must be <= DateRange.To")
