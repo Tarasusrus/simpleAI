@@ -29,12 +29,14 @@ type DigestSource interface {
 type ReminderWorker struct {
 	store  ReminderStore
 	sender ReminderSender
+	digest DigestSource
 	logger *slog.Logger
 }
 
 // NewReminderWorker создаёт воркер напоминаний.
-func NewReminderWorker(store ReminderStore, sender ReminderSender, logger *slog.Logger) *ReminderWorker {
-	return &ReminderWorker{store: store, sender: sender, logger: logger}
+// digest опционален (nil допустим) — без него шлётся только напоминание.
+func NewReminderWorker(store ReminderStore, sender ReminderSender, digest DigestSource, logger *slog.Logger) *ReminderWorker {
+	return &ReminderWorker{store: store, sender: sender, digest: digest, logger: logger}
 }
 
 // Run запускает цикл опроса. Блокируется до отмены ctx.
@@ -67,6 +69,15 @@ func (w *ReminderWorker) check(ctx context.Context, now time.Time) {
 		local := now.In(loc)
 		if local.Hour() == r.NotifyHour && local.Minute() == r.NotifyMinute {
 			text := "👋 Привет! Не забудь внести сегодняшние покупки и траты."
+			// Дайджест за вчера — non-fatal: ошибка/пусто не блокирует напоминание.
+			if w.digest != nil {
+				d, err := w.digest.YesterdayDigest(ctx, r.ChatID, loc)
+				if err != nil {
+					w.logger.Warn("reminder worker: digest failed", "chat_id", r.ChatID, "err", err)
+				} else if d != "" {
+					text += "\n\n" + d
+				}
+			}
 			if err := w.sender.SendToChatID(ctx, r.ChatID, text); err != nil {
 				w.logger.Error("reminder worker: send failed", "chat_id", r.ChatID, "err", err)
 			}
