@@ -18,6 +18,13 @@ type ReminderSender interface {
 	SendToChatID(ctx context.Context, chatID int64, text string) error
 }
 
+// DigestSource строит дайджест трат за вчера для напоминания.
+// Реализуется в budget/skills (DigestProvider); notify знает только контракт.
+// Пустая строка = показывать нечего. Проводка в воркер — задача simpleAI-c2ud.
+type DigestSource interface {
+	YesterdayDigest(ctx context.Context, chatID int64, loc *time.Location) (string, error)
+}
+
 // ReminderWorker каждую минуту проверяет, кому нужно отправить напоминание.
 type ReminderWorker struct {
 	store  ReminderStore
