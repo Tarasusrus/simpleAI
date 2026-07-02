@@ -15,6 +15,8 @@ import (
 // границы таймзоны.
 var nowFunc = time.Now
 
+// Пороги умного дайджеста — единый ориентир для тюнинга. Обоснование и
+// правила подбора — ADR-006. Менять здесь, не в теле функций.
 const (
 	// baselineDays — окно среднего дневного расхода для детекта аномалий.
 	baselineDays = 30
@@ -26,6 +28,11 @@ const (
 	// от среднего, при котором показываем заметку. Дневной шум высокий,
 	// поэтому порог грубее трендовых ±3% из ADR-001.
 	anomalyThreshold = 0.25
+	// wowNoisePct — ниже этого |WoW| в процентах изменение считаем шумом и
+	// показываем «≈ как на прошлой» (иначе округлилось бы до 0%).
+	wowNoisePct = 0.5
+	// topCategories — сколько категорий показываем в строке топа.
+	topCategories = 2
 )
 
 // digestStore — узкий контракт стора для дайджеста (тестируемость).
@@ -126,7 +133,7 @@ func wowLine(thisWeek, prevWeek float64) string {
 		return ""
 	}
 	delta := (thisWeek - prevWeek) / prevWeek
-	if math.Abs(delta)*100 < 0.5 { // округлилось бы до 0%
+	if math.Abs(delta)*100 < wowNoisePct { // ниже порога шума → округлилось бы до 0%
 		return "📈 Неделя: ≈ как на прошлой"
 	}
 	arrow := "↑"
@@ -155,7 +162,7 @@ func topCategoriesLine(sum *budget.Summary, rates map[string]float64) string {
 		items = append(items, kv{n, v})
 		total += v
 	}
-	if len(items) < 2 || total <= 0 {
+	if len(items) < topCategories || total <= 0 {
 		return ""
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -165,9 +172,8 @@ func topCategoriesLine(sum *budget.Summary, rates map[string]float64) string {
 		return items[i].name < items[j].name // детерминизм при равных долях
 	})
 
-	const topN = 2
-	parts := make([]string, 0, topN)
-	for i := 0; i < len(items) && i < topN; i++ {
+	parts := make([]string, 0, topCategories)
+	for i := 0; i < len(items) && i < topCategories; i++ {
 		parts = append(parts, fmt.Sprintf("%s %.0f%%", items[i].name, items[i].val/total*100))
 	}
 	return "📊 Топ: " + strings.Join(parts, ", ")
