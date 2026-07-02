@@ -313,6 +313,24 @@ func (s *Store) GetSummary(ctx context.Context, p Period) (*Summary, error) {
 	return summary, catRows.Err()
 }
 
+// EarliestTransactionDate возвращает дату первой транзакции ledger'а.
+// Второй результат false — транзакций ещё нет (пустой ledger).
+// Дайджест использует это как гейт возраста: молодой ledger не даёт
+// достоверного 30-дневного бэйзлайна для аномалий.
+func (s *Store) EarliestTransactionDate(ctx context.Context) (time.Time, bool, error) {
+	var earliest *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT MIN(transaction_date) FROM budget_transaction
+	`).Scan(&earliest)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("earliest transaction date: %w", err)
+	}
+	if earliest == nil {
+		return time.Time{}, false, nil
+	}
+	return *earliest, true, nil
+}
+
 // --- Цели ---
 
 // AddGoal создаёт цель накопления.
