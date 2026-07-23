@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -849,6 +851,197 @@ func (s *Store) GetMonthlyIncomeAvg(ctx context.Context, rates map[string]float6
 	return sum / float64(len(byMonth)), nil
 }
 
+// GetRegularMonthlyIncomeAvg — как GetMonthlyIncomeAvg, но исключает РАЗОВЫЕ
+// поступления (ADR-007 §8, фикс бага №3): income с recurring_id IS NULL И
+// категорией из denylist (Прочее / без категории) в среднее не входит. Это
+// снимает раздувание якоря дохода одноразовыми поступлениями
+// (Март «Прочее» 126000, Апрель без категории 152126). GetMonthlyIncomeAvg
+// оставлен без изменений — используется в affordability.
+func (s *Store) GetRegularMonthlyIncomeAvg(ctx context.Context, rates map[string]float64) (float64, error) {
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return 0, fmt.Errorf("GetRegularMonthlyIncomeAvg: THB rate missing")
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.currency, date_trunc('month', t.transaction_date) AS month, SUM(t.amount) AS total
+		FROM budget_transaction t
+		LEFT JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = 'income'
+		  AND t.transaction_date < date_trunc('month', NOW())
+		  AND NOT (t.recurring_id IS NULL AND COALESCE(c.name, '') = ANY($1))
+		GROUP BY t.currency, month
+	`, OneOffIncomeCategories)
+	if err != nil {
+		return 0, fmt.Errorf("GetRegularMonthlyIncomeAvg: %w", err)
+	}
+	defer rows.Close()
+
+	byMonth := map[time.Time]float64{}
+	for rows.Next() {
+		var currency string
+		var month time.Time
+		var total float64
+		if err := rows.Scan(&currency, &month, &total); err != nil {
+			return 0, fmt.Errorf("GetRegularMonthlyIncomeAvg scan: %w", err)
+		}
+		rubRate, ok := rates[currency]
+		if !ok || rubRate == 0 {
+			continue
+		}
+		byMonth[month] += total * rubRate / thbRate
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("GetRegularMonthlyIncomeAvg rows: %w", err)
+	}
+	if len(byMonth) == 0 {
+		return 0, nil
+	}
+	var sum float64
+	for _, v := range byMonth {
+		sum += v
+	}
+	return sum / float64(len(byMonth)), nil
+}
+
+// AddPlannedExpense добавляет ручную разовую плановую трату (ADR-007 §6).
+func (s *Store) AddPlannedExpense(ctx context.Context, chatID int64, amount float64, currency, description string) error {
+	if amount <= 0 {
+		return fmt.Errorf("AddPlannedExpense: amount must be > 0")
+	}
+	if currency == "" {
+		currency = "RUB"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO budget_planned_expense (chat_id, amount, currency, description)
+		VALUES ($1, $2, $3, $4)
+	`, chatID, amount, currency, description)
+	if err != nil {
+		return fmt.Errorf("AddPlannedExpense: %w", err)
+	}
+	return nil
+}
+
+// ListPlannedExpenses — незакрытые плановые траты chat'а (chat-scoped, ADR-004),
+// отсортированные по убыванию суммы. Для детализации «на что заложено».
+func (s *Store) ListPlannedExpenses(ctx context.Context, chatID int64) ([]PlannedExpense, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, chat_id, amount, currency, description
+		FROM budget_planned_expense
+		WHERE chat_id = $1 AND settled = false
+		ORDER BY amount DESC
+	`, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("ListPlannedExpenses: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PlannedExpense
+	for rows.Next() {
+		var p PlannedExpense
+		if err := rows.Scan(&p.ID, &p.ChatID, &p.Amount, &p.Currency, &p.Description); err != nil {
+			return nil, fmt.Errorf("ListPlannedExpenses scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// PlannedExpensesTHB — сумма НЕзакрытых плановых трат chat'а, в THB, и их число.
+// chat-scoped (ADR-004). Валюта без курса — запись пропускается со slog.Warn.
+func (s *Store) PlannedExpensesTHB(ctx context.Context, chatID int64, rates map[string]float64) (float64, int, error) {
+	thbRate, ok := rates["THB"]
+	if !ok || thbRate == 0 {
+		return 0, 0, fmt.Errorf("PlannedExpensesTHB: THB rate missing")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT currency, SUM(amount)::float8, COUNT(*)::int
+		FROM budget_planned_expense
+		WHERE chat_id = $1 AND settled = false
+		GROUP BY currency
+	`, chatID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("PlannedExpensesTHB: %w", err)
+	}
+	defer rows.Close()
+
+	var totalTHB float64
+	var count int
+	for rows.Next() {
+		var currency string
+		var sum float64
+		var cnt int
+		if err := rows.Scan(&currency, &sum, &cnt); err != nil {
+			return 0, 0, fmt.Errorf("PlannedExpensesTHB scan: %w", err)
+		}
+		rubRate, ok := rates[currency]
+		if !ok || rubRate == 0 {
+			slog.Warn("PlannedExpensesTHB: skipping, no rate", "currency", currency)
+			continue
+		}
+		totalTHB += sum * rubRate / thbRate
+		count += cnt
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, fmt.Errorf("PlannedExpensesTHB rows: %w", err)
+	}
+	return totalTHB, count, nil
+}
+
+// CreateEnvelope сохраняет новый активный конверт, деактивируя предыдущий
+// активный для этого chat (не более одного активного). ADR-007 H3.
+func (s *Store) CreateEnvelope(ctx context.Context, chatID int64, incomeAmount float64, currency string, from, to time.Time) (uuid.UUID, error) {
+	if incomeAmount <= 0 {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope: income must be > 0")
+	}
+	if currency == "" {
+		currency = "RUB"
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope begin: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("CreateEnvelope rollback", "err", rbErr)
+		}
+	}()
+
+	if _, err := tx.Exec(ctx, `UPDATE budget_envelope SET active = false WHERE chat_id = $1 AND active`, chatID); err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope deactivate: %w", err)
+	}
+	var id uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO budget_envelope (chat_id, income_amount, income_currency, period_start, period_end)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id
+	`, chatID, incomeAmount, currency, from, to).Scan(&id)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope insert: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope commit: %w", err)
+	}
+	return id, nil
+}
+
+// GetActiveEnvelope возвращает активный конверт chat'а (ok=false если нет).
+func (s *Store) GetActiveEnvelope(ctx context.Context, chatID int64) (*Envelope, bool, error) {
+	var e Envelope
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, chat_id, income_amount, income_currency, period_start, period_end, created_at
+		FROM budget_envelope
+		WHERE chat_id = $1 AND active
+		LIMIT 1
+	`, chatID).Scan(&e.ID, &e.ChatID, &e.IncomeAmount, &e.IncomeCurrency, &e.PeriodStart, &e.PeriodEnd, &e.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("GetActiveEnvelope: %w", err)
+	}
+	return &e, true, nil
+}
+
 func (s *Store) getMonthlyExpenses(ctx context.Context, months int) ([]MonthlyCategoryExpense, error) {
 	var fromClause string
 	var args []any
@@ -1072,6 +1265,67 @@ UNION ALL
 SELECT kind, subtype, currency, category, total, cnt FROM recurring_agg
 `
 
+// periodSnapshotQuery — аналог advisorSnapshotQuery, но период задаётся явными
+// границами [$1::date, $2::date] (включительно с обеих сторон), а не date_trunc
+// от месяца. Обязательства (debt.due_date, recurring.next_date) берутся с верхней
+// границей <= period_end — та же семантика, что в месячном снапшоте (FreeCash),
+// чтобы не расходиться с уже работающей формулой. $3 — chat_id для recurring.
+const periodSnapshotQuery = `
+WITH params AS (
+    SELECT $1::date AS period_start, $2::date AS period_end
+),
+tx_agg AS (
+    SELECT
+        'tx'::text                          AS kind,
+        t.type                              AS subtype,
+        t.currency                          AS currency,
+        COALESCE(c.name, 'Прочее')          AS category,
+        SUM(t.amount)::float8               AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_transaction t
+    LEFT JOIN budget_category c ON c.id = t.category_id
+    CROSS JOIN params p
+    WHERE t.transaction_date >= p.period_start
+      AND t.transaction_date <= p.period_end
+    GROUP BY t.type, t.currency, COALESCE(c.name, 'Прочее')
+),
+debt_agg AS (
+    SELECT
+        'debt'::text                        AS kind,
+        ''::text                            AS subtype,
+        'RUB'::text                         AS currency,
+        ''::text                            AS category,
+        COALESCE(SUM(d.total_amount - d.paid_amount), 0)::float8 AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_debt d
+    CROSS JOIN params p
+    WHERE d.status = 'active'
+      AND d.direction = 'owe'
+      AND d.due_date IS NOT NULL
+      AND d.due_date <= p.period_end
+),
+recurring_agg AS (
+    SELECT
+        'recurring'::text                   AS kind,
+        r.type                              AS subtype,
+        r.currency                          AS currency,
+        ''::text                            AS category,
+        SUM(r.amount)::float8               AS total,
+        COUNT(*)::int                       AS cnt
+    FROM budget_recurring r
+    CROSS JOIN params p
+    WHERE r.chat_id = $3
+      AND r.enabled = true
+      AND r.next_date <= p.period_end
+    GROUP BY r.type, r.currency
+)
+SELECT kind, subtype, currency, category, total, cnt FROM tx_agg
+UNION ALL
+SELECT kind, subtype, currency, category, total, cnt FROM debt_agg WHERE cnt > 0
+UNION ALL
+SELECT kind, subtype, currency, category, total, cnt FROM recurring_agg
+`
+
 // GetAdvisorSnapshot собирает финансовый снимок для AdvisorSkill одним SQL CTE.
 // Все суммы конвертируются в THB через rates (map[currency]rate_to_rub).
 //
@@ -1099,6 +1353,40 @@ func (s *Store) GetAdvisorSnapshot(ctx context.Context, chatID int64, today time
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("advisor rows: %w", err)
+	}
+	return aggregateAdvisorSnapshot(collected, rates)
+}
+
+// GetPeriodSnapshot собирает финансовый снимок за ПРОИЗВОЛЬНЫЙ период
+// [from, to] (включительно), а не за календарный месяц. Все суммы в THB.
+// Переиспользует aggregateAdvisorSnapshot (период-агностична).
+//
+//   - from, to: границы периода включительно (по transaction_date)
+//   - chatID: фильтр для budget_recurring; transaction и debt — глобальные
+//   - rates: map currency → rate_to_rub, должна содержать "THB"
+//
+// Обязательства (recurring.next_date, debt.due_date) учитываются с верхней
+// границей <= to (та же семантика, что в месячном GetAdvisorSnapshot).
+func (s *Store) GetPeriodSnapshot(ctx context.Context, chatID int64, from, to time.Time, rates map[string]float64) (*AdvisorSnapshot, error) {
+	if to.Before(from) {
+		return nil, fmt.Errorf("GetPeriodSnapshot: to (%s) раньше from (%s)", to.Format("2006-01-02"), from.Format("2006-01-02"))
+	}
+	rows, err := s.pool.Query(ctx, periodSnapshotQuery, from, to, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("period snapshot query: %w", err)
+	}
+	defer rows.Close()
+
+	var collected []advisorRow
+	for rows.Next() {
+		var r advisorRow
+		if err := rows.Scan(&r.Kind, &r.Subtype, &r.Currency, &r.Category, &r.Total, &r.Cnt); err != nil {
+			return nil, fmt.Errorf("scan period row: %w", err)
+		}
+		collected = append(collected, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("period rows: %w", err)
 	}
 	return aggregateAdvisorSnapshot(collected, rates)
 }
