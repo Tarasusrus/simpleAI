@@ -33,14 +33,16 @@ func (s *BudgetSkill) WithBuckets(cfg BucketConfig) (*BudgetSkill, error) {
 // Manifest возвращает описание скилла для registry и LLM.
 func (s *BudgetSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
-		ID:          "budget",
-		Name:        "Budget Tracker",
+		ID:   "budget",
+		Name: "Budget Tracker",
 		Description: "Personal finance TRACKER: record COMPLETED expenses/income (past tense: 'купил', 'потратил', 'заплатил', 'получил'), get spending summaries, manage savings goals, debts, and recurring payments. " +
 			"Use when user RECORDS a transaction or asks to SHOW data (summary, list, forecast, debt status). " +
 			"action='summary' shows aggregate totals for a period. Pass transaction_type='income' when user asks ONLY about income ('покажи доходы за <период>', 'сколько я заработал'); pass transaction_type='expense' when user asks ONLY about expenses ('покажи траты / расходы за <период>'); omit transaction_type for a general overview ('итоги за <период>', 'сводка'). " +
 			"action='list_transactions' shows individual transaction entries; pass transaction_type='income' or 'expense' when the user explicitly asks to LIST income or expense entries ('перечисли все доходы за апрель'). " +
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
+			"action='add_planned_expense' records a FUTURE planned one-off expense the user wants to set aside ('запланируй трату X на Y', 'будет трата X', 'отложи X на Z', 'плановая трата X') — it is NOT a completed transaction. " +
+			"action='start_envelope' SAVES an arrived income to track its remaining balance over time ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X'). " +
 			"Use budget.summary for plain numerical totals only.",
 		Version: "1.0.0",
 		InputSchema: &plugin.Schema{
@@ -51,7 +53,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -251,6 +253,10 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.disableRecurring(ctx, req)
 	case "forecast":
 		return s.forecastAction(ctx, req)
+	case "add_planned_expense":
+		return s.addPlannedExpense(ctx, req)
+	case "start_envelope":
+		return s.startEnvelope(ctx, req)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}

@@ -36,3 +36,9 @@
 {"id":"r034","input":"покажи доходы предыдущего месяца","expected":{"skill":"budget","action":"summary"},"tags":["summary","prev_month","income","ru","regression"]}
 {"id":"r035","input":"перечисли все доходы за апрель","expected":{"skill":"budget","action":"list_transactions"},"tags":["list_transactions","income","ru"]}
 {"id":"r036","input":"сколько я заработал в марте","expected":{"skill":"budget","action":"summary"},"tags":["summary","income","ru"]}
+{"id":"r037","input":"пришло 127000, сколько свободных денег осталось на этот месяц?","expected":{"skill":"safe_to_spend","action":""},"tags":["safe_to_spend","income_arrived","free","ru","regression"],"notes":"ADR-007 бага №1 — раньше уходило в budget.add_income (запись прихода вместо ответа)"}
+{"id":"r038","input":"получил премию 40000, на что её лучше распределить?","expected":{"skill":"safe_to_spend","action":""},"tags":["safe_to_spend","allocate","ru"]}
+{"id":"r039","input":"запиши доход зарплата 130000","expected":{"skill":"budget","action":"add_income"},"tags":["add_income","record","ru","regression"],"notes":"чистая запись без вопроса о свободных деньгах остаётся add_income"}
+{"id":"r040","input":"запланируй трату 15600 на визу","expected":{"skill":"budget","action":"add_planned_expense"},"tags":["add_planned_expense","planned","ru"]}
+{"id":"r041","input":"запомни приход 127000 на 2 недели","expected":{"skill":"budget","action":"start_envelope"},"tags":["start_envelope","envelope","ru"]}
+{"id":"r042","input":"сколько свободных денег осталось?","expected":{"skill":"safe_to_spend","action":""},"tags":["remaining","envelope","ru"]}

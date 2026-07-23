@@ -42,7 +42,6 @@ const (
 	SortByCreatedAt TransactionSortField = "created_at"
 )
 
-
 // SortDirection — направление сортировки.
 type SortDirection string
 
@@ -251,12 +250,12 @@ type Reminder struct {
 // CategoryForecast — прогноз трат по одной категории в одной валюте на следующий период.
 // Используется как граница интерфейса для будущего ForecastSkill (ADR-001).
 type CategoryForecast struct {
-	CategoryName    string
-	Icon            string
-	Currency        string
-	ForecastAmount  float64 // среднее за последние N месяцев (Этап 1)
-	TrendPct        float64 // (last_month - prev_month) / prev_month * 100
-	HasTrend        bool    // false если данных только за 1 месяц
+	CategoryName   string
+	Icon           string
+	Currency       string
+	ForecastAmount float64 // среднее за последние N месяцев (Этап 1)
+	TrendPct       float64 // (last_month - prev_month) / prev_month * 100
+	HasTrend       bool    // false если данных только за 1 месяц
 }
 
 // MinTxForConfidence — минимум транзакций в текущем месяце для уверенного прогноза.
@@ -282,6 +281,27 @@ type AdvisorSnapshot struct {
 	LowData                 bool               // TxCount < MinTxForConfidence (порог в пакете skills)
 }
 
+// PlannedExpense — ручная разовая плановая трата (ADR-007 §6).
+type PlannedExpense struct {
+	ID          uuid.UUID
+	ChatID      int64
+	Amount      float64
+	Currency    string
+	Description string
+}
+
+// Envelope — сохранённый «живой конверт» (ADR-007 H3): событие прихода + горизонт.
+// Остаток НЕ хранится — вычисляется из фактических транзакций за период.
+type Envelope struct {
+	ID             uuid.UUID
+	ChatID         int64
+	IncomeAmount   float64
+	IncomeCurrency string
+	PeriodStart    time.Time
+	PeriodEnd      time.Time
+	CreatedAt      time.Time
+}
+
 // TopExpense — одна из топ-N самых дорогих расходных транзакций за период,
 // сконвертированная в THB. Используется AdvisorSkill action='analyze' для
 // передачи LLM детализированного среза трат.
@@ -295,20 +315,20 @@ type TopExpense struct {
 
 // RecurringPayment — повторяющийся платёж, создающий транзакцию автоматически по расписанию.
 type RecurringPayment struct {
-	ID              uuid.UUID
-	ChatID          int64
-	Name            string
-	Type            string    // "expense" | "income"
-	Amount          float64
-	CategoryID      *uuid.UUID
-	CategoryName    string
-	Currency        string    // ISO 4217
-	RecurrenceType  string    // "monthly" | "weekly" | "daily"
-	DayOfMonth      *int      // для monthly: день месяца (1–31)
-	NextDate        time.Time // следующая дата срабатывания
-	Enabled         bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID             uuid.UUID
+	ChatID         int64
+	Name           string
+	Type           string // "expense" | "income"
+	Amount         float64
+	CategoryID     *uuid.UUID
+	CategoryName   string
+	Currency       string    // ISO 4217
+	RecurrenceType string    // "monthly" | "weekly" | "daily"
+	DayOfMonth     *int      // для monthly: день месяца (1–31)
+	NextDate       time.Time // следующая дата срабатывания
+	Enabled        bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // TransactionPatch — поля для частичного обновления транзакции.

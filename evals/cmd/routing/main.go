@@ -32,23 +32,24 @@ import (
 	"simpleAI/internal/plugin"
 	advisorskill "simpleAI/internal/skills/advisor"
 	budgetskill "simpleAI/internal/skills/budget"
+	safetospendskill "simpleAI/internal/skills/safetospend"
 
 	"simpleAI/evals"
 )
 
 const (
-	caseTimeout    = 60 * time.Second
-	promptHashLen  = 12
+	caseTimeout   = 60 * time.Second
+	promptHashLen = 12
 )
 
 func main() {
 	var (
-		inputPath  = flag.String("input", "evals/golden_set.jsonl", "путь к golden_set.jsonl")
-		outDir     = flag.String("out", "evals/runs", "каталог куда писать run-файлы")
-		tagFilter  = flag.String("tag", "", "фильтр по тегу (пусто = без фильтра)")
-		limit      = flag.Int("limit", 0, "smoke: ограничить N кейсами (0 = все)")
-		prevPath   = flag.String("prev", "", "путь к предыдущему run для diff (пусто = без diff)")
-		dryRun     = flag.Bool("dry-run", false, "не вызывать LLM, проверить только загрузку и схему")
+		inputPath = flag.String("input", "evals/golden_set.jsonl", "путь к golden_set.jsonl")
+		outDir    = flag.String("out", "evals/runs", "каталог куда писать run-файлы")
+		tagFilter = flag.String("tag", "", "фильтр по тегу (пусто = без фильтра)")
+		limit     = flag.Int("limit", 0, "smoke: ограничить N кейсами (0 = все)")
+		prevPath  = flag.String("prev", "", "путь к предыдущему run для diff (пусто = без diff)")
+		dryRun    = flag.Bool("dry-run", false, "не вызывать LLM, проверить только загрузку и схему")
 	)
 	flag.Parse()
 
@@ -126,6 +127,7 @@ func buildManifests() []plugin.Manifest {
 	return []plugin.Manifest{
 		budgetskill.NewBudgetSkill(nil).Manifest(),
 		advisorskill.NewAdvisorSkill(nil, nil, nil).Manifest(),
+		safetospendskill.NewSafeToSpendSkill(nil, nil, nil).Manifest(),
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed all:advisor
+//go:embed all:advisor all:safetospend
 var fs embed.FS
 
 // Get returns the content of the named template (e.g. "advisor/advice.tmpl").

@@ -22,7 +22,7 @@ import (
 	"simpleAI/config"
 	llmfactory "simpleAI/internal/adapters/llm"
 	telegramadapter "simpleAI/internal/adapters/telegram"
-	"simpleAI/internal/agent"
+	"simpleAI/internal/appwiring"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 	"simpleAI/internal/db"
@@ -31,10 +31,7 @@ import (
 	"simpleAI/internal/notify"
 	"simpleAI/internal/observability"
 	"simpleAI/internal/plugin"
-	"simpleAI/internal/rag"
 	"simpleAI/internal/rates"
-	"simpleAI/internal/skills"
-	advisorskill "simpleAI/internal/skills/advisor"
 	budgetskill "simpleAI/internal/skills/budget"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
@@ -65,7 +62,7 @@ func main() {
 	}
 
 	// Единый реестр skills для всех компонентов.
-	registry, budgetSkill := buildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
 
 	// Контекст с graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -177,7 +174,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		logger.Warn("failed to set telegram commands", "err", err)
 	}
 
-	agentService := agent.NewServiceWithRegistry(llmClient, registry).WithTracer(tracer).WithObservability(obsTracer).WithLogger(logger).WithLLMModel(cfg.LLM.ChatModel)
+	agentService := appwiring.BuildAgentService(llmClient, registry, tracer, obsTracer, logger, cfg.LLM.ChatModel)
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))
@@ -280,31 +277,6 @@ func runWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, pool
 		case <-ticker.C:
 		}
 	}
-}
-
-func buildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration) (*plugin.Registry, *budgetskill.BudgetSkill) {
-	registry := plugin.NewRegistry()
-
-	retriever := rag.NewRetriever(pool)
-	ragSkill := skills.NewRAGSearchSkill(retriever, llmClient)
-	if err := registry.Register(ragSkill); err != nil {
-		logger.Error("failed to register rag_search skill", "err", err)
-	}
-
-	budgetStore := budget.NewStore(pool)
-	bs := budgetskill.NewBudgetSkill(budgetStore)
-	if err := registry.Register(bs); err != nil {
-		logger.Error("failed to register budget skill", "err", err)
-	}
-
-	advisorSkill := advisorskill.NewAdvisorSkill(budgetStore, llmClient, logger).
-		WithLLMTimeout(advisorLLMTimeout)
-	if err := registry.Register(advisorSkill); err != nil {
-		logger.Error("failed to register advisor skill", "err", err)
-	}
-
-	logger.Info("registry ready", "skills", len(registry.List()))
-	return registry, bs
 }
 
 func buildHelpText(commands []telegramadapter.Command) string {
