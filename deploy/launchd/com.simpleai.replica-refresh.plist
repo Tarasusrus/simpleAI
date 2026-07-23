@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Почасовой авто-рефреш локальной read-only реплики боевой БД.
+  Graceful: если docker/postgres/прод недоступны — скрипт пишет warn в
+  ~/.simpleai-replica/refresh.log и выходит 0 (не спамит, не копит ошибки).
+  Установка:
+    cp deploy/launchd/com.simpleai.replica-refresh.plist ~/Library/LaunchAgents/
+    launchctl unload ~/Library/LaunchAgents/com.simpleai.replica-refresh.plist 2>/dev/null
+    launchctl load ~/Library/LaunchAgents/com.simpleai.replica-refresh.plist
+  Проверка/снятие:
+    launchctl list | grep simpleai
+    tail -f ~/.simpleai-replica/refresh.log
+    launchctl unload ~/Library/LaunchAgents/com.simpleai.replica-refresh.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.simpleai.replica-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/tarasmalinovskij/dev/simpleAI/scripts/refresh-replica.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Почасово: каждые 3600 c. RunAtLoad — сразу при загрузке агента. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/tarasmalinovskij/.simpleai-replica/refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/tarasmalinovskij/.simpleai-replica/refresh.err.log</string>
+</dict>
+</plist>

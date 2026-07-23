@@ -42,3 +42,7 @@ run-mcp:
 
 lint:
 	golangci-lint run
+
+# Обновить локальную read-only реплику боевой БД (прод не мутируется, только pg_dump).
+refresh-replica:
+	bash scripts/refresh-replica.sh
