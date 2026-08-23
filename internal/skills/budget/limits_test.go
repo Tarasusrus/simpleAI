@@ -264,6 +264,78 @@ func TestSetShareLimit_KeepsCarriedIn(t *testing.T) {
 	}
 }
 
+// Тот же перенос, но у доли, которой в свежей раскладке НЕТ и быть не может:
+// override на «Отпуск» не стоит, из истории трат такая доля не считается, и
+// PlanEnvelope её не выдаёт — доля живёт исключительно ради перенесённых денег
+// (CarryOver заводит её принудительно, ADR-008 §9).
+//
+// Это и есть дыра, которую тест выше не ловил: там «Отпуск» держался override'ом
+// и приходил из раскладки сам. Здесь ReplaceShares вынес бы долю целиком вместе
+// с накопленным — молча, без единой строки в ответе.
+//
+// Мутация, под которую написан тест: вернуть keepCarriedIn к расстановке
+// carried_in по именам уже существующих долей — тест краснеет («Отпуск» исчезает).
+func TestSetShareLimit_KeepsCarriedInForShareOutsidePlan(t *testing.T) {
+	store, pool := shareLimitEnv(t)
+	const chatID = int64(-70038)
+	cleanupChat(t, pool, chatID)
+	t.Cleanup(func() { cleanupChat(t, pool, chatID) })
+
+	ctx := context.WithValue(context.Background(), agent.ChatIDKey{}, chatID)
+	from := time.Now()
+	envID, err := store.CreateEnvelope(ctx, chatID, 300000, "RUB", from, from.AddDate(0, 0, 14))
+	if err != nil {
+		t.Fatalf("CreateEnvelope: %v", err)
+	}
+	// Доля-носитель переноса: allocated=0, живёт только ради carried_in — ровно
+	// в таком виде её оставляет CarryOver при заведении конверта.
+	if err := store.CreateShares(ctx, envID, []budget.EnvelopeShare{
+		{Name: "Отпуск", Kind: budget.ShareKindSave, Allocated: 0, CarriedIn: 2500, Source: budget.ShareSourceAuto, Position: 0},
+		{Name: budget.FallbackShareName, Kind: budget.ShareKindSpend, Allocated: 0, Source: budget.ShareSourceAuto, Position: 1},
+	}); err != nil {
+		t.Fatalf("CreateShares: %v", err)
+	}
+	// Проверка предпосылки: override'ов нет вовсе, иначе тест доказывал бы не то.
+	if overrides, err := store.ListOverrides(ctx, chatID); err != nil {
+		t.Fatalf("ListOverrides: %v", err)
+	} else if len(overrides) != 0 {
+		t.Fatalf("предпосылка сломана: у чата уже есть override'ы %+v", overrides)
+	}
+
+	skill := NewBudgetSkill(store)
+	// Правка ПО ДРУГОЙ категории — «Отпуск» тут вообще ни при чём.
+	mustRun(t, skill, ctx, `{"action":"set_share_limit","name":"еда","amount":15000,"currency":"RUB"}`)
+
+	shares, err := store.ListShares(ctx, chatID, envID)
+	if err != nil {
+		t.Fatalf("ListShares: %v", err)
+	}
+	vacation, ok := findShare(shares, "отпуск")
+	if !ok {
+		t.Fatalf("доля «Отпуск» вынесена пересчётом вместе с накопленным: %v", shareNames(shares))
+	}
+	if vacation.CarriedIn != 2500 {
+		t.Errorf("перенос обнулён: carried_in = %.2f, ожидали 2500", vacation.CarriedIn)
+	}
+	if vacation.Kind != budget.ShareKindSave {
+		t.Errorf("доля-носитель переноса должна остаться накопительной, got kind=%q", vacation.Kind)
+	}
+
+	// И то же самое при снятии лимита — второй путь в тот же пересчёт.
+	mustRun(t, skill, ctx, `{"action":"clear_share_limit","name":"еда"}`)
+	shares, err = store.ListShares(ctx, chatID, envID)
+	if err != nil {
+		t.Fatalf("ListShares после clear: %v", err)
+	}
+	vacation, ok = findShare(shares, "отпуск")
+	if !ok {
+		t.Fatalf("после снятия лимита доля «Отпуск» исчезла: %v", shareNames(shares))
+	}
+	if vacation.CarriedIn != 2500 {
+		t.Errorf("после снятия лимита перенос = %.2f, ожидали 2500", vacation.CarriedIn)
+	}
+}
+
 // Правка без активного конверта — не ошибка: правило сохраняется и ждёт прихода.
 func TestSetShareLimit_NoActiveEnvelope(t *testing.T) {
 	store, pool := shareLimitEnv(t)

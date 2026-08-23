@@ -100,10 +100,17 @@ func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates ma
 	}
 
 	// Факт — с начала конверта по сегодня, но не позже его конца (иначе в
-	// остаток уехали бы траты, к этому конверту не относящиеся).
+	// остаток уехали бы траты, к этому конверту не относящиеся) и не раньше его
+	// начала: у конверта, чей период стартует в будущем, окно факта пустое, а не
+	// отрицательное — иначе SpentByCategoryExcludingRecurring вернёт ошибку «to
+	// раньше from», и вместо статуса конвертов оператор увидит «временную
+	// ошибку». Та же обрезка с двух сторон, что в add_expense (share_warning.go).
 	spentTo := time.Now()
 	if spentTo.After(env.PeriodEnd) {
 		spentTo = env.PeriodEnd
+	}
+	if spentTo.Before(env.PeriodStart) {
+		spentTo = env.PeriodStart
 	}
 	rowsSpent, err := s.store.SpentByCategoryExcludingRecurring(ctx, env.PeriodStart, spentTo)
 	if err != nil {

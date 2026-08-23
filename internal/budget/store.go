@@ -1116,11 +1116,15 @@ func (s *Store) GetActiveEnvelope(ctx context.Context, chatID int64) (*Envelope,
 
 // --- Доли конверта (ADR-008) ---
 
-// normalizeName приводит имя доли/категории к каноничному виду ключа: обрезка
+// NormalizeName приводит имя доли/категории к каноничному виду ключа: обрезка
 // пробелов + нижний регистр. Имена категорий регистрозависимы в уникальном
 // индексе budget_category(name,type), а FindCategory ищет по LOWER(name) —
 // поэтому ключом везде служит нормализованная форма.
-func normalizeName(s string) string {
+//
+// Экспортируется намеренно и единственная в проекте: ключ доли в раскладке и
+// ключ доли в сторе обязаны совпадать посимвольно, а вторая копия
+// strings.ToLower(strings.TrimSpace(...)) рано или поздно разъедется с этой.
+func NormalizeName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
@@ -1176,7 +1180,7 @@ func insertSharesTx(ctx context.Context, tx pgx.Tx, envelopeID uuid.UUID, shares
 			return fmt.Errorf("CreateShares insert share %q: %w", name, err)
 		}
 		for _, c := range sh.Categories {
-			catName := normalizeName(c.CategoryName)
+			catName := NormalizeName(c.CategoryName)
 			if catName == "" {
 				continue
 			}
@@ -1257,7 +1261,7 @@ func (s *Store) ListShares(ctx context.Context, chatID int64, envelopeID uuid.UU
 // SetOverride сохраняет ручной лимит доли. Ключ — нормализованное имя доли:
 // лимит переживает конверт и находится по имени при следующем приходе.
 func (s *Store) SetOverride(ctx context.Context, chatID int64, shareName string, amount float64, currency string) error {
-	name := normalizeName(shareName)
+	name := NormalizeName(shareName)
 	if name == "" {
 		return fmt.Errorf("SetOverride: пустое имя доли")
 	}
@@ -1277,7 +1281,7 @@ func (s *Store) SetOverride(ctx context.Context, chatID int64, shareName string,
 }
 
 // ListOverrides возвращает ручные лимиты chat'а. ShareName — нормализованный,
-// сравнивать с именами долей нужно через normalizeName.
+// сравнивать с именами долей нужно через NormalizeName.
 func (s *Store) ListOverrides(ctx context.Context, chatID int64) ([]EnvelopeOverride, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT chat_id, share_name, amount, currency, updated_at
@@ -1303,7 +1307,7 @@ func (s *Store) ListOverrides(ctx context.Context, chatID int64) ([]EnvelopeOver
 
 // DeleteOverride снимает ручной лимит: доля снова считается из истории трат.
 func (s *Store) DeleteOverride(ctx context.Context, chatID int64, shareName string) error {
-	name := normalizeName(shareName)
+	name := NormalizeName(shareName)
 	if name == "" {
 		return fmt.Errorf("DeleteOverride: пустое имя доли")
 	}
@@ -1355,7 +1359,7 @@ func (s *Store) CategoryHistoryMonths(ctx context.Context, months int) (map[stri
 		if err := rows.Scan(&name, &n); err != nil {
 			return nil, fmt.Errorf("CategoryHistoryMonths scan: %w", err)
 		}
-		out[normalizeName(name)] = n
+		out[NormalizeName(name)] = n
 	}
 	return out, rows.Err()
 }
@@ -1432,10 +1436,10 @@ func ResolveShare(shares []EnvelopeShare, categoryID *uuid.UUID, categoryName st
 			}
 		}
 	}
-	if name := normalizeName(categoryName); name != "" {
+	if name := NormalizeName(categoryName); name != "" {
 		for i := range shares {
 			for _, c := range shares[i].Categories {
-				if normalizeName(c.CategoryName) == name {
+				if NormalizeName(c.CategoryName) == name {
 					return &shares[i]
 				}
 			}
@@ -1448,7 +1452,7 @@ func ResolveShare(shares []EnvelopeShare, categoryID *uuid.UUID, categoryName st
 // категорий, не привязанных ни к одной доле. nil, если такой доли нет.
 func FallbackShare(shares []EnvelopeShare) *EnvelopeShare {
 	for i := range shares {
-		if normalizeName(shares[i].Name) == FallbackShareName {
+		if NormalizeName(shares[i].Name) == FallbackShareName {
 			return &shares[i]
 		}
 	}

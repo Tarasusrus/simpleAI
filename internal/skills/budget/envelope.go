@@ -233,7 +233,7 @@ func (s *BudgetSkill) attachCategoryIDs(ctx context.Context, shares []budget.Env
 		if c.Type != "expense" {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(c.Name))
+		key := budget.NormalizeName(c.Name)
 		if _, exists := byName[key]; exists {
 			// Регистровые дубли («Еда» и «еда» — разные строки с разными id):
 			// какой из них «тот самый», неизвестно, поэтому не берём ни один —
@@ -244,7 +244,7 @@ func (s *BudgetSkill) attachCategoryIDs(ctx context.Context, shares []budget.Env
 	}
 	for i := range shares {
 		for j := range shares[i].Categories {
-			key := strings.ToLower(strings.TrimSpace(shares[i].Categories[j].CategoryName))
+			key := budget.NormalizeName(shares[i].Categories[j].CategoryName)
 			if c, ok := byName[key]; ok {
 				id := c.ID
 				shares[i].Categories[j].CategoryID = &id

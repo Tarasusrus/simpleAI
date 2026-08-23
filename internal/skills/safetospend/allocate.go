@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 
 	"simpleAI/internal/budget"
 )
@@ -22,12 +21,12 @@ type shareDraft struct {
 	categories []string // нормализованные имена категорий доли
 }
 
-// normalizeShareName — ключ сопоставления долей, категорий и override'ов:
-// обрезка пробелов + нижний регистр. Совпадает с нормализацией в budget
-// (store.normalizeName), но та неэкспортируемая, а тащить ради этого зависимость
-// на внутренности стора в чистую функцию незачем.
+// normalizeShareName — ключ сопоставления долей, категорий и override'ов.
+// Своей нормализации не имеет: делегирует budget.NormalizeName, которым стор
+// пишет и читает те же ключи. Ключ раскладки и ключ стора обязаны совпадать —
+// собственная копия правила развела бы их на первой же правке.
 func normalizeShareName(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	return budget.NormalizeName(s)
 }
 
 // roundKopecks — округление суммы доли до копейки.

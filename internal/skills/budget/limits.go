@@ -168,7 +168,10 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64) (*
 		History:    history,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
-	s.keepCarriedIn(ctx, chatID, env.ID, plan.Shares)
+	plan.Shares, err = s.keepCarriedIn(ctx, chatID, env.ID, plan.Shares)
+	if err != nil {
+		return nil, false, err
+	}
 
 	if err := s.store.ReplaceShares(ctx, chatID, env.ID, plan.Shares); err != nil {
 		return nil, false, fmt.Errorf("перезапись долей: %w", err)
@@ -179,30 +182,43 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64) (*
 	return &replan{plan: plan, rubPerTHB: rates["THB"]}, true, nil
 }
 
-// keepCarriedIn переносит carried_in со старых долей на новые по имени.
-// Перенос с прошлого конверта — не результат раскладки, а факт прошлого периода
-// (ADR-008 §9); пересчёт лимита его не пересчитывает и не имеет права обнулить.
-// Ключ — имя доли, тот же, что и у переноса между конвертами.
-func (s *BudgetSkill) keepCarriedIn(ctx context.Context, chatID int64, envelopeID uuid.UUID, shares []budget.EnvelopeShare) {
+// keepCarriedIn сохраняет уже перенесённое (carried_in) в пересчитанной
+// раскладке. Перенос с прошлого конверта — не результат раскладки, а факт
+// прошлого периода (ADR-008 §9): пересчёт лимита его не считает заново и не
+// имеет права обнулить.
+//
+// Кладёт его тот же safetospend.ApplyCarry, что и при заведении нового конверта.
+// Своей ветки «расставить carried_in по именам» здесь быть не может: доля-
+// носитель переноса («отпуск», выпавший из авто-раскладки) в plan.Shares не
+// приходит — PlanEnvelope лишних save-долей не выдаёт, — и ReplaceShares молча
+// вынес бы её вместе с деньгами. ApplyCarry такую долю воссоздаёт.
+//
+// Ошибка чтения старых долей НЕ проглатывается, в отличие от override'ов и
+// категорий: пересчёт без них затрёт накопленное. Дешевле не пересчитать —
+// сам лимит уже сохранён и применится при следующем приходе.
+func (s *BudgetSkill) keepCarriedIn(
+	ctx context.Context,
+	chatID int64,
+	envelopeID uuid.UUID,
+	shares []budget.EnvelopeShare,
+) ([]budget.EnvelopeShare, error) {
 	old, err := s.store.ListShares(ctx, chatID, envelopeID)
 	if err != nil {
-		slog.Default().WarnContext(ctx, "replan: старые доли не прочитались — carried_in может потеряться", "err", err)
-		return
+		return nil, fmt.Errorf("доли текущего конверта: %w", err)
 	}
-	carried := make(map[string]float64, len(old))
+	carried := make([]safetospend.CarriedAmount, 0, len(old))
 	for _, sh := range old {
-		if sh.CarriedIn != 0 {
-			carried[strings.ToLower(strings.TrimSpace(sh.Name))] = sh.CarriedIn
+		if sh.CarriedIn <= 0 {
+			continue
 		}
+		carried = append(carried, safetospend.CarriedAmount{
+			Name:       sh.Name,
+			Amount:     sh.CarriedIn,
+			Source:     sh.Source,
+			Categories: sh.Categories,
+		})
 	}
-	if len(carried) == 0 {
-		return
-	}
-	for i := range shares {
-		if v, ok := carried[strings.ToLower(strings.TrimSpace(shares[i].Name))]; ok {
-			shares[i].CarriedIn = v
-		}
-	}
+	return safetospend.ApplyCarry(shares, carried), nil
 }
 
 // replan — результат пересчёта: сама раскладка плюс курс, которым её печатать.

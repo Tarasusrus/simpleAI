@@ -40,16 +40,62 @@ type CarryInput struct {
 // Отрицательный остаток (пробитая save-доля) не переносится: в carried_in это
 // был бы долг, вычитаемый из нового прихода молча, без единой строки в ответе.
 func CarryOver(in CarryInput) []budget.EnvelopeShare {
-	next := make([]budget.EnvelopeShare, len(in.NextShares))
-	copy(next, in.NextShares)
-	for i := range next {
-		next[i].CarriedIn = 0
-	}
 	if len(in.PrevShares) == 0 {
-		return next
+		return ApplyCarry(in.NextShares, nil)
 	}
 
 	prevRemaining := computeShareRemaining(in.PrevShares, in.PrevSpent, in.Rates)
+	carried := make([]CarriedAmount, 0, len(prevRemaining))
+	for pi, rem := range prevRemaining {
+		if rem.Kind != budget.ShareKindSave || rem.Remaining <= 0 {
+			continue
+		}
+		prev := in.PrevShares[pi]
+		carried = append(carried, CarriedAmount{
+			Name:       prev.Name,
+			Amount:     rem.Remaining,
+			Source:     prev.Source,
+			Categories: prev.Categories,
+		})
+	}
+	return ApplyCarry(in.NextShares, carried)
+}
+
+// CarriedAmount — накопленное, которое обязано пережить перезапись раскладки:
+// сумма плюс всё, чем доля-носитель воссоздаётся, если свежей раскладке она
+// больше не нужна.
+type CarriedAmount struct {
+	Name       string // отображаемое имя доли; ключ — его нормализованная форма
+	Amount     float64
+	Source     string
+	Categories []budget.EnvelopeShareCategory
+}
+
+// ApplyCarry кладёт накопленное в новую раскладку — единственный путь, которым
+// carried_in попадает в доли: и при заведении нового конверта (CarryOver), и при
+// пересчёте под правку лимита. Отдельной ветки «перенести carried_in по именам»
+// быть не должно: она теряет доли-носители, которых в свежей раскладке нет, —
+// PlanEnvelope лишних save-долей не выдаёт никогда.
+//
+// Правила (ADR-008 §9):
+//   - carried_in новых долей сначала обнуляется ЯВНО: доля, пришедшая откуда-то
+//     ещё с ненулевым carried_in, молча удвоила бы деньги;
+//   - имя нашлось — сумма кладётся в найденную долю;
+//   - имени нет — заводится save-доля с allocated=0 и carried_in=сумма, иначе
+//     накопленное пропало бы вместе с долей.
+//
+// Ключ — нормализованное имя доли (UNIQUE(envelope_id, name) для того и стоит).
+// Position в ключ НЕ входит, в отличие от shareKey внутри одной раскладки:
+// раскладка пересчитывается заново, и «еда» легко переезжает со строки на строку.
+func ApplyCarry(nextShares []budget.EnvelopeShare, carried []CarriedAmount) []budget.EnvelopeShare {
+	next := make([]budget.EnvelopeShare, len(nextShares))
+	copy(next, nextShares)
+	for i := range next {
+		next[i].CarriedIn = 0
+	}
+	if len(carried) == 0 {
+		return next
+	}
 
 	// Индекс новых долей по нормализованному имени. Дубли имён внутри одной
 	// раскладки невозможны (UNIQUE), первый выигрывает.
@@ -68,28 +114,27 @@ func CarryOver(in CarryInput) []budget.EnvelopeShare {
 		}
 	}
 
-	for pi, rem := range prevRemaining {
-		if rem.Kind != budget.ShareKindSave || rem.Remaining <= 0 {
+	for _, c := range carried {
+		if c.Amount <= 0 {
 			continue
 		}
-		key := normalizeShareName(rem.Name)
+		key := normalizeShareName(c.Name)
 		if i, ok := idx[key]; ok {
-			next[i].CarriedIn = rem.Remaining
+			next[i].CarriedIn = c.Amount
 			continue
 		}
 		// Доли с таким именем в новой раскладке нет — заводим её пустой, но с
-		// накопленным (ADR-008 §9). Категории копируются со старой доли, чтобы
-		// траты по ним продолжали матчиться туда же.
-		prev := in.PrevShares[pi]
+		// накопленным. Категории копируются со старой доли, чтобы траты по ним
+		// продолжали матчиться туда же.
 		maxPos++
 		next = append(next, budget.EnvelopeShare{
-			Name:       prev.Name,
+			Name:       c.Name,
 			Kind:       budget.ShareKindSave,
 			Allocated:  0,
-			CarriedIn:  rem.Remaining,
-			Source:     prev.Source,
+			CarriedIn:  c.Amount,
+			Source:     c.Source,
 			Position:   maxPos,
-			Categories: prev.Categories,
+			Categories: c.Categories,
 		})
 		idx[key] = len(next) - 1
 	}
