@@ -42,3 +42,11 @@
 {"id":"r040","input":"запланируй трату 15600 на визу","expected":{"skill":"budget","action":"add_planned_expense"},"tags":["add_planned_expense","planned","ru"]}
 {"id":"r041","input":"запомни приход 127000 на 2 недели","expected":{"skill":"budget","action":"start_envelope"},"tags":["start_envelope","envelope","ru"]}
 {"id":"r042","input":"сколько свободных денег осталось?","expected":{"skill":"safe_to_spend","action":""},"tags":["remaining","envelope","ru"]}
+# ADR-008 (конверты-доли). Кейсы заведены ДО кода: скиллов/actions ещё нет,
+# до задач 4/6/8 эпика simpleAI-faeq они краснеют — это ожидаемый TDD-красный.
+# Механизма skip у харнеса нет; срез снимается тегом: -tag envelope_shares.
+{"id":"r043","input":"пришло 127000, разложи по конвертам","expected":{"skill":"budget","action":"start_envelope"},"tags":["envelope_shares","allocate","income_arrived","ru","pending_impl"],"notes":"ADR-008 §1 — раскладка прихода по категорийным долям; делится FreeAfterObligations, не сырой приход"}
+{"id":"r044","input":"сколько в конвертах","expected":{"skill":"safe_to_spend","action":""},"tags":["envelope_shares","share_status","read_only","ru","pending_impl"],"notes":"ADR-008 — read-only статус долей, ничего не пишет"}
+{"id":"r045","input":"сколько осталось на еду","expected":{"skill":"safe_to_spend","action":""},"tags":["envelope_shares","share_status","read_only","ru","pending_impl"],"notes":"ADR-008 §8 — остаток доли производный: allocated + carried_in − факт"}
+{"id":"r046","input":"на еду хватит 15000","expected":{"skill":"budget","action":"set_share_limit"},"tags":["envelope_shares","share_override","ru","pending_impl","regression"],"notes":"ADR-008 §2 — ручная правка лимита доли (override), НЕ add_expense: сумма есть, но траты не было"}
+{"id":"r047","input":"купил еды на 3000","expected":{"skill":"budget","action":"add_expense"},"tags":["envelope_shares","past_tense","with_amount","ru","regression"],"notes":"контраст к r046: разграничение триггеров уже ломалось (simpleAI-399, simpleAI-q49). Должен проходить и ДО реализации конвертов"}
