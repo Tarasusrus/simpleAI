@@ -1007,19 +1007,76 @@ func (s *Store) CreateEnvelope(ctx context.Context, chatID int64, incomeAmount f
 		}
 	}()
 
+	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelope commit: %w", err)
+	}
+	return id, nil
+}
+
+// CreateEnvelopeWithShares сохраняет конверт ВМЕСТЕ с его раскладкой одной
+// транзакцией (ADR-008): конверт без долей — состояние, в котором трате некуда
+// падать (budget.ResolveShare вернёт nil), а «сколько осталось в конверте» не
+// на что ответить. Две отдельные транзакции дают такое состояние при любой
+// ошибке между ними, поэтому запись атомарна структурно, а не по договорённости.
+func (s *Store) CreateEnvelopeWithShares(
+	ctx context.Context,
+	chatID int64,
+	incomeAmount float64,
+	currency string,
+	from, to time.Time,
+	shares []EnvelopeShare,
+) (uuid.UUID, error) {
+	if incomeAmount <= 0 {
+		return uuid.Nil, fmt.Errorf("CreateEnvelopeWithShares: income must be > 0")
+	}
+	if len(shares) == 0 {
+		return uuid.Nil, fmt.Errorf("CreateEnvelopeWithShares: пустая раскладка")
+	}
+	if currency == "" {
+		currency = "RUB"
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelopeWithShares begin: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("CreateEnvelopeWithShares rollback", "err", rbErr)
+		}
+	}()
+
+	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if err := insertSharesTx(ctx, tx, id, shares); err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("CreateEnvelopeWithShares commit: %w", err)
+	}
+	return id, nil
+}
+
+// insertEnvelopeTx — деактивация прошлого активного конверта + вставка нового
+// внутри уже открытой транзакции. Вынесено, чтобы CreateEnvelope и
+// CreateEnvelopeWithShares писали конверт ОДНИМ кодом: расхождение здесь
+// означало бы два разных конверта в зависимости от точки входа.
+func insertEnvelopeTx(ctx context.Context, tx pgx.Tx, chatID int64, incomeAmount float64, currency string, from, to time.Time) (uuid.UUID, error) {
 	if _, err := tx.Exec(ctx, `UPDATE budget_envelope SET active = false WHERE chat_id = $1 AND active`, chatID); err != nil {
-		return uuid.Nil, fmt.Errorf("CreateEnvelope deactivate: %w", err)
+		return uuid.Nil, fmt.Errorf("envelope deactivate: %w", err)
 	}
 	var id uuid.UUID
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO budget_envelope (chat_id, income_amount, income_currency, period_start, period_end)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id
 	`, chatID, incomeAmount, currency, from, to).Scan(&id)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("CreateEnvelope insert: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, fmt.Errorf("CreateEnvelope commit: %w", err)
+		return uuid.Nil, fmt.Errorf("envelope insert: %w", err)
 	}
 	return id, nil
 }
@@ -1072,10 +1129,22 @@ func (s *Store) CreateShares(ctx context.Context, envelopeID uuid.UUID, shares [
 		}
 	}()
 
+	if err := insertSharesTx(ctx, tx, envelopeID, shares); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("CreateShares commit: %w", err)
+	}
+	return nil
+}
+
+// insertSharesTx вставляет доли и их категории внутри уже открытой транзакции.
+// Единый код записи раскладки для CreateShares и CreateEnvelopeWithShares.
+func insertSharesTx(ctx context.Context, tx pgx.Tx, envelopeID uuid.UUID, shares []EnvelopeShare) error {
 	for i, sh := range shares {
 		name := strings.TrimSpace(sh.Name)
 		if name == "" {
-			return fmt.Errorf("CreateShares: доля #%d без имени", i)
+			return fmt.Errorf("доля #%d без имени", i)
 		}
 		position := sh.Position
 		if position == 0 {
@@ -1101,12 +1170,9 @@ func (s *Store) CreateShares(ctx context.Context, envelopeID uuid.UUID, shares [
 				VALUES ($1, $2, $3)
 				ON CONFLICT (share_id, category_name) DO UPDATE SET category_id = EXCLUDED.category_id
 			`, shareID, c.CategoryID, catName); err != nil {
-				return fmt.Errorf("CreateShares insert category %q: %w", catName, err)
+				return fmt.Errorf("insert category %q: %w", catName, err)
 			}
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("CreateShares commit: %w", err)
 	}
 	return nil
 }
@@ -1232,6 +1298,104 @@ func (s *Store) DeleteOverride(ctx context.Context, chatID int64, shareName stri
 		return fmt.Errorf("DeleteOverride: %w", err)
 	}
 	return nil
+}
+
+// CategoryHistoryMonths возвращает глубину истории по категориям: сколько
+// ПОЛНЫХ календарных месяцев содержат траты этой категории. Ключ —
+// нормализованное имя категории (тот же ключ, что у долей).
+//
+// Текущий месяц исключён намеренно: он неполный, и раскладка, поверившая ему
+// как «месяцу данных», назначила бы лимит по обрезку. Окно — те же months, что
+// у GetForecastData: глубина истории должна измеряться по ТОЙ ЖЕ выборке, из
+// которой считается прогноз, иначе лимит назначается по одним данным, а
+// допуск к нему проверяется по другим.
+func (s *Store) CategoryHistoryMonths(ctx context.Context, months int) (map[string]int, error) {
+	var fromClause string
+	var args []any
+	if months > 0 {
+		fromClause = `AND t.transaction_date >= date_trunc('month', NOW()) - ($1 * INTERVAL '1 month')`
+		args = append(args, months)
+	}
+	query := fmt.Sprintf(`
+		SELECT COALESCE(c.name, 'Прочее') AS category_name,
+		       COUNT(DISTINCT date_trunc('month', t.transaction_date))::int AS months
+		FROM budget_transaction t
+		LEFT JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = 'expense'
+		  AND t.transaction_date < date_trunc('month', NOW())
+		%s
+		GROUP BY category_name
+	`, fromClause)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CategoryHistoryMonths: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			return nil, fmt.Errorf("CategoryHistoryMonths scan: %w", err)
+		}
+		out[normalizeName(name)] = n
+	}
+	return out, rows.Err()
+}
+
+// SpentOutsideShares — факт трат за период, который НЕ ложится ни в одну долю
+// конверта (строка «вне конвертов», ADR-008 §4). Это два слагаемых:
+//
+//   - траты по ФИКСИРОВАННЫМ и непотребительским категориям (аренда, подписки,
+//     переводы) — доли строятся только по переменным ежедневным тратам;
+//   - траты по переменным категориям, порождённые recurring-платежом
+//     (recurring_id IS NOT NULL) — они уже вычтены как обязательства на этапе
+//     computeSafeToSpend, и учитывать их ещё и в доле значило бы посчитать
+//     дважды (ADR-008 §5).
+//
+// Классификация категории — единый доменный IsVariableDailyExpense, тот же, по
+// которому строится прогноз и раскладка. Сумма в THB.
+func (s *Store) SpentOutsideShares(ctx context.Context, from, to time.Time, rates map[string]float64) (float64, error) {
+	if to.Before(from) {
+		return 0, fmt.Errorf("SpentOutsideShares: to (%s) раньше from (%s)", to.Format("2006-01-02"), from.Format("2006-01-02"))
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(c.name, 'Прочее') AS category_name,
+		       t.currency,
+		       (t.recurring_id IS NOT NULL) AS is_recurring,
+		       SUM(t.amount)::float8 AS total
+		FROM budget_transaction t
+		LEFT JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = 'expense'
+		  AND t.transaction_date >= $1::date
+		  AND t.transaction_date <= $2::date
+		GROUP BY category_name, t.currency, is_recurring
+	`, from, to)
+	if err != nil {
+		return 0, fmt.Errorf("SpentOutsideShares: %w", err)
+	}
+	defer rows.Close()
+
+	var total float64
+	for rows.Next() {
+		var category, currency string
+		var isRecurring bool
+		var amount float64
+		if err := rows.Scan(&category, &currency, &isRecurring, &amount); err != nil {
+			return 0, fmt.Errorf("SpentOutsideShares scan: %w", err)
+		}
+		if IsVariableDailyExpense(category) && !isRecurring {
+			continue // это факт доли, а не «вне конвертов»
+		}
+		thb, ok := ToTHB(amount, currency, rates)
+		if !ok {
+			continue // курса нет — молча раздувать сумму нельзя
+		}
+		total += thb
+	}
+	return total, rows.Err()
 }
 
 // ResolveShare определяет, в какую долю попадает трата (ADR-008).

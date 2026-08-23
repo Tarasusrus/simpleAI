@@ -35,6 +35,65 @@ func roundKopecks(v float64) float64 {
 	return math.Round(v*kopecksInUnit) / kopecksInUnit
 }
 
+// EnvelopePlanInput — вход раскладки прихода по конвертам. Всё, что читается из
+// БД, собирает вызывающий (budget-скилл); здесь только счёт.
+type EnvelopePlanInput struct {
+	IncomeTHB  float64                   // приход, сконвертированный в THB
+	Snapshot   *budget.AdvisorSnapshot   // обязательства за горизонт конверта
+	PlannedTHB float64                   // ручные плановые траты
+	Forecast   []budget.CategoryForecast // месячный прогноз по категориям
+	Rates      map[string]float64
+	Days       int                // длина горизонта конверта
+	Overrides  map[string]float64 // ручные лимиты, THB, ключ нормализован
+	History    map[string]int     // категория → полных месяцев данных
+}
+
+// EnvelopePlan — результат раскладки: детерминированные числа и доли.
+// Инвариант ADR-008 §4: Σ Shares[i].Allocated = Result.FreeAfterObligations.
+type EnvelopePlan struct {
+	Result   Result
+	Shares   []budget.EnvelopeShare
+	Warnings []string
+}
+
+// PlanEnvelope — единственная точка входа раскладки для внешних пакетов.
+// Экспортируется целиком, а не по кусочкам (computeSafeToSpend + allocateShares
+// отдельно): порядок «сначала обязательства, потом делим ОСТАТОК» — инвариант
+// ADR-008 §3, и разрешать вызывающему собрать его самому значит разрешить
+// разложить сырой приход.
+func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
+	snap := in.Snapshot
+	if snap == nil {
+		snap = &budget.AdvisorSnapshot{}
+	}
+	_, forecastTHB := buildForecastBreakdown(in.Forecast, in.Rates, in.Days)
+	res := computeSafeToSpend(in.IncomeTHB, snap, in.PlannedTHB, forecastTHB)
+	shares, warnings := allocateShares(
+		res.FreeAfterObligations, in.Forecast, in.Rates, in.Days, in.Overrides, in.History)
+	return EnvelopePlan{Result: res, Shares: shares, Warnings: warnings}
+}
+
+// SpendShares / SaveShares — разрез раскладки для показа: лимиты трат и то, что
+// осталось свободным (уходит в накопления). Разрез по Kind, а не по имени:
+// имя доли-накопления оператор может поменять, вид — нет.
+func SpendShares(shares []budget.EnvelopeShare) []budget.EnvelopeShare {
+	return filterShares(shares, budget.ShareKindSpend)
+}
+
+func SaveShares(shares []budget.EnvelopeShare) []budget.EnvelopeShare {
+	return filterShares(shares, budget.ShareKindSave)
+}
+
+func filterShares(shares []budget.EnvelopeShare, kind string) []budget.EnvelopeShare {
+	out := make([]budget.EnvelopeShare, 0, len(shares))
+	for _, sh := range shares {
+		if sh.Kind == kind {
+			out = append(out, sh)
+		}
+	}
+	return out
+}
+
 // allocateShares раскладывает free (Result.FreeAfterObligations, THB) по
 // категорийным конвертам из истории трат. Чистая функция.
 //
@@ -105,10 +164,22 @@ func buildDrafts(
 			fallback.categories = append(fallback.categories, norm)
 			continue
 		}
-		if it.THB < threshold {
-			// Мелочь сливаем в «прочее» вместе с её лимитом.
+		if norm == budget.FallbackShareName || it.THB < threshold {
+			// Мелочь сливаем в «прочее» вместе с её лимитом. Категория,
+			// БУКВАЛЬНО названная «прочее», — туда же: отдельным черновиком она
+			// стала бы вторым «прочее», и на сборке (finalizeShares) один из двух
+			// затёр бы другой, а его лимит остался бы в Σ allocated и утёк из
+			// раскладки — инвариант ADR-008 §4 не сошёлся бы.
 			fallback.amount += it.THB
 			fallback.categories = append(fallback.categories, norm)
+			continue
+		}
+		if d := findDraft(drafts, norm); d != nil {
+			// Регистровые дубли категорий («Еда» и «еда» — разные строки в
+			// budget_category с разными id, ADR-008 §6) дают два черновика с
+			// одним именем доли. Складываем, а не добавляем второй: две доли с
+			// одним именем ломают и сборку, и UNIQUE(envelope_id,name).
+			d.amount += it.THB
 			continue
 		}
 		drafts = append(drafts, &shareDraft{

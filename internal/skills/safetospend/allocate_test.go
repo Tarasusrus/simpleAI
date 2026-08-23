@@ -401,3 +401,49 @@ func TestAllocateShares_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestAllocateShares_DuplicateNamesMerge — регрессия на молча теряющийся лимит.
+//
+// Два источника одинакового имени доли: (1) категория, БУКВАЛЬНО названная
+// «Прочее» — совпадает с именем fallback-доли; (2) регистровые дубли категорий
+// («Еда» и «еда» — по ADR-008 §6 это разные строки budget_category с разными
+// id, и прогноз, сгруппированный по имени, даёт их обе).
+//
+// До фикса каждый из них создавал ВТОРУЮ долю с тем же именем: на сборке одна
+// затирала другую, но её сумма оставалась в Σ allocated — «накопления» получали
+// заниженный остаток, и Σ allocated + свободно ≠ free. Ловится инвариантом, а
+// не сравнением текста: расхождение вылезло на живом прогоне (127000 ₽, реплика
+// с категориями «Прочее» и «clothes»), а не в юнит-фикстуре.
+func TestAllocateShares_DuplicateNamesMerge(t *testing.T) {
+	const free = 100000.0
+	fc := []budget.CategoryForecast{
+		fcRUB("Прочее", 20000),
+		fcRUB("Еда", 30000),
+		fcRUB("еда", 10000),
+	}
+	history := map[string]int{"прочее": 3, "еда": 3}
+
+	shares, _ := allocateShares(free, fc, oneToOne, 30, nil, history)
+
+	checkConvergence(t, shares, free)
+
+	seen := map[string]int{}
+	for _, sh := range shares {
+		seen[normalizeShareName(sh.Name)]++
+	}
+	for name, n := range seen {
+		if n > 1 {
+			t.Errorf("доля %q встречается %d раза — UNIQUE(envelope_id,name) отобьёт вторую", name, n)
+		}
+	}
+
+	byName := allocatedByName(shares)
+	// Регистровые дубли складываются, а не теряются.
+	if got := byName["Еда"]; math.Abs(got-40000) > 0.01 {
+		t.Errorf("«Еда» = %.2f, ожидали 40000 (30000 + дубль 10000)", got)
+	}
+	// Категория «Прочее» уходит в долю-приёмник вместе со своим лимитом.
+	if got := byName[budget.FallbackShareName]; math.Abs(got-20000) > 0.01 {
+		t.Errorf("«%s» = %.2f, ожидали 20000 (лимит категории «Прочее»)", budget.FallbackShareName, got)
+	}
+}

@@ -3,8 +3,11 @@ package safetospend
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"simpleAI/internal/budget"
 )
 
 // replyData — всё, что нужно для ответа. Числа детерминированы (из Result),
@@ -64,6 +67,90 @@ func formatReply(d replyData) string {
 	return b.String()
 }
 
+// EnvelopeReply — данные для ответа о заведённом конверте с раскладкой
+// (ADR-008). Числа приходят готовыми из PlanEnvelope — форматтер только
+// печатает, не считает (числа не проходят ни через LLM, ни через вёрстку).
+type EnvelopeReply struct {
+	Plan           EnvelopePlan
+	RubPerTHB      float64 // ₽ за 1 ฿
+	Period         string  // человекочитаемый горизонт («ближайшие 2 недели»)
+	From, To       time.Time
+	IncomeAmount   float64 // приход как его назвал оператор
+	IncomeCurrency string
+	OutsideTHB     float64 // факт «вне конвертов» за период (ADR-008 §4)
+}
+
+// FormatEnvelopePlan печатает раскладку прихода по конвертам.
+//
+// Порядок строк повторяет порядок расчёта, чтобы каждое число можно было
+// проверить глазами сверху вниз: приход → обязательства → что осталось делить →
+// сами конверты → свободный остаток → факт вне конвертов → предупреждения.
+//
+// «Вне конвертов» показывается ВСЕГДА, даже нулевым: это тот член, из-за
+// которого сумма конвертов не сходится с остатком по ADR-007 (§4 ADR-008).
+// Спрятать его при нуле значит спрятать и объяснение расхождения, когда он
+// перестанет быть нулём.
+func FormatEnvelopePlan(d EnvelopeReply) string {
+	r := d.Plan.Result
+	rub := func(thb float64) float64 { return thb * d.RubPerTHB }
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "🧧 Конверт заведён: %.0f %s на %s (%s — %s)\n",
+		d.IncomeAmount, currencySign(d.IncomeCurrency), d.Period,
+		d.From.Format("02.01"), d.To.Format("02.01"))
+	fmt.Fprintf(&b, "🗓 курс %.2f ₽/฿\n\n", d.RubPerTHB)
+
+	fmt.Fprintf(&b, "💰 Приход: %.0f ₽\n", rub(r.IncomeTHB))
+	fmt.Fprintf(&b, "➖ Обязательства: %.0f ₽ (регулярные %.0f + долги %.0f)\n",
+		rub(r.RecurringTHB+r.DebtTHB), rub(r.RecurringTHB), rub(r.DebtTHB))
+	if r.PlannedTHB > 0 {
+		fmt.Fprintf(&b, "➖ Плановые покупки: %.0f ₽\n", rub(r.PlannedTHB))
+	}
+	fmt.Fprintf(&b, "= К раскладке: %.0f ₽\n\n", rub(r.FreeAfterObligations))
+
+	b.WriteString("📦 Конверты:\n")
+	for _, sh := range SpendShares(d.Plan.Shares) {
+		mark := ""
+		if sh.Source == budget.ShareSourceOverride {
+			mark = " (вручную)"
+		}
+		fmt.Fprintf(&b, "   • %-16s %.0f ₽%s\n", normalizeLabel(sh.Name), rub(sh.Allocated), mark)
+	}
+
+	var free float64
+	for _, sh := range SaveShares(d.Plan.Shares) {
+		free += sh.Allocated
+	}
+	b.WriteString("   ──────────────────────\n")
+	fmt.Fprintf(&b, "   🆓 Свободно: %.0f ₽ (уходит в накопления)\n", rub(free))
+
+	fmt.Fprintf(&b, "\n🚪 Вне конвертов: %.0f ₽ — фиксированные траты и платежи по подпискам за период; они уже вычтены в обязательствах.\n",
+		rub(d.OutsideTHB))
+
+	for _, w := range d.Plan.Warnings {
+		fmt.Fprintf(&b, "⚠️ %s\n", w)
+	}
+
+	b.WriteString("\nСкажи «на еду хватит 15000», если лимит не тот, или спроси «сколько осталось в конвертах?».")
+	return b.String()
+}
+
+// currencySign — знак валюты для заголовка. Неизвестная валюта печатается своим
+// кодом: выдумывать знак хуже, чем показать «USD».
+func currencySign(code string) string {
+	switch strings.ToUpper(strings.TrimSpace(code)) {
+	case "RUB", "":
+		return "₽"
+	case "THB":
+		return "฿"
+	case "USD":
+		return "$"
+	case "EUR":
+		return "€"
+	}
+	return strings.ToUpper(code)
+}
+
 // formatItems печатает разбивку: до topN пунктов + свёртка остатка в «прочее».
 // Категории нормализуются по регистру (единый вид).
 func formatItems(items []CategorySpend, rubPerTHB float64, topN int) string {
@@ -109,8 +196,11 @@ func parseAdviceLines(raw string) []string {
 		if ln == "" {
 			continue
 		}
-		if len(ln) > 200 {
-			ln = ln[:200]
+		// Обрезка по РУНАМ, а не по байтам: в кириллице ln[:200] режет символ
+		// пополам, и в ответ уезжает «д<U+FFFD>» (видно на живом прогоне
+		// safe_to_spend). Длина считается в символах — она и имелась в виду.
+		if r := []rune(ln); len(r) > adviceLineRunes {
+			ln = string(r[:adviceLineRunes])
 		}
 		out = append(out, ln)
 		if len(out) >= 4 {
