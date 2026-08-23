@@ -184,7 +184,7 @@ func TestCreateEnvelopeWithShares_Atomic(t *testing.T) {
 		{Name: "Еда", Kind: budget.ShareKindSpend, Allocated: 100, Source: budget.ShareSourceAuto, Position: 0},
 		{Name: "Еда", Kind: budget.ShareKindSpend, Allocated: 200, Source: budget.ShareSourceAuto, Position: 1},
 	}
-	if _, err := skill.store.CreateEnvelopeWithShares(ctx, envelopeTestChatID, 1000, "RUB", from, from.AddDate(0, 0, 14), dup); err == nil {
+	if _, err := skill.store.CreateEnvelopeWithShares(ctx, envelopeTestChatID, 1000, "RUB", from, from.AddDate(0, 0, 14), dup, time.Now()); err == nil {
 		t.Fatal("дубль имени доли должен отбиваться UNIQUE(envelope_id,name)")
 	}
 

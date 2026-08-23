@@ -92,7 +92,17 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 
-	envID, err := s.store.CreateEnvelopeWithShares(ctx, chatID, req.Amount, currency, h.From, h.To, plan.Shares)
+	// Перенос накопленного с прошлого конверта — ДО записи нового: доли пишутся
+	// одной транзакцией с конвертом, и carried_in должен быть уже в них.
+	now := time.Now()
+	carried, err := s.carryFromPrevious(ctx, chatID, rates, now, plan.Shares)
+	if err != nil {
+		slog.Default().ErrorContext(ctx, "start_envelope: carry over", "err", err, "chat_id", chatID)
+		return "Не удалось поднять накопления с прошлого конверта — новый конверт не заведён, чтобы они не потерялись. Попробуй ещё раз.", nil
+	}
+	plan.Shares = carried
+
+	envID, err := s.store.CreateEnvelopeWithShares(ctx, chatID, req.Amount, currency, h.From, h.To, plan.Shares, now)
 	if err != nil {
 		slog.Default().ErrorContext(ctx, "start_envelope: create envelope with shares", "err", err, "chat_id", chatID)
 		return "Не удалось сохранить конверт — попробуй ещё раз.", nil
@@ -124,6 +134,63 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		IncomeAmount:   req.Amount,
 		IncomeCurrency: currency,
 		OutsideTHB:     outsideTHB,
+	}), nil
+}
+
+// carryFromPrevious переносит накопления прошлого активного конверта в новую
+// раскладку (ADR-008 §9). Остаток считается computeShareRemaining внутри
+// safetospend.CarryOver — второй формулы остатка в проекте нет.
+//
+// Ошибка здесь НЕ проглатывается, в отличие от override'ов и категорий: без
+// раскладки лимиты просто станут авто-лимитами, а без переноса накопленные
+// деньги молча исчезнут вместе со старым конвертом. Дешевле не завести конверт.
+func (s *BudgetSkill) carryFromPrevious(
+	ctx context.Context,
+	chatID int64,
+	rates map[string]float64,
+	now time.Time,
+	next []budget.EnvelopeShare,
+) ([]budget.EnvelopeShare, error) {
+	prev, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("прошлый конверт: %w", err)
+	}
+	if !ok {
+		// Первый приход: переносить нечего, но carried_in всё равно обнуляем
+		// явно — этим занимается CarryOver с пустой прошлой раскладкой.
+		return safetospend.CarryOver(safetospend.CarryInput{Rates: rates, NextShares: next}), nil
+	}
+	prevShares, err := s.store.ListShares(ctx, chatID, prev.ID)
+	if err != nil {
+		return nil, fmt.Errorf("доли прошлого конверта: %w", err)
+	}
+	if len(prevShares) == 0 {
+		return safetospend.CarryOver(safetospend.CarryInput{Rates: rates, NextShares: next}), nil
+	}
+
+	// Факт считается за тот период, которым конверт СЕЙЧАС и закроется:
+	// period_end := now − 1 день, обрезанный сверху своим period_end и снизу
+	// period_start (ADR-008 §10). Иначе перенос учёл бы траты дня переключения,
+	// которые по факту достанутся уже новому конверту.
+	to := now.AddDate(0, 0, -1)
+	if to.After(prev.PeriodEnd) {
+		to = prev.PeriodEnd
+	}
+	var spent []budget.CategorySpentRow
+	if !to.Before(prev.PeriodStart) {
+		spent, err = s.store.SpentByCategoryExcludingRecurring(ctx, prev.PeriodStart, to)
+		if err != nil {
+			return nil, fmt.Errorf("факт прошлого конверта: %w", err)
+		}
+	}
+	// to < period_start — конверт заведён и закрыт в один день: период нулевой
+	// длины, факта за него нет, накопления переносятся целиком.
+
+	return safetospend.CarryOver(safetospend.CarryInput{
+		PrevShares: prevShares,
+		PrevSpent:  spent,
+		Rates:      rates,
+		NextShares: next,
 	}), nil
 }
 

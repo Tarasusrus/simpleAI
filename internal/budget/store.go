@@ -1007,7 +1007,7 @@ func (s *Store) CreateEnvelope(ctx context.Context, chatID int64, incomeAmount f
 		}
 	}()
 
-	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to)
+	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to, time.Now())
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -1029,6 +1029,7 @@ func (s *Store) CreateEnvelopeWithShares(
 	currency string,
 	from, to time.Time,
 	shares []EnvelopeShare,
+	now time.Time,
 ) (uuid.UUID, error) {
 	if incomeAmount <= 0 {
 		return uuid.Nil, fmt.Errorf("CreateEnvelopeWithShares: income must be > 0")
@@ -1049,7 +1050,7 @@ func (s *Store) CreateEnvelopeWithShares(
 		}
 	}()
 
-	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to)
+	id, err := insertEnvelopeTx(ctx, tx, chatID, incomeAmount, currency, from, to, now)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -1066,8 +1067,22 @@ func (s *Store) CreateEnvelopeWithShares(
 // внутри уже открытой транзакции. Вынесено, чтобы CreateEnvelope и
 // CreateEnvelopeWithShares писали конверт ОДНИМ кодом: расхождение здесь
 // означало бы два разных конверта в зависимости от точки входа.
-func insertEnvelopeTx(ctx context.Context, tx pgx.Tx, chatID int64, incomeAmount float64, currency string, from, to time.Time) (uuid.UUID, error) {
-	if _, err := tx.Exec(ctx, `UPDATE budget_envelope SET active = false WHERE chat_id = $1 AND active`, chatID); err != nil {
+func insertEnvelopeTx(ctx context.Context, tx pgx.Tx, chatID int64, incomeAmount float64, currency string, from, to time.Time, now time.Time) (uuid.UUID, error) {
+	// Закрытие прошлого конверта: period_end := now − 1 день (ADR-008 §10).
+	// Не now: все даты в схеме — DATE, а periodSnapshotQuery фильтрует границы
+	// ВКЛЮЧИТЕЛЬНО, поэтому при period_end = now траты дня переключения попали
+	// бы разом в старый конверт (по верхней границе) и в новый (по нижней).
+	//
+	// LEAST — чтобы не удлинить уже истёкший конверт: у него period_end в
+	// прошлом, и присвоение now−1 задним числом втянуло бы в него чужие траты.
+	// GREATEST — обрезка до period_start для конверта, заведённого и закрытого
+	// в один день: период отрицательной длины GetPeriodSnapshot не принимает.
+	if _, err := tx.Exec(ctx, `
+		UPDATE budget_envelope
+		SET active = false,
+		    period_end = GREATEST(LEAST(period_end, $2::date - 1), period_start)
+		WHERE chat_id = $1 AND active
+	`, chatID, now); err != nil {
 		return uuid.Nil, fmt.Errorf("envelope deactivate: %w", err)
 	}
 	var id uuid.UUID
