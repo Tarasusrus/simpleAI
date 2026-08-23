@@ -302,6 +302,54 @@ type Envelope struct {
 	CreatedAt      time.Time
 }
 
+// Виды долей конверта (ADR-008).
+const (
+	ShareKindSpend = "spend" // тратится в этом периоде
+	ShareKindSave  = "save"  // копится, остаток переносится в следующий приход
+)
+
+// Источник суммы доли (ADR-008).
+const (
+	ShareSourceAuto     = "auto"     // посчитано из истории трат
+	ShareSourceOverride = "override" // поправлено оператором вручную
+)
+
+// FallbackShareName — имя доли, в которую попадают траты без категории
+// (category_id IS NULL) и категории, не привязанные ни к одной доле.
+const FallbackShareName = "прочее"
+
+// EnvelopeShare — одна доля раскладки прихода (ADR-008). Суммы в THB.
+type EnvelopeShare struct {
+	ID         uuid.UUID
+	EnvelopeID uuid.UUID
+	Name       string
+	Kind       string  // ShareKindSpend | ShareKindSave
+	Allocated  float64 // THB
+	CarriedIn  float64 // THB, перенос с прошлого прихода
+	Source     string  // ShareSourceAuto | ShareSourceOverride
+	Position   int
+	Categories []EnvelopeShareCategory
+}
+
+// EnvelopeShareCategory — категория, отнесённая к доле. Хранится двойным
+// ключом: CategoryID (может быть nil) и нормализованное имя в нижнем регистре,
+// потому что фактический пайплайн трат name-keyed, а часть транзакций вообще
+// без category_id.
+type EnvelopeShareCategory struct {
+	CategoryID   *uuid.UUID
+	CategoryName string // всегда в нижнем регистре
+}
+
+// EnvelopeOverride — ручной лимит доли, заданный оператором. Живёт между
+// приходами и к конкретному конверту не привязан.
+type EnvelopeOverride struct {
+	ChatID    int64
+	ShareName string
+	Amount    float64
+	Currency  string
+	UpdatedAt time.Time
+}
+
 // TopExpense — одна из топ-N самых дорогих расходных транзакций за период,
 // сконвертированная в THB. Используется AdvisorSkill action='analyze' для
 // передачи LLM детализированного среза трат.

@@ -1042,6 +1042,240 @@ func (s *Store) GetActiveEnvelope(ctx context.Context, chatID int64) (*Envelope,
 	return &e, true, nil
 }
 
+// --- Доли конверта (ADR-008) ---
+
+// normalizeName приводит имя доли/категории к каноничному виду ключа: обрезка
+// пробелов + нижний регистр. Имена категорий регистрозависимы в уникальном
+// индексе budget_category(name,type), а FindCategory ищет по LOWER(name) —
+// поэтому ключом везде служит нормализованная форма.
+func normalizeName(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// CreateShares сохраняет раскладку прихода по долям вместе с категориями долей
+// одной транзакцией: частичная раскладка (доли без категорий) хуже отсутствия
+// раскладки — по ней траты разойдутся не туда.
+func (s *Store) CreateShares(ctx context.Context, envelopeID uuid.UUID, shares []EnvelopeShare) error {
+	if envelopeID == uuid.Nil {
+		return fmt.Errorf("CreateShares: envelopeID пуст")
+	}
+	if len(shares) == 0 {
+		return nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("CreateShares begin: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("CreateShares rollback", "err", rbErr)
+		}
+	}()
+
+	for i, sh := range shares {
+		name := strings.TrimSpace(sh.Name)
+		if name == "" {
+			return fmt.Errorf("CreateShares: доля #%d без имени", i)
+		}
+		position := sh.Position
+		if position == 0 {
+			position = i
+		}
+		var shareID uuid.UUID
+		err := tx.QueryRow(ctx, `
+			INSERT INTO budget_envelope_share
+				(envelope_id, name, kind, allocated, carried_in, source, position)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`, envelopeID, name, sh.Kind, sh.Allocated, sh.CarriedIn, sh.Source, position).Scan(&shareID)
+		if err != nil {
+			return fmt.Errorf("CreateShares insert share %q: %w", name, err)
+		}
+		for _, c := range sh.Categories {
+			catName := normalizeName(c.CategoryName)
+			if catName == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO budget_envelope_share_category (share_id, category_id, category_name)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (share_id, category_name) DO UPDATE SET category_id = EXCLUDED.category_id
+			`, shareID, c.CategoryID, catName); err != nil {
+				return fmt.Errorf("CreateShares insert category %q: %w", catName, err)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("CreateShares commit: %w", err)
+	}
+	return nil
+}
+
+// ListShares возвращает доли конверта вместе с их категориями. Фильтрация по
+// chat_id — через join на budget_envelope: доли своего chat_id не имеют, и без
+// join чужой envelope_id прочитал бы чужую раскладку (ADR-004 изоляция).
+func (s *Store) ListShares(ctx context.Context, chatID int64, envelopeID uuid.UUID) ([]EnvelopeShare, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT sh.id, sh.envelope_id, sh.name, sh.kind, sh.allocated, sh.carried_in, sh.source, sh.position
+		FROM budget_envelope_share sh
+		JOIN budget_envelope e ON e.id = sh.envelope_id
+		WHERE e.id = $1 AND e.chat_id = $2
+		ORDER BY sh.position, sh.name
+	`, envelopeID, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("ListShares: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EnvelopeShare
+	byID := map[uuid.UUID]int{}
+	for rows.Next() {
+		var sh EnvelopeShare
+		if err := rows.Scan(&sh.ID, &sh.EnvelopeID, &sh.Name, &sh.Kind, &sh.Allocated, &sh.CarriedIn, &sh.Source, &sh.Position); err != nil {
+			return nil, fmt.Errorf("ListShares scan: %w", err)
+		}
+		byID[sh.ID] = len(out)
+		out = append(out, sh)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListShares rows: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+
+	catRows, err := s.pool.Query(ctx, `
+		SELECT sc.share_id, sc.category_id, sc.category_name
+		FROM budget_envelope_share_category sc
+		JOIN budget_envelope_share sh ON sh.id = sc.share_id
+		JOIN budget_envelope e ON e.id = sh.envelope_id
+		WHERE e.id = $1 AND e.chat_id = $2
+		ORDER BY sc.category_name
+	`, envelopeID, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("ListShares categories: %w", err)
+	}
+	defer catRows.Close()
+
+	for catRows.Next() {
+		var shareID uuid.UUID
+		var c EnvelopeShareCategory
+		if err := catRows.Scan(&shareID, &c.CategoryID, &c.CategoryName); err != nil {
+			return nil, fmt.Errorf("ListShares scan category: %w", err)
+		}
+		if idx, ok := byID[shareID]; ok {
+			out[idx].Categories = append(out[idx].Categories, c)
+		}
+	}
+	if err := catRows.Err(); err != nil {
+		return nil, fmt.Errorf("ListShares category rows: %w", err)
+	}
+	return out, nil
+}
+
+// SetOverride сохраняет ручной лимит доли. Ключ — нормализованное имя доли:
+// лимит переживает конверт и находится по имени при следующем приходе.
+func (s *Store) SetOverride(ctx context.Context, chatID int64, shareName string, amount float64, currency string) error {
+	name := normalizeName(shareName)
+	if name == "" {
+		return fmt.Errorf("SetOverride: пустое имя доли")
+	}
+	if currency == "" {
+		currency = "THB"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO budget_envelope_limit_override (chat_id, share_name, amount, currency, updated_at)
+		VALUES ($1, $2, $3, $4, now())
+		ON CONFLICT (chat_id, share_name)
+		DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency, updated_at = now()
+	`, chatID, name, amount, currency)
+	if err != nil {
+		return fmt.Errorf("SetOverride: %w", err)
+	}
+	return nil
+}
+
+// ListOverrides возвращает ручные лимиты chat'а. ShareName — нормализованный,
+// сравнивать с именами долей нужно через normalizeName.
+func (s *Store) ListOverrides(ctx context.Context, chatID int64) ([]EnvelopeOverride, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT chat_id, share_name, amount, currency, updated_at
+		FROM budget_envelope_limit_override
+		WHERE chat_id = $1
+		ORDER BY share_name
+	`, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("ListOverrides: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EnvelopeOverride
+	for rows.Next() {
+		var o EnvelopeOverride
+		if err := rows.Scan(&o.ChatID, &o.ShareName, &o.Amount, &o.Currency, &o.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ListOverrides scan: %w", err)
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+// DeleteOverride снимает ручной лимит: доля снова считается из истории трат.
+func (s *Store) DeleteOverride(ctx context.Context, chatID int64, shareName string) error {
+	name := normalizeName(shareName)
+	if name == "" {
+		return fmt.Errorf("DeleteOverride: пустое имя доли")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		DELETE FROM budget_envelope_limit_override WHERE chat_id = $1 AND share_name = $2
+	`, chatID, name); err != nil {
+		return fmt.Errorf("DeleteOverride: %w", err)
+	}
+	return nil
+}
+
+// ResolveShare определяет, в какую долю попадает трата (ADR-008).
+//
+// Порядок: по category_id, если он у транзакции есть; иначе — по
+// нормализованному имени категории. Если по id не нашлось, имя всё равно
+// проверяется: доля могла быть заведена по имени категории, у которой на тот
+// момент не было строки в budget_category. Ничего не сматчилось (в том числе
+// category_id IS NULL и пустое имя) — трата уходит в fallback-долю «прочее».
+// Fallback-доли нет — возвращается nil: вызывающий сам решает, что делать с
+// нераспределённой тратой, молча ронять её в первую попавшуюся долю нельзя.
+func ResolveShare(shares []EnvelopeShare, categoryID *uuid.UUID, categoryName string) *EnvelopeShare {
+	if categoryID != nil && *categoryID != uuid.Nil {
+		for i := range shares {
+			for _, c := range shares[i].Categories {
+				if c.CategoryID != nil && *c.CategoryID == *categoryID {
+					return &shares[i]
+				}
+			}
+		}
+	}
+	if name := normalizeName(categoryName); name != "" {
+		for i := range shares {
+			for _, c := range shares[i].Categories {
+				if normalizeName(c.CategoryName) == name {
+					return &shares[i]
+				}
+			}
+		}
+	}
+	return FallbackShare(shares)
+}
+
+// FallbackShare возвращает долю «прочее» — приёмник трат без категории и
+// категорий, не привязанных ни к одной доле. nil, если такой доли нет.
+func FallbackShare(shares []EnvelopeShare) *EnvelopeShare {
+	for i := range shares {
+		if normalizeName(shares[i].Name) == FallbackShareName {
+			return &shares[i]
+		}
+	}
+	return nil
+}
+
 func (s *Store) getMonthlyExpenses(ctx context.Context, months int) ([]MonthlyCategoryExpense, error) {
 	var fromClause string
 	var args []any
