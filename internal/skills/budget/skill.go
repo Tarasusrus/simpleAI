@@ -42,7 +42,12 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
 			"action='add_planned_expense' records a FUTURE planned one-off expense the user wants to set aside ('запланируй трату X на Y', 'будет трата X', 'отложи X на Z', 'плановая трата X') — it is NOT a completed transaction. " +
-			"action='start_envelope' SAVES an arrived income to track its remaining balance over time ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X'). " +
+			"action='start_envelope' SAVES an arrived income and SPLITS it into category envelopes ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X', " +
+			"'пришло X, разложи по конвертам', 'разложи приход X по конвертам', 'раскидай X по конвертам', 'пришло X, разложи'). " +
+			"Any 'разложи / раскидай / распредели ... по конвертам' with an arrived income is start_envelope — it WRITES the envelope and its shares; safe_to_spend only counts and writes nothing. " +
+			"action='set_share_limit' CORRECTS the LIMIT of a category envelope by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
+			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The correction is remembered and applied to every following income until removed. " +
+			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the limit goes back to being computed from spending history; pass name=<категория>. " +
 			"Use budget.summary for plain numerical totals only.",
 		Version: "1.0.0",
 		InputSchema: &plugin.Schema{
@@ -53,7 +58,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope, set_share_limit, clear_share_limit",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -73,7 +78,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"name": map[string]any{
 						"type":        "string",
-						"description": "Name of a savings goal, debt, or recurring payment",
+						"description": "Name of a savings goal, debt, or recurring payment. For set_share_limit / clear_share_limit — the name of the category envelope whose limit is corrected ('еда', 'транспорт', 'развлечения').",
 					},
 					"target_amount": map[string]any{
 						"type":        "number",
@@ -257,6 +262,10 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.addPlannedExpense(ctx, req)
 	case "start_envelope":
 		return s.startEnvelope(ctx, req)
+	case "set_share_limit":
+		return s.setShareLimit(ctx, req)
+	case "clear_share_limit":
+		return s.clearShareLimit(ctx, req)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}
