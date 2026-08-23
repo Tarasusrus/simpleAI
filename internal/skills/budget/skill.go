@@ -14,11 +14,15 @@ import (
 type BudgetSkill struct {
 	store   *budget.Store
 	buckets BucketConfig
+	// shareStore — тот же store, но суженный до чтения конверта и долей.
+	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
+	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
+	shareStore shareWarningStore
 }
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
 func NewBudgetSkill(store *budget.Store) *BudgetSkill {
-	return &BudgetSkill{store: store, buckets: defaultBuckets()}
+	return &BudgetSkill{store: store, buckets: defaultBuckets(), shareStore: store}
 }
 
 // WithBuckets заменяет конфигурацию корзин. Возвращает ошибку если config невалиден.

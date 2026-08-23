@@ -52,7 +52,13 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 		return "", fmt.Errorf("add transaction: %w", err)
 	}
 
-	return formatTransaction(t, typ), nil
+	reply := formatTransaction(t, typ)
+	// Предупреждение о пробитом конверте — ПОВЕРХ обычного ответа и только для
+	// расхода: транзакция уже записана и не откатывается (ADR-008, задача 7/8).
+	if typ == "expense" {
+		reply += s.shareOverspendWarning(ctx, t)
+	}
+	return reply, nil
 }
 
 func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (string, error) {
