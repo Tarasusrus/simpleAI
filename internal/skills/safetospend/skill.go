@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
@@ -23,6 +25,8 @@ type store interface {
 	PlannedExpensesTHB(ctx context.Context, chatID int64, rates map[string]float64) (float64, int, error)
 	ListPlannedExpenses(ctx context.Context, chatID int64) ([]budget.PlannedExpense, error)
 	GetActiveEnvelope(ctx context.Context, chatID int64) (*budget.Envelope, bool, error)
+	ListShares(ctx context.Context, chatID int64, envelopeID uuid.UUID) ([]budget.EnvelopeShare, error)
+	SpentByCategoryExcludingRecurring(ctx context.Context, from, to time.Time) ([]budget.CategorySpentRow, error)
 }
 
 // SafeToSpendSkill — read-only reasoning skill (ADR-007 фаза H1).
@@ -59,6 +63,8 @@ func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 			"Триггеры EN: 'got X income, how much is free to spend?', 'received X, what's safe to spend?'. " +
 			"РЕЖИМ ОСТАТКА (БЕЗ суммы): показывает, сколько свободно осталось из ранее сохранённого конверта, пересчитывая по фактическим тратам. " +
 			"Триггеры RU: «сколько свободно осталось?», «сколько осталось из прихода?», «остаток по конверту», «сколько ещё могу потратить?», «сколько денег свободно сейчас?». " +
+			"РЕЖИМ КОНВЕРТОВ (БЕЗ суммы): показывает остаток и лимит по КАЖДОМУ категорийному конверту, пробитые видно сразу. Ничего не пишет. " +
+			"Триггеры RU: «сколько в конвертах», «сколько осталось в конвертах», «остаток конвертов», «сколько осталось на еду», «сколько осталось на транспорт». " +
 			"НЕ используй для простой ЗАПИСИ дохода без вопроса о свободных деньгах («пришло X», «запиши доход X», «получил зарплату X» без вопроса) → budget.add_income. " +
 			"НЕ используй для СОХРАНЕНИЯ прихода («запомни приход X», «заведи конверт») → budget.start_envelope. " +
 			"НЕ используй для РАСКЛАДКИ прихода по конвертам («пришло X, разложи по конвертам», «разложи приход X по конвертам», «раскидай X по конвертам») → budget.start_envelope: раскладка ПИШЕТ конверт и его доли, а этот скилл только считает. " +
@@ -74,7 +80,7 @@ func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 					"amount":   map[string]any{"type": "number", "description": "Сумма пришедшего дохода из сообщения. НЕ указывай в режиме остатка (вопрос без суммы)."},
 					"currency": map[string]any{"type": "string", "description": "Валюта прихода: RUB (по умолчанию), THB, USD, EUR."},
 					"period":   map[string]any{"type": "string", "description": "Горизонт расчёта. По умолчанию (пусто) — ближайшие 2 недели (интервал между приходами). 'month' — до конца текущего месяца; 'YYYY-MM' — конкретный месяц."},
-					"question": map[string]any{"type": "string", "description": "Исходный вопрос пользователя."},
+					"question": map[string]any{"type": "string", "description": "Исходный вопрос пользователя ДОСЛОВНО. Заполняй всегда: по нему различаются режим общего остатка и режим конвертов."},
 				},
 				"required": []string{},
 			},
@@ -110,8 +116,12 @@ func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) 
 		return "Не могу посчитать — обнови курс валют командой /rates.", nil
 	}
 
-	// Без суммы: режим «сколько осталось» по активному конверту (ADR-007 T5).
+	// Без суммы: режим остатка. Спрашивают про конверты — раскладка по долям
+	// (ADR-008 §8), иначе общий свободный остаток (ADR-007 T5).
 	if in.Amount <= 0 {
+		if sharesRequested(in.Question) {
+			return s.runShares(ctx, chatID, rates)
+		}
 		return s.runRemaining(ctx, chatID, rates)
 	}
 

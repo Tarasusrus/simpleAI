@@ -5,6 +5,7 @@
 package safetospend
 
 import (
+	"fmt"
 	"math"
 	"sort"
 
@@ -128,4 +129,94 @@ func consumptionSpentTHB(spentByCategory map[string]float64) float64 {
 		}
 	}
 	return total
+}
+
+// ShareRemaining — производный остаток ОДНОЙ доли конверта (ADR-008 §8):
+//
+//	Remaining = Allocated + CarriedIn − факт по категориям доли за период
+//
+// Остаток не хранится нигде: у каждого слагаемого ровно один источник.
+type ShareRemaining struct {
+	Name      string
+	Kind      string  // budget.ShareKindSpend | budget.ShareKindSave
+	Source    string  // budget.ShareSourceAuto | budget.ShareSourceOverride
+	Allocated float64 // THB
+	CarriedIn float64 // THB, перенос с прошлого конверта
+	LimitTHB  float64 // Allocated + CarriedIn — то, что показываем как «лимит»
+	SpentTHB  float64 // факт по категориям доли, БЕЗ recurring
+	Remaining float64 // LimitTHB − SpentTHB, может быть отрицательным (доля пробита)
+}
+
+// Overspent — доля пробита: потрачено больше лимита.
+func (s ShareRemaining) Overspent() bool { return s.Remaining < 0 }
+
+// computeShareRemaining — чистая функция остатка по каждой доле (ADR-008 §8,
+// §11: числа не проходят через LLM).
+//
+// spentByCategory — сырой факт расходов за период конверта, уже БЕЗ транзакций
+// с recurring_id (их отсекает SpentByCategoryExcludingRecurring; учитывать их
+// здесь значило бы посчитать обязательства дважды, ADR-008 §5).
+//
+// В факт доли попадают только ПЕРЕМЕННЫЕ ежедневные траты
+// (budget.IsVariableDailyExpense) — по ним и строится раскладка. Фиксированные
+// категории и движение денег («Переводы», «Кредит») не трогают ни одну долю:
+// они уже учтены в обязательствах и показываются строкой «вне конвертов»
+// (ADR-008 §4). Классификатор тот же, что у прогноза и раскладки, — один
+// доменный источник.
+//
+// Матчинг траты к доле — budget.ResolveShare (id, затем имя, затем fallback
+// «прочее»), чтобы факт не терялся молча (ADR-008 §6). Категория без своей доли
+// уменьшает долю-приёмник «прочее».
+//
+// Порядок долей на выходе повторяет порядок входа: он задан Position раскладки.
+func computeShareRemaining(shares []budget.EnvelopeShare, spentByCategory []budget.CategorySpentRow, rates map[string]float64) []ShareRemaining {
+	if len(shares) == 0 {
+		return nil
+	}
+	spent := make([]float64, len(shares))
+	idx := map[string]int{} // ключ доли (position+имя) → индекс в shares
+	for i := range shares {
+		idx[shareKey(shares[i])] = i
+	}
+
+	for _, row := range spentByCategory {
+		if !budget.IsVariableDailyExpense(row.CategoryName) {
+			continue // фикс и движение денег — «вне конвертов», не факт доли
+		}
+		thb, ok := budget.ToTHB(row.Amount, row.Currency, rates)
+		if !ok {
+			continue // курса нет — раздувать факт выдуманным числом нельзя
+		}
+		sh := budget.ResolveShare(shares, row.CategoryID, row.CategoryName)
+		if sh == nil {
+			continue // нет даже fallback-доли — падать некуда (ADR-008 §6)
+		}
+		if i, ok := idx[shareKey(*sh)]; ok {
+			spent[i] += thb
+		}
+	}
+
+	out := make([]ShareRemaining, 0, len(shares))
+	for i, sh := range shares {
+		limit := sh.Allocated + sh.CarriedIn
+		out = append(out, ShareRemaining{
+			Name:      sh.Name,
+			Kind:      sh.Kind,
+			Source:    sh.Source,
+			Allocated: sh.Allocated,
+			CarriedIn: sh.CarriedIn,
+			LimitTHB:  limit,
+			SpentTHB:  spent[i],
+			Remaining: limit - spent[i],
+		})
+	}
+	return out
+}
+
+// shareKey — идентификатор доли внутри одной раскладки. ID использовать нельзя:
+// у долей, посчитанных PlanEnvelope и ещё не сохранённых, он нулевой, и все
+// доли слиплись бы в одну. Имя уникально в пределах конверта (UNIQUE(envelope_id,
+// name), ADR-008 §9), position добавлен как страховка от рассинхронизации.
+func shareKey(sh budget.EnvelopeShare) string {
+	return fmt.Sprintf("%d|%s", sh.Position, normalizeShareName(sh.Name))
 }

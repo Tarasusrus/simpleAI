@@ -75,3 +75,59 @@ func formatRemaining(r RemainingResult, rubPerTHB float64, env *budget.Envelope)
 	fmt.Fprintf(&b, "  💚 Свободно осталось: ~%.0f ₽\n", rub(r.RemainingTHB))
 	return b.String()
 }
+
+// runShares — режим «сколько осталось в конвертах» (ADR-008 §8). Скилл
+// read-only: остаток считается из фактических транзакций и никуда не пишется.
+func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates map[string]float64) (string, error) {
+	env, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "safe_to_spend: shares get active envelope", "err", err, "chat_id", chatID)
+		return "Не удалось получить конверт — попробуй позже.", nil
+	}
+	if !ok {
+		return "Активного конверта нет. Скажи «пришло X, разложи по конвертам» — заведу раскладку.", nil
+	}
+
+	shares, err := s.store.ListShares(ctx, chatID, env.ID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "safe_to_spend: list shares", "err", err, "chat_id", chatID)
+		return "Временная ошибка — попробуй позже.", nil
+	}
+	if len(shares) == 0 {
+		// Конверт есть, но без раскладки — это старый режим ADR-007, а не
+		// поломка: честнее отдать общий остаток, чем пустой список конвертов.
+		return s.runRemaining(ctx, chatID, rates)
+	}
+
+	// Факт — с начала конверта по сегодня, но не позже его конца (иначе в
+	// остаток уехали бы траты, к этому конверту не относящиеся).
+	spentTo := time.Now()
+	if spentTo.After(env.PeriodEnd) {
+		spentTo = env.PeriodEnd
+	}
+	rowsSpent, err := s.store.SpentByCategoryExcludingRecurring(ctx, env.PeriodStart, spentTo)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "safe_to_spend: shares spent", "err", err, "chat_id", chatID)
+		return "Временная ошибка — попробуй позже.", nil
+	}
+
+	items := computeShareRemaining(shares, rowsSpent, rates)
+	reply := formatShareRemaining(items, rates["THB"], env)
+	s.logger.InfoContext(ctx, "safe_to_spend.shares",
+		"chat_id", chatID, "envelope_id", env.ID, "shares", len(items))
+	return reply, nil
+}
+
+// sharesRequested — спрашивают именно про конверты/доли, а не про общий
+// свободный остаток. Детект по словам, а не по параметру LLM: роутинг в
+// golden-set (r044/r045) идёт на скилл без action, и модель имени режима не
+// называет.
+func sharesRequested(question string) bool {
+	q := strings.ToLower(question)
+	for _, w := range []string{"конверт", "доля", "доли", "долям", "по категориям", "осталось на "} {
+		if strings.Contains(q, w) {
+			return true
+		}
+	}
+	return false
+}

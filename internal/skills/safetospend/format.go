@@ -209,3 +209,49 @@ func parseAdviceLines(raw string) []string {
 	}
 	return out
 }
+
+// formatShareRemaining печатает остаток по каждому конверту (ADR-008 §8).
+// Форматтер только печатает готовые числа — не считает: иначе у остатка стало
+// бы два источника, один из которых вёрстка.
+//
+// По каждой доле видно лимит и остаток, пробитые помечены явно: главный вопрос
+// оператора — «на что уже нельзя тратить», и он не должен вычитать в уме.
+func formatShareRemaining(items []ShareRemaining, rubPerTHB float64, env *budget.Envelope) string {
+	rub := func(thb float64) float64 { return thb * rubPerTHB }
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "🧧 Конверты (%s — %s)\n\n",
+		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"))
+
+	var overspent []string
+	var totalLimit, totalRemaining float64
+	for _, it := range items {
+		totalLimit += it.LimitTHB
+		totalRemaining += it.Remaining
+		icon := "🟢"
+		if it.Overspent() {
+			icon = "🔴"
+			overspent = append(overspent, normalizeLabel(it.Name))
+		} else if it.LimitTHB > 0 && it.Remaining < it.LimitTHB*lowShareFraction {
+			icon = "🟡"
+		}
+		if it.Kind == budget.ShareKindSave {
+			icon = "🏦"
+		}
+		fmt.Fprintf(&b, "%s %-16s осталось %.0f ₽ из %.0f ₽",
+			icon, normalizeLabel(it.Name), rub(it.Remaining), rub(it.LimitTHB))
+		if it.CarriedIn != 0 {
+			fmt.Fprintf(&b, " (в т.ч. перенос %.0f ₽)", rub(it.CarriedIn))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("   ──────────────────────\n")
+	fmt.Fprintf(&b, "   Итого осталось: %.0f ₽ из %.0f ₽\n", rub(totalRemaining), rub(totalLimit))
+
+	if len(overspent) > 0 {
+		fmt.Fprintf(&b, "\n⚠️ Пробито: %s — дальше тратишь из других конвертов.\n", strings.Join(overspent, ", "))
+	}
+	b.WriteString("\nℹ️ Обязательные платежи по подпискам и переводы в конверты не входят — они уже вычтены отдельно.")
+	return b.String()
+}
