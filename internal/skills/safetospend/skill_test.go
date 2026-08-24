@@ -157,8 +157,8 @@ func TestRunShares_UsesRecurringFreeSource(t *testing.T) {
 	}
 	// 10000 − 1000 = 9000 ฿ (валюту не просили — печатаем батами). Снапшотный
 	// факт (100 THB по «Еда») в остаток попасть не должен.
-	if !regexpContains(out, `Еда\s+осталось 9 000 ฿ из 10 000 ฿`) {
-		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
+	if !regexpContains(out, `Еда\s+1 000\s+9 000`) {
+		t.Errorf("ожидался остаток «Еда» 9000 ฿ при потраченных 1000 ฿, got:\n%s", out)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestRunShares_DefaultCurrencyIsTHB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "₽") {
+	if strings.Contains(amountsOnly(out), "₽") {
 		t.Errorf("без просьбы о рублях ответ обязан быть в батах, got:\n%s", out)
 	}
 }
@@ -193,10 +193,10 @@ func TestRunShares_DisplayRUB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !regexpContains(out, `Еда\s+осталось 23 400 ₽ из 26 000 ₽`) {
-				t.Errorf("ожидался остаток «Еда» 23400 ₽ из 26000 ₽, got:\n%s", out)
+			if !regexpContains(out, `Еда\s+2 600\s+23 400`) {
+				t.Errorf("ожидался остаток «Еда» 23400 ₽ при потраченных 2600 ₽, got:\n%s", out)
 			}
-			if strings.Contains(out, "฿") {
+			if strings.Contains(amountsOnly(out), "฿") {
 				t.Errorf("просили рубли, а в ответе баты:\n%s", out)
 			}
 		})
@@ -211,9 +211,23 @@ func TestRunShares_DisplayTHBByWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexpContains(out, `Еда\s+осталось 9 000 ฿ из 10 000 ฿`) {
-		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
+	if !regexpContains(out, `Еда\s+1 000\s+9 000`) {
+		t.Errorf("ожидался остаток «Еда» 9000 ฿ при потраченных 1000 ฿, got:\n%s", out)
 	}
+}
+
+// amountsOnly отбрасывает строку курса: она печатает ОБА знака валют («3,1 ₽/฿»)
+// по определению, и проверка «в ответе нет чужого знака» должна смотреть на
+// суммы, а не на курс.
+func amountsOnly(out string) string {
+	var keep []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Курс ") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
 }
 
 // Вопрос без слова «конверт» ведёт в общий остаток, а не в раскладку.

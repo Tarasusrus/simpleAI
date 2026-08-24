@@ -119,7 +119,7 @@ func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates ma
 	}
 
 	items := computeShareRemaining(shares, rowsSpent, rates)
-	reply := formatShareRemaining(items, m, env)
+	reply := formatShareRemaining(items, m, env, time.Now())
 	s.logger.InfoContext(ctx, "safe_to_spend.shares",
 		"chat_id", chatID, "envelope_id", env.ID, "shares", len(items), "display", m.Code)
 	return reply, nil

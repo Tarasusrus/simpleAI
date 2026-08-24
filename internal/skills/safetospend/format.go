@@ -238,18 +238,25 @@ func shareTotalTHB(shares []budget.EnvelopeShare) float64 {
 // уже отложено. Без него число «814 ฿» читается как «всё, что у меня есть».
 func dailyLimitScope(shares []budget.EnvelopeShare) string {
 	flexible := make([]string, 0, len(shares))
-	for i, sh := range SpendShares(shares) {
-		label := shareLabel(sh.Name)
-		if i > 0 {
-			label = lowerFirst(label)
-		}
-		flexible = append(flexible, label)
+	for _, sh := range SpendShares(shares) {
+		flexible = append(flexible, shareLabel(sh.Name))
 	}
 	fixed := make([]string, 0, len(shares))
 	for _, sh := range FixedShares(shares) {
 		fixed = append(fixed, shareLabel(sh.Name))
 	}
+	return scopeSentence(flexible, fixed)
+}
 
+// scopeSentence собирает предложение из уже готовых имён: гибкие перечислением,
+// фиксированные — «уже отложены». Общая для раскладки прихода и показа
+// конвертов: два ответа об одних и тех же деньгах обязаны звучать одинаково.
+func scopeSentence(flexible, fixed []string) string {
+	for i := range flexible {
+		if i > 0 {
+			flexible[i] = lowerFirst(flexible[i])
+		}
+	}
 	var b strings.Builder
 	if len(flexible) > 0 {
 		fmt.Fprintf(&b, "%s.", strings.Join(flexible, ", "))
@@ -279,7 +286,11 @@ func incomeLine(d EnvelopeReply, m Display) string {
 // shareLabel ужимает имя доли под ширину колонки по границе СЛОВА: обрезанное
 // посередине «Кредит потребит…» читается хуже, чем честное «Кредит». Ellipsis
 // остаётся страховкой на случай, когда не помещается даже первое слово.
-func shareLabel(name string) string {
+func shareLabel(name string) string { return shareLabelWidth(name, labelWidth) }
+
+// shareLabelWidth — то же ужатие под ПРОИЗВОЛЬНУЮ ширину колонки: показ
+// конвертов печатает два числа вместо одного, и имени достаётся меньше места.
+func shareLabelWidth(name string, labelWidth int) string {
 	label := normalizeLabel(name)
 	if utf8.RuneCountInString(label) <= labelWidth {
 		return label
@@ -442,55 +453,150 @@ func parseAdviceLines(raw string) []string {
 	return out
 }
 
-// formatShareRemaining печатает остаток по каждому конверту (ADR-008 §8).
-// Форматтер только печатает готовые числа — не считает: иначе у остатка стало
-// бы два источника, один из которых вёрстка.
+// Ширина колонок моноблока ПОКАЗА конвертов. Колонок здесь три: имя и два
+// числа — потрачено и осталось. Сумма 14+9+9 = 32, тот же порог 36, что и у
+// раскладки: pre в Telegram не переносит строки по словам.
 //
-// По каждой доле видно лимит и остаток, пробитые помечены явно: главный вопрос
-// оператора — «на что уже нельзя тратить», и он не должен вычитать в уме.
-func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelope) string {
+// Имя ужато с 18 до 14 знаков именно ради второго числа: без «потрачено»
+// оператор видит остаток, но не видит, с чего тот упал.
+const (
+	remLabelWidth  = 14
+	remSpentWidth  = 9
+	remLeftWidth   = 9
+	remTotalsWidth = remLabelWidth + remSpentWidth + remLeftWidth
+)
+
+// DaysLeft — сколько дней периода ещё осталось, СЕГОДНЯШНИЙ включительно.
+//
+// Считается по календарным датам, а не по разнице таймстампов: «осталось дней»
+// — свойство календаря, и в 23:00 последнего дня их всё ещё один, а не ноль.
+//
+// Ниже единицы не опускается никогда. Это не косметика, а защита знаменателя:
+// день после конца периода дал бы ноль, и дневной лимит стал бы +Inf.
+func DaysLeft(now, periodEnd time.Time) int {
+	d := int(dayStart(periodEnd).Sub(dayStart(now)).Hours()/24) + 1
+	if d < 1 {
+		d = 1
+	}
+	return d
+}
+
+// formatShareRemaining печатает ТЕКУЩИЕ конверты в том же формате, что и
+// раскладка прихода (simpleAI-faeq.11), но с остатками (simpleAI-faeq.12).
+//
+// Форматтер только печатает готовые числа — не считает: иначе у остатка стало
+// бы два источника, один из которых вёрстка. Единственное исключение —
+// дневной лимит: он производная от уже посчитанных остатков и числа дней, и
+// считается штатными DailyLimit/FlexibleRemainingTHB, а не арифметикой здесь.
+//
+// Что принципиально, помимо вёрстки:
+//
+//  1. Колонки две — потрачено и осталось. Один остаток отвечает «сколько ещё
+//     можно», но не отвечает «с чего он упал»; оператор не должен вычитать
+//     лимит из остатка в уме.
+//  2. Пробитый конверт печатается МИНУСОМ, а не эмодзи: внутри pre эмодзи
+//     шириной ≈2 знака и рендерится по-разному на iOS/Android/Desktop —
+//     колонка едет. Названия пробитых собираются в строку под блоком.
+//  3. Дневной лимит делится на ОСТАВШИЕСЯ дни (DaysLeft), а не на длину
+//     периода. Это и есть смысл показа: потратил сегодня 2 000 — завтра планка
+//     ниже, и оператор видит это числом, а не узнаёт в конце периода.
+func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelope, now time.Time) string {
+	daysLeft := DaysLeft(now, env.PeriodEnd)
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "🧧 Конверты (%s — %s)\n\n",
-		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"))
+	// Шапка обычным текстом: период, сколько его осталось, курс. Курс
+	// показывается всегда, любой валютой показа — по нему оператор сверяет
+	// числа с тем, что видит в банке.
+	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n",
+		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"), daysLeft, pluralDays(daysLeft))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(m.RubPerTHB), now.Format("02.01"))
 
-	var overspent []string
-	var totalLimit, totalRemaining float64
-	for _, it := range items {
-		totalLimit += it.LimitTHB
-		totalRemaining += it.Remaining
-		icon := "🟢"
-		if it.Overspent() {
-			icon = "🔴"
-			overspent = append(overspent, normalizeLabel(it.Name))
-		} else if it.LimitTHB > 0 && it.Remaining < it.LimitTHB*lowShareFraction {
-			icon = "🟡"
-		}
-		if it.Kind == budget.ShareKindSave {
-			icon = "🏦"
-		}
-		fmt.Fprintf(&b, "%s %-16s осталось %s из %s",
-			icon, normalizeLabel(it.Name), m.Fmt(it.Remaining), m.Fmt(it.LimitTHB))
-		if it.CarriedIn != 0 {
-			fmt.Fprintf(&b, " (в т.ч. перенос %s)", m.Fmt(it.CarriedIn))
-		}
-		b.WriteString("\n")
+	b.WriteString("\n**Что осталось**\n```\n")
+	fmt.Fprintf(&b, "%s%s%s\n",
+		padRight("", remLabelWidth), padLeft("потрачено", remSpentWidth), padLeft("осталось", remLeftWidth))
+
+	rows := remainingRows(items, m)
+	var spentTotal, leftTotal int
+	for _, r := range rows {
+		// Итог складывается из НАПЕЧАТАННЫХ чисел, а не из исходных float:
+		// иначе колонка из округлённых строк не сошлась бы в свой же итог
+		// (9 193,55 печатается как 9 194).
+		spentTotal += r.spent
+		leftTotal += r.left
+		fmt.Fprintf(&b, "%s%s%s\n", padRight(r.label, remLabelWidth),
+			padLeft(groupDigits(r.spent), remSpentWidth), padLeft(groupDigits(r.left), remLeftWidth))
 	}
+	spentStr, leftStr := groupDigits(spentTotal), groupDigits(leftTotal)
+	fmt.Fprintf(&b, "%s%s%s\n", padRight("", remLabelWidth),
+		padLeft(strings.Repeat("-", utf8.RuneCountInString(spentStr)), remSpentWidth),
+		padLeft(strings.Repeat("-", utf8.RuneCountInString(leftStr)), remLeftWidth))
+	fmt.Fprintf(&b, "%s%s%s\n```\n", padRight("", remLabelWidth),
+		padLeft(spentStr, remSpentWidth), padLeft(leftStr, remLeftWidth))
 
-	b.WriteString("   ──────────────────────\n")
-	fmt.Fprintf(&b, "   Итого осталось: %s из %s\n", m.Fmt(totalRemaining), m.Fmt(totalLimit))
+	// Главное число — одно и внизу: по нему оператор действует сегодня.
+	fmt.Fprintf(&b, "\n**На день: %s**\n", m.Fmt(DailyLimit(FlexibleRemainingTHB(items), daysLeft)))
+	fmt.Fprintf(&b, "Осталось %d %s. %s", daysLeft, pluralDays(daysLeft), remainingScope(items))
 
-	// Дневной лимит пересчитывается ЗДЕСЬ, от остатка гибких конвертов и
-	// оставшихся дней — то есть после каждой траты (simpleAI-faeq.11 §5).
-	// Приход в формуле не участвует: конверты уже наполнены, и вопрос «сколько
-	// можно сегодня» от факта нового прихода не зависит.
-	daysLeft := envelopeDays(time.Now(), env.PeriodEnd)
-	fmt.Fprintf(&b, "\n👉 На день: %s (%d %s до конца периода)\n",
-		m.Fmt(DailyLimit(FlexibleRemainingTHB(items), daysLeft)), daysLeft, pluralDays(daysLeft))
-
-	if len(overspent) > 0 {
-		fmt.Fprintf(&b, "\n⚠️ Пробито: %s — дальше тратишь из других конвертов.\n", strings.Join(overspent, ", "))
+	if over := overspentNames(items); len(over) > 0 {
+		fmt.Fprintf(&b, "\n\n⚠️ Пробито: %s — дальше тратишь из других конвертов.", strings.Join(over, ", "))
 	}
-	b.WriteString("\nℹ️ Обязательные платежи по подпискам и переводы в конверты не входят — они уже вычтены отдельно.")
 	return b.String()
+}
+
+// remainingRow — строка моноблока показа: имя и два уже целых числа в валюте
+// показа. Округление делается ОДИН раз здесь, потому что складываться в итог
+// обязаны именно напечатанные числа.
+type remainingRow struct {
+	label string
+	spent int
+	left  int
+}
+
+// remainingRows раскладывает конверты по строкам. Порядок тот же, что в
+// раскладке прихода: сначала регулярные платежи, затем гибкие, затем
+// накопления — иначе два ответа об одних и тех же деньгах читались бы как два
+// разных набора конвертов.
+func remainingRows(items []ShareRemaining, m Display) []remainingRow {
+	rows := make([]remainingRow, 0, len(items))
+	for _, kind := range []string{budget.ShareKindFixed, budget.ShareKindSpend, budget.ShareKindSave} {
+		for _, it := range items {
+			if it.Kind != kind {
+				continue
+			}
+			rows = append(rows, remainingRow{
+				label: shareLabelWidth(it.Name, remLabelWidth),
+				spent: roundInt(m.Amount(it.SpentTHB)),
+				left:  roundInt(m.Amount(it.Remaining)),
+			})
+		}
+	}
+	return rows
+}
+
+// overspentNames — имена пробитых конвертов, в порядке показа.
+func overspentNames(items []ShareRemaining) []string {
+	out := make([]string, 0, len(items))
+	for _, kind := range []string{budget.ShareKindFixed, budget.ShareKindSpend, budget.ShareKindSave} {
+		for _, it := range items {
+			if it.Kind == kind && it.Overspent() {
+				out = append(out, normalizeLabel(it.Name))
+			}
+		}
+	}
+	return out
+}
+
+// remainingScope — предложение под дневным лимитом: что входит в планку, а что
+// уже отложено. Без него число «338 ฿» читается как «всё, что у меня есть».
+func remainingScope(items []ShareRemaining) string {
+	var flexible, fixed []string
+	for _, it := range items {
+		switch it.Kind {
+		case budget.ShareKindSpend:
+			flexible = append(flexible, shareLabel(it.Name))
+		case budget.ShareKindFixed:
+			fixed = append(fixed, shareLabel(it.Name))
+		}
+	}
+	return scopeSentence(flexible, fixed)
 }
