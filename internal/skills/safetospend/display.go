@@ -66,7 +66,15 @@ func (d Display) Sign() string {
 // Разряды группируются пробелом, копеек нет: негруппированные цифры человек
 // считает справа налево, а десятые в сводке — шум (ресёрч вёрстки, п. П2.5).
 func (d Display) Fmt(thb float64) string {
-	return fmt.Sprintf("%s %s", groupDigits(roundInt(d.Amount(thb))), d.Sign())
+	return d.Signed(roundInt(d.Amount(thb)))
+}
+
+// Signed — та же строка «сумма знак», но для числа, УЖЕ переведённого в валюту
+// показа и уже целого. Нужна моноблоку: там суммы округляются один раз заранее,
+// потому что складываться в итог обязаны именно напечатанные числа, и повторный
+// проход через Amount() перевёл бы их второй раз (simpleAI-302i).
+func (d Display) Signed(amount int) string {
+	return fmt.Sprintf("%s %s", groupDigits(amount), d.Sign())
 }
 
 // ParseDisplayCurrency вытаскивает валюту конвертов из фразы оператора:
@@ -91,4 +99,12 @@ func ParseDisplayCurrency(text string) string {
 		}
 	}
 	return ""
+}
+
+// FmtAmount — сумма в СВОЕЙ валюте, без перевода: «15 000 ₽», «18 000 ฿».
+// Нужна там, где число уже названо оператором в конкретной валюте и переводить
+// его нельзя — подтверждение лимита, эхо введённой суммы. Отдельно от Display
+// намеренно: Display держит валюту ПОКАЗА и курс, а здесь курса нет вовсе.
+func FmtAmount(amount float64, currency string) string {
+	return fmt.Sprintf("%s %s", groupDigits(roundInt(amount)), currencySign(currency))
 }
