@@ -2,6 +2,7 @@ package safetospend
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -107,4 +108,15 @@ func ParseDisplayCurrency(text string) string {
 // намеренно: Display держит валюту ПОКАЗА и курс, а здесь курса нет вовсе.
 func FmtAmount(amount float64, currency string) string {
 	return fmt.Sprintf("%s %s", groupDigits(roundInt(amount)), currencySign(currency))
+}
+
+// FmtRate — курс с запятой: русский текст, «2.7» в нём читается как сбой.
+// Десятых две, а не одна: оператор задаёт курс словами и «2,53» обязано
+// вернуться ему как «2,53», а не округлиться до «2,5» (simpleAI-su6l).
+func FmtRate(v float64) string {
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	if dot := strings.IndexByte(s, '.'); dot >= 0 && len(s)-dot > 3 {
+		s = strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	return strings.Replace(s, ".", ",", 1)
 }

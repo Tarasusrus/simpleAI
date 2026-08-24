@@ -51,15 +51,15 @@ const referenceRemainingText = "24.08 — 06.09 · осталось 13 дней\
 	"\n" +
 	"**Что осталось**\n" +
 	"```\n" +
-	"              потрачено осталось\n" +
-	"Аренда                0   18 000\n" +
-	"Кредит                0    9 194\n" +
-	"Еда               2 000    3 400\n" +
-	"Транспорт         1 900     -200\n" +
-	"Прочее                0    1 200\n" +
-	"Накопления            0      858\n" +
-	"                  -----   ------\n" +
-	"                  3 900   32 452\n" +
+	"               потрачено  осталось\n" +
+	"Аренда               0 ฿  18 000 ฿\n" +
+	"Кредит               0 ฿   9 194 ฿\n" +
+	"Еда              2 000 ฿   3 400 ฿\n" +
+	"Транспорт        1 900 ฿    -200 ฿\n" +
+	"Прочее               0 ฿   1 200 ฿\n" +
+	"Накопления           0 ฿     858 ฿\n" +
+	"                 -------  --------\n" +
+	"                 3 900 ฿  32 452 ฿\n" +
 	"```\n" +
 	"\n" +
 	"**На день: 338 ฿**\n" +
@@ -169,10 +169,15 @@ func parseTwoAmounts(line string) (int, int, bool) {
 	return spent, left, true
 }
 
-// parseGrouped читает число одной колонки: пробелы-разряды выкидываются,
-// нецифровое содержимое (шапка «потрачено», линейка «-----») отвергается.
+// parseGrouped читает число одной колонки: пробелы-разряды и знак валюты
+// выкидываются, нецифровое содержимое (шапка «потрачено», линейка «-----»)
+// отвергается. Знак валюты стоит у каждой суммы (simpleAI-302i) и к разбору
+// колонки отношения не имеет — здесь проверяется сходимость, а не вёрстка.
 func parseGrouped(cell string) (int, bool) {
-	digits := strings.ReplaceAll(strings.TrimSpace(cell), " ", "")
+	digits := strings.TrimSpace(cell)
+	digits = strings.TrimSuffix(digits, "฿")
+	digits = strings.TrimSuffix(digits, "₽")
+	digits = strings.ReplaceAll(strings.TrimSpace(digits), " ", "")
 	neg := strings.HasPrefix(digits, "-")
 	digits = strings.TrimPrefix(digits, "-")
 	if digits == "" {
@@ -252,7 +257,7 @@ func TestDaysLeft_AfterPeriodEndNeverZero(t *testing.T) {
 // Пробитый конверт видно: минусом в колонке остатка и отдельной строкой снизу.
 func TestFormatShareRemaining_OverspentIsVisible(t *testing.T) {
 	got := formatShareRemaining(remainingReference(), NewDisplay("THB", 3.1), remainingEnv(), referenceNow)
-	if !strings.Contains(got, "Транспорт         1 900     -200") {
+	if !strings.Contains(got, "Транспорт        1 900 ฿    -200 ฿") {
 		t.Errorf("пробитый конверт не показан минусом в колонке остатка:\n%s", got)
 	}
 	if !strings.Contains(got, "⚠️ Пробито: Транспорт") {
@@ -271,7 +276,7 @@ func TestFormatShareRemaining_OverspentIsVisible(t *testing.T) {
 // арифметика: в рублях все числа умножены на курс, знак — ₽.
 func TestFormatShareRemaining_DisplayRUB(t *testing.T) {
 	got := formatShareRemaining(remainingReference(), NewDisplay("RUB", 2), remainingEnv(), referenceNow)
-	if !strings.Contains(got, "Еда               4 000    6 800") {
+	if !strings.Contains(got, "Еда              4 000 ₽   6 800 ₽") {
 		t.Errorf("суммы не переведены в рубли по курсу 2:\n%s", got)
 	}
 	if !strings.Contains(got, "**На день: 677 ₽**") {

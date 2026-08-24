@@ -487,15 +487,19 @@ func parseAdviceLines(raw string) []string {
 }
 
 // Ширина колонок моноблока ПОКАЗА конвертов. Колонок здесь три: имя и два
-// числа — потрачено и осталось. Сумма 14+9+9 = 32, тот же порог 36, что и у
-// раскладки: pre в Telegram не переносит строки по словам.
+// числа — потрачено и осталось. Сумма 14+10+10 = 34, в пределах порога 36:
+// pre в Telegram не переносит строки по словам, и лишний знак уводит колонку
+// в горизонтальный скролл на узком экране.
 //
 // Имя ужато с 18 до 14 знаков именно ради второго числа: без «потрачено»
 // оператор видит остаток, но не видит, с чего тот упал.
+//
+// По 10 на число, а не по 9: знак валюты стоит у КАЖДОЙ суммы (simpleAI-302i).
+// Самая длинная реальная строка — «27 798 ฿», восемь знаков.
 const (
 	remLabelWidth  = 14
-	remSpentWidth  = 9
-	remLeftWidth   = 9
+	remSpentWidth  = 10
+	remLeftWidth   = 10
 	remTotalsWidth = remLabelWidth + remSpentWidth + remLeftWidth
 )
 
@@ -557,9 +561,9 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 		spentTotal += r.spent
 		leftTotal += r.left
 		fmt.Fprintf(&b, "%s%s%s\n", padRight(r.label, remLabelWidth),
-			padLeft(groupDigits(r.spent), remSpentWidth), padLeft(groupDigits(r.left), remLeftWidth))
+			padLeft(m.Signed(r.spent), remSpentWidth), padLeft(m.Signed(r.left), remLeftWidth))
 	}
-	spentStr, leftStr := groupDigits(spentTotal), groupDigits(leftTotal)
+	spentStr, leftStr := m.Signed(spentTotal), m.Signed(leftTotal)
 	fmt.Fprintf(&b, "%s%s%s\n", padRight("", remLabelWidth),
 		padLeft(strings.Repeat("-", utf8.RuneCountInString(spentStr)), remSpentWidth),
 		padLeft(strings.Repeat("-", utf8.RuneCountInString(leftStr)), remLeftWidth))

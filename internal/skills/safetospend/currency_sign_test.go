@@ -80,6 +80,17 @@ func TestFormat_EveryAmountCarriesCurrencySign(t *testing.T) {
 			}),
 		},
 		{
+			// Дырка, найденная живым прогоном 24.08: показ конвертов печатал ДВЕ
+			// колонки чисел, и обе без знака — этот форматтер в проверку не входил.
+			name: "сколько в конвертах",
+			out: formatShareRemaining([]ShareRemaining{
+				{Name: "Кредит потребительский Сбербанк", Kind: budget.ShareKindFixed, Allocated: 11242.05, Remaining: 11242.05},
+				{Name: "Еда", Kind: budget.ShareKindSpend, Allocated: 5025.73, SpentTHB: 553, Remaining: 4472.73},
+				{Name: "Транспорт", Kind: budget.ShareKindSpend, Allocated: 919.83, SpentTHB: 1100, Remaining: -180.17},
+				{Name: "накопления", Kind: budget.ShareKindSave, Allocated: 27797.54, Remaining: 27797.54},
+			}, NewDisplay("THB", 2.5351), &budget.Envelope{PeriodStart: from, PeriodEnd: to}, from),
+		},
+		{
 			name: "остаток по конверту",
 			out: formatRemaining(RemainingResult{
 				IncomeTHB: 50490.91, RecurringTHB: 12425.42, DebtTHB: 3000,
