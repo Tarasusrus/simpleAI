@@ -38,7 +38,9 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		if _, err := w.Write([]byte(`{"ok":true}`)); err != nil {
+			t.Errorf("тестовый сервер не смог ответить: %v", err)
+		}
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -80,7 +82,10 @@ func TestSendToChatID_UsesHTML(t *testing.T) {
 	if calls[0]["parse_mode"] != "HTML" {
 		t.Errorf("пуш ушёл без parse_mode=HTML: %#v", calls[0])
 	}
-	text, _ := calls[0]["text"].(string)
+	text, ok := calls[0]["text"].(string)
+	if !ok {
+		t.Fatalf("в запросе нет текстового поля text: %#v", calls[0])
+	}
 	if !strings.Contains(text, "<pre>Аренда         15.09  12 000\nЕда                    8 000</pre>") {
 		t.Errorf("моноблок пуша не стал pre:\n%s", text)
 	}
@@ -101,7 +106,10 @@ func TestSendToChatID_EscapesEvilStrings(t *testing.T) {
 	if err := tg.SendToChatID(context.Background(), 7, "Кафе <Мама & Папа> — 15.09"); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	text, _ := f.sent()[0]["text"].(string)
+	text, ok := f.sent()[0]["text"].(string)
+	if !ok {
+		t.Fatalf("в запросе нет текстового поля text: %#v", f.sent()[0])
+	}
 	if !strings.Contains(text, "&lt;Мама &amp; Папа&gt;") {
 		t.Fatalf("не экранировано: %q", text)
 	}
@@ -121,7 +129,10 @@ func TestSendToChatID_SplitsLongPush(t *testing.T) {
 		t.Fatalf("длинный пуш ушёл %d куском(ами)", len(calls))
 	}
 	for i, c := range calls {
-		text, _ := c["text"].(string)
+		text, ok := c["text"].(string)
+		if !ok {
+			t.Fatalf("в куске %d нет текстового поля text: %#v", i, c)
+		}
 		if n := len([]rune(text)); n > 4096 {
 			t.Errorf("кусок %d длиной %d — Telegram вернёт 400", i, n)
 		}
@@ -143,7 +154,10 @@ func TestSendToChatID_FallsBackToPlainOn400(t *testing.T) {
 	if _, has := last["parse_mode"]; has {
 		t.Errorf("фоллбэк ушёл с parse_mode: %#v", last)
 	}
-	text, _ := last["text"].(string)
+	text, ok := last["text"].(string)
+	if !ok {
+		t.Fatalf("в запросе нет текстового поля text: %#v", last)
+	}
 	if !strings.Contains(text, "Аренда") {
 		t.Errorf("фоллбэк потерял содержимое: %q", text)
 	}

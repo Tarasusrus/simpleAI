@@ -88,8 +88,9 @@ func TestNumbersIndependentOfLLM(t *testing.T) {
 	}
 
 	// И проверим само число: приход 127000 − recurring 20000 = 107000.
-	if !regexpContains(out1, `Остаётся до повседневных трат: 107000 ₽`) {
-		t.Errorf("ожидалось 'Остаётся до повседневных трат: 107000 ₽', got:\n%s", out1)
+	// Разряды группируются пробелом — суммы печатаются через Display (simpleAI-302i).
+	if !regexpContains(out1, `Остаётся до повседневных трат: 107 000 ₽`) {
+		t.Errorf("ожидалось 'Остаётся до повседневных трат: 107 000 ₽', got:\n%s", out1)
 	}
 }
 
@@ -157,7 +158,7 @@ func TestRunShares_UsesRecurringFreeSource(t *testing.T) {
 	}
 	// 10000 − 1000 = 9000 ฿ (валюту не просили — печатаем батами). Снапшотный
 	// факт (100 THB по «Еда») в остаток попасть не должен.
-	if !regexpContains(out, `Еда\s+1 000\s+9 000`) {
+	if !regexpContains(out, `Еда\s+1 000 ฿\s+9 000 ฿`) {
 		t.Errorf("ожидался остаток «Еда» 9000 ฿ при потраченных 1000 ฿, got:\n%s", out)
 	}
 }
@@ -193,7 +194,7 @@ func TestRunShares_DisplayRUB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !regexpContains(out, `Еда\s+2 600\s+23 400`) {
+			if !regexpContains(out, `Еда\s+2 600 ₽\s+23 400 ₽`) {
 				t.Errorf("ожидался остаток «Еда» 23400 ₽ при потраченных 2600 ₽, got:\n%s", out)
 			}
 			if strings.Contains(amountsOnly(out), "฿") {
@@ -211,7 +212,7 @@ func TestRunShares_DisplayTHBByWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexpContains(out, `Еда\s+1 000\s+9 000`) {
+	if !regexpContains(out, `Еда\s+1 000 ฿\s+9 000 ฿`) {
 		t.Errorf("ожидался остаток «Еда» 9000 ฿ при потраченных 1000 ฿, got:\n%s", out)
 	}
 }

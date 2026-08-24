@@ -26,38 +26,42 @@ type replyData struct {
 // затем прозрачная раскладка. Ложного зелёного на «свободно» нет.
 func formatReply(d replyData) string {
 	r := d.res
-	rub := func(thb float64) float64 { return thb * d.rubPerTHB }
+	// Единая точка печати денег и здесь: раньше каждая строка собирала «число +
+	// ₽» руками, и знак рубля стоял рядом с суммой, местами уже переведённой в
+	// баты. Display держит валюту и курс вместе, разъехаться им нечем
+	// (simpleAI-302i).
+	m := NewDisplay("RUB", d.rubPerTHB)
 	var b strings.Builder
 
 	// 1) ВЕРДИКТ по финальному запасу (free − повседневные).
-	verdict := rub(r.RealisticFree)
+	verdict := r.RealisticFree
 	if verdict >= 0 {
-		fmt.Fprintf(&b, "✅ Можно отложить ~%.0f ₽ за %s.\n", verdict, d.period)
+		fmt.Fprintf(&b, "✅ Можно отложить ~%s за %s.\n", m.Fmt(verdict), d.period)
 	} else {
-		fmt.Fprintf(&b, "❌ Отложить нельзя — не хватает ~%.0f ₽ за %s.\n", -verdict, d.period)
+		fmt.Fprintf(&b, "❌ Отложить нельзя — не хватает ~%s за %s.\n", m.Fmt(-verdict), d.period)
 	}
-	fmt.Fprintf(&b, "🗓 %s · курс %.1f ₽/฿\n\n", d.period, d.rubPerTHB)
+	fmt.Fprintf(&b, "🗓 %s · курс %s ₽/฿\n\n", d.period, FmtRate(d.rubPerTHB))
 
 	// 2) Раскладка.
-	fmt.Fprintf(&b, "💰 Приход: %.0f ₽\n", rub(r.IncomeTHB))
-	fmt.Fprintf(&b, "➖ Обязательные платежи: %.0f ₽\n", rub(r.RecurringTHB+r.DebtTHB))
+	fmt.Fprintf(&b, "💰 Приход: %s\n", m.Fmt(r.IncomeTHB))
+	fmt.Fprintf(&b, "➖ Обязательные платежи: %s\n", m.Fmt(r.RecurringTHB+r.DebtTHB))
 	if r.PlannedTHB > 0 {
-		fmt.Fprintf(&b, "➖ Запланированные покупки: %.0f ₽\n", rub(r.PlannedTHB))
-		b.WriteString(formatItems(d.planned, d.rubPerTHB, len(d.planned)))
+		fmt.Fprintf(&b, "➖ Запланированные покупки: %s\n", m.Fmt(r.PlannedTHB))
+		b.WriteString(formatItems(d.planned, m, len(d.planned)))
 	}
-	fmt.Fprintf(&b, "= Остаётся до повседневных трат: %.0f ₽\n", rub(r.FreeAfterObligations))
+	fmt.Fprintf(&b, "= Остаётся до повседневных трат: %s\n", m.Fmt(r.FreeAfterObligations))
 
 	// 3) Повседневные (статистика) — «на что уйдёт».
 	if r.ForecastSpendTHB > 0 {
-		fmt.Fprintf(&b, "\n➖ Повседневные траты (по статистике, %s): %.0f ₽\n", d.period, rub(r.ForecastSpendTHB))
-		b.WriteString(formatItems(d.variable, d.rubPerTHB, categoriesTopN))
+		fmt.Fprintf(&b, "\n➖ Повседневные траты (по статистике, %s): %s\n", d.period, m.Fmt(r.ForecastSpendTHB))
+		b.WriteString(formatItems(d.variable, m, categoriesTopN))
 	}
 
 	// 4) Итог + связка с советами.
 	if verdict >= 0 {
-		fmt.Fprintf(&b, "\n⚖️ Итог: запас %.0f ₽ — можно отложить.\n", verdict)
+		fmt.Fprintf(&b, "\n⚖️ Итог: запас %s — можно отложить.\n", m.Fmt(verdict))
 	} else {
-		fmt.Fprintf(&b, "\n⚖️ Итог: нехватка %.0f ₽. Чтобы выйти в ноль — срезать столько же:\n", -verdict)
+		fmt.Fprintf(&b, "\n⚖️ Итог: нехватка %s. Чтобы выйти в ноль — срезать столько же:\n", m.Fmt(-verdict))
 	}
 	for _, line := range d.advice {
 		fmt.Fprintf(&b, "• %s\n", line)
@@ -89,9 +93,12 @@ type EnvelopeReply struct {
 // сумма по правому краю. Третья полноценная колонка (процент, остаток) на
 // телефоне уже не помещается.
 const (
-	labelWidth  = 18
-	dueWidth    = 6
-	amountWidth = 8
+	labelWidth = 18
+	dueWidth   = 6
+	// amountWidth — колонка суммы ВМЕСТЕ со знаком валюты. Знак стоит у каждой
+	// строки, а не один раз в шапке: оператор читает колонку сверху вниз и без
+	// знака не может сказать, баты это или рубли (simpleAI-302i).
+	amountWidth = 10
 )
 
 // FormatEnvelopePlan печатает раскладку прихода по конвертам в формате,
@@ -134,7 +141,7 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	if carried := TotalCarriedIn(d.Plan.Shares); carried > 0 {
 		fmt.Fprintf(&b, "Перенос с прошлого раза %s\n", m.Fmt(carried))
 	}
-	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(d.RubPerTHB), d.From.Format("02.01"))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(d.RubPerTHB), d.From.Format("02.01"))
 
 	// Один моноблок на всё сообщение: колонка чисел в Telegram держится ТОЛЬКО
 	// внутри pre — системный шрифт пропорциональный, и выравнивания пробелами
@@ -145,9 +152,9 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	for _, r := range rows {
 		lineSum += r.amount
 		fmt.Fprintf(&b, "%s%s%s\n",
-			padRight(r.label, labelWidth), padLeft(r.due, dueWidth), padLeft(groupDigits(r.amount), amountWidth))
+			padRight(r.label, labelWidth), padLeft(r.due, dueWidth), padLeft(m.Signed(r.amount), amountWidth))
 	}
-	totalStr := groupDigits(lineSum)
+	totalStr := m.Signed(lineSum)
 	fmt.Fprintf(&b, "%s\n", padLeft(strings.Repeat("-", utf8.RuneCountInString(totalStr)), labelWidth+dueWidth+amountWidth))
 	fmt.Fprintf(&b, "%s\n```\n", padLeft(totalStr, labelWidth+dueWidth+amountWidth))
 
@@ -156,8 +163,33 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	fmt.Fprintf(&b, "\n**На день: %s**\n", m.Fmt(DailyLimit(FlexibleTHB(d.Plan.Shares), days)))
 	b.WriteString(dailyLimitScope(d.Plan.Shares))
 
+	b.WriteString(upcomingBlock(d.Plan.Upcoming, m))
+
 	for _, w := range d.Plan.Warnings {
 		fmt.Fprintf(&b, "\n\n⚠️ %s", w)
+	}
+	return b.String()
+}
+
+// upcomingBlock печатает платежи, которые придутся уже на следующий период.
+//
+// Деньги на них этим приходом не отложены — окно финансирования равно периоду
+// конверта. Но и промолчать нельзя: аренда, не показанная нигде, будет съедена
+// как свободные деньги, а через две недели встретит пустой карман. Блок
+// намеренно стоит ПОСЛЕ дневного лимита и вне моноблока — это не часть колонки,
+// которая сходится с приходом, а напоминание на будущее.
+func upcomingBlock(upcoming []budget.EnvelopeShare, m Display) string {
+	if len(upcoming) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n**Впереди, из следующего прихода**\n")
+	for _, sh := range upcoming {
+		fmt.Fprintf(&b, "%s — %s", normalizeLabel(sh.Name), m.Fmt(sh.Allocated))
+		if sh.DueDate != nil {
+			fmt.Fprintf(&b, ", %s", sh.DueDate.Format("02.01"))
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -347,11 +379,6 @@ func groupDigits(n int) string {
 	return sign + strings.Join(append([]string{s}, parts...), " ")
 }
 
-// decimalComma — курс с запятой: русский текст, «3.1» в нём читается как сбой.
-func decimalComma(v float64) string {
-	return strings.Replace(fmt.Sprintf("%.1f", v), ".", ",", 1)
-}
-
 func roundInt(v float64) int { return int(math.Round(v)) }
 
 // padRight / padLeft считают ширину В РУНАХ: %-18s в Go меряет БАЙТЫ, и на
@@ -395,8 +422,9 @@ func currencySign(code string) string {
 }
 
 // formatItems печатает разбивку: до topN пунктов + свёртка остатка в «прочее».
-// Категории нормализуются по регистру (единый вид).
-func formatItems(items []CategorySpend, rubPerTHB float64, topN int) string {
+// Категории нормализуются по регистру (единый вид). Суммы — через Display, а не
+// «число + ₽» руками: знак обязан приходить из того же места, что и курс.
+func formatItems(items []CategorySpend, m Display, topN int) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -407,10 +435,10 @@ func formatItems(items []CategorySpend, rubPerTHB float64, topN int) string {
 			other += cs.THB
 			continue
 		}
-		fmt.Fprintf(&b, "   • %-16s %.0f ₽\n", normalizeLabel(cs.Category), cs.THB*rubPerTHB)
+		fmt.Fprintf(&b, "   • %-16s %s\n", normalizeLabel(cs.Category), m.Fmt(cs.THB))
 	}
 	if other > 0 {
-		fmt.Fprintf(&b, "   • %-16s %.0f ₽\n", "Остальные статьи", other*rubPerTHB)
+		fmt.Fprintf(&b, "   • %-16s %s\n", "Остальные статьи", m.Fmt(other))
 	}
 	return b.String()
 }
@@ -454,15 +482,19 @@ func parseAdviceLines(raw string) []string {
 }
 
 // Ширина колонок моноблока ПОКАЗА конвертов. Колонок здесь три: имя и два
-// числа — потрачено и осталось. Сумма 14+9+9 = 32, тот же порог 36, что и у
-// раскладки: pre в Telegram не переносит строки по словам.
+// числа — потрачено и осталось. Сумма 14+10+10 = 34, в пределах порога 36:
+// pre в Telegram не переносит строки по словам, и лишний знак уводит колонку
+// в горизонтальный скролл на узком экране.
 //
 // Имя ужато с 18 до 14 знаков именно ради второго числа: без «потрачено»
 // оператор видит остаток, но не видит, с чего тот упал.
+//
+// По 10 на число, а не по 9: знак валюты стоит у КАЖДОЙ суммы (simpleAI-302i).
+// Самая длинная реальная строка — «27 798 ฿», восемь знаков.
 const (
 	remLabelWidth  = 14
-	remSpentWidth  = 9
-	remLeftWidth   = 9
+	remSpentWidth  = 10
+	remLeftWidth   = 10
 	remTotalsWidth = remLabelWidth + remSpentWidth + remLeftWidth
 )
 
@@ -509,7 +541,7 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 	// числа с тем, что видит в банке.
 	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n",
 		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"), daysLeft, pluralDays(daysLeft))
-	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(m.RubPerTHB), now.Format("02.01"))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(m.RubPerTHB), now.Format("02.01"))
 
 	b.WriteString("\n**Что осталось**\n```\n")
 	fmt.Fprintf(&b, "%s%s%s\n",
@@ -524,9 +556,9 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 		spentTotal += r.spent
 		leftTotal += r.left
 		fmt.Fprintf(&b, "%s%s%s\n", padRight(r.label, remLabelWidth),
-			padLeft(groupDigits(r.spent), remSpentWidth), padLeft(groupDigits(r.left), remLeftWidth))
+			padLeft(m.Signed(r.spent), remSpentWidth), padLeft(m.Signed(r.left), remLeftWidth))
 	}
-	spentStr, leftStr := groupDigits(spentTotal), groupDigits(leftTotal)
+	spentStr, leftStr := m.Signed(spentTotal), m.Signed(leftTotal)
 	fmt.Fprintf(&b, "%s%s%s\n", padRight("", remLabelWidth),
 		padLeft(strings.Repeat("-", utf8.RuneCountInString(spentStr)), remSpentWidth),
 		padLeft(strings.Repeat("-", utf8.RuneCountInString(leftStr)), remLeftWidth))

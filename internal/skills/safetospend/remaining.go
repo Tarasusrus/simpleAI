@@ -60,19 +60,22 @@ func (s *SafeToSpendSkill) runRemaining(ctx context.Context, chatID int64, rates
 }
 
 func formatRemaining(r RemainingResult, rubPerTHB float64, env *budget.Envelope) string {
-	rub := func(thb float64) float64 { return thb * rubPerTHB }
+	// Через Display, а не «число + ₽» руками: знак и курс обязаны приходить из
+	// одного места, иначе рублёвый знак однажды встанет рядом с батами
+	// (simpleAI-302i).
+	m := NewDisplay("RUB", rubPerTHB)
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "🧧 Конверт: приход ~%.0f ₽ (%s — %s)\n\n",
-		rub(r.IncomeTHB), env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"))
-	fmt.Fprintf(&b, "  🔁 Регулярные: ~%.0f ₽\n", rub(r.RecurringTHB))
-	fmt.Fprintf(&b, "  💳 Долги: ~%.0f ₽\n", rub(r.DebtTHB))
+	fmt.Fprintf(&b, "🧧 Конверт: приход ~%s (%s — %s)\n\n",
+		m.Fmt(r.IncomeTHB), env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"))
+	fmt.Fprintf(&b, "  🔁 Регулярные: ~%s\n", m.Fmt(r.RecurringTHB))
+	fmt.Fprintf(&b, "  💳 Долги: ~%s\n", m.Fmt(r.DebtTHB))
 	if r.PlannedTHB > 0 {
-		fmt.Fprintf(&b, "  📝 Плановые: ~%.0f ₽\n", rub(r.PlannedTHB))
+		fmt.Fprintf(&b, "  📝 Плановые: ~%s\n", m.Fmt(r.PlannedTHB))
 	}
-	fmt.Fprintf(&b, "  🛒 Уже потрачено: ~%.0f ₽\n", rub(r.ActualSpentTHB))
+	fmt.Fprintf(&b, "  🛒 Уже потрачено: ~%s\n", m.Fmt(r.ActualSpentTHB))
 	b.WriteString("  ──────────────────────\n")
-	fmt.Fprintf(&b, "  💚 Свободно осталось: ~%.0f ₽\n", rub(r.RemainingTHB))
+	fmt.Fprintf(&b, "  💚 Свободно осталось: ~%s\n", m.Fmt(r.RemainingTHB))
 	return b.String()
 }
 

@@ -60,6 +60,10 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 			"action='set_share_limit' CORRECTS the LIMIT of a category envelope by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
 			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The correction is remembered and applied to every following income until removed. " +
 			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the limit goes back to being computed from spending history; pass name=<категория>. " +
+			"action='set_rate' SETS the ฿→₽ EXCHANGE RATE by hand ('курс 2,7', 'ставь курс 2.65', 'курс бата 2,7') — pass amount=<rate>. " +
+			"It is NOT a transaction and NOT a limit: the number is rubles per one baht, not money spent or planned. " +
+			"action='clear_rate' returns to the automatic rate ('курс авто', 'верни автоматический курс', 'бери курс сам'). " +
+			"action='rate_status' answers 'какой сейчас курс', 'по какому курсу считаешь'. " +
 			"Use budget.summary for plain numerical totals only.",
 		Version: "1.0.0",
 		InputSchema: &plugin.Schema{
@@ -70,7 +74,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope, set_share_limit, clear_share_limit",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope, set_share_limit, clear_share_limit, set_rate, clear_rate, rate_status",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -285,6 +289,12 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.setShareLimit(ctx, req)
 	case "clear_share_limit":
 		return s.clearShareLimit(ctx, req)
+	case "set_rate":
+		return s.setRate(ctx, req)
+	case "clear_rate":
+		return s.clearRate(ctx)
+	case "rate_status":
+		return s.rateStatus(ctx)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}

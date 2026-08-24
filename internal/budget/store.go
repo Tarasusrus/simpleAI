@@ -1609,8 +1609,13 @@ func AggregateForecast(rows []MonthlyCategoryExpense, rates map[string]float64) 
 // --- Курсы валют ---
 
 // GetExchangeRates возвращает все курсы из БД как map[currency]rate_to_rub.
+//
+// Ручной курс перекрывает автоматический (simpleAI-su6l): COALESCE выбирает его
+// прямо в запросе, чтобы «какой курс действует» имело ровно один ответ и
+// вызывающему не приходилось помнить про override.
 func (s *Store) GetExchangeRates(ctx context.Context) (map[string]float64, error) {
-	rows, err := s.pool.Query(ctx, `SELECT currency, rate_to_rub FROM exchange_rate`)
+	rows, err := s.pool.Query(ctx,
+		`SELECT currency, COALESCE(manual_rate_to_rub, rate_to_rub) FROM exchange_rate`)
 	if err != nil {
 		return nil, fmt.Errorf("get exchange rates: %w", err)
 	}
@@ -1628,7 +1633,94 @@ func (s *Store) GetExchangeRates(ctx context.Context) (map[string]float64, error
 	return rates, rows.Err()
 }
 
-// SaveExchangeRate сохраняет или обновляет курс валюты.
+// RateSource — откуда взялся действующий курс валюты.
+type RateSource struct {
+	Currency  string
+	RateToRUB float64   // действующий курс: ручной, если задан, иначе автоматический
+	Auto      float64   // последний курс из API — остаётся жить и под override'ом
+	Manual    bool      // курс задан руками
+	UpdatedAt time.Time // когда действующий курс появился
+}
+
+// GetRateSource отдаёт действующий курс валюты вместе с его происхождением.
+// Нужен подтверждению «курс 2,7»: не показав, ручной курс или автоматический,
+// мы оставляем оператора гадать, подействовала его команда или нет.
+func (s *Store) GetRateSource(ctx context.Context, currency string) (RateSource, bool, error) {
+	var (
+		out    = RateSource{Currency: currency}
+		manual *float64
+		mAt    *time.Time
+		aAt    time.Time
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT rate_to_rub, updated_at, manual_rate_to_rub, manual_set_at
+		FROM exchange_rate WHERE currency = $1
+	`, currency).Scan(&out.Auto, &aAt, &manual, &mAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, fmt.Errorf("get rate source: %w", err)
+	}
+	out.RateToRUB, out.UpdatedAt = out.Auto, aAt
+	if manual != nil {
+		out.RateToRUB, out.Manual = *manual, true
+		if mAt != nil {
+			out.UpdatedAt = *mAt
+		}
+	}
+	return out, true, nil
+}
+
+// SetManualRate задаёт ручной курс валюты. Автоматический не трогается — он
+// продолжает обновляться воркером и ждёт «курс авто».
+func (s *Store) SetManualRate(ctx context.Context, currency string, rateToRUB float64) error {
+	if rateToRUB <= 0 {
+		return fmt.Errorf("set manual rate: курс должен быть больше нуля, получено %v", rateToRUB)
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE exchange_rate
+		SET manual_rate_to_rub = $2, manual_set_at = NOW()
+		WHERE currency = $1
+	`, currency, rateToRUB)
+	if err != nil {
+		return fmt.Errorf("set manual rate: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Валюты нет в таблице — воркер её ещё не приносил. Заводим строку с
+		// ручным курсом в обеих колонках: без rate_to_rub (NOT NULL по схеме)
+		// вставка не пройдёт, а «курс авто» до первого тика воркера честно
+		// вернёт ровно то же число.
+		_, err = s.pool.Exec(ctx, `
+			INSERT INTO exchange_rate (currency, rate_to_rub, updated_at, manual_rate_to_rub, manual_set_at)
+			VALUES ($1, $2, NOW(), $2, NOW())
+			ON CONFLICT (currency) DO UPDATE
+			SET manual_rate_to_rub = EXCLUDED.manual_rate_to_rub, manual_set_at = NOW()
+		`, currency, rateToRUB)
+		if err != nil {
+			return fmt.Errorf("set manual rate (insert): %w", err)
+		}
+	}
+	return nil
+}
+
+// ClearManualRate снимает ручной курс: действовать снова начинает автоматический.
+// Идемпотентна — «курс авто» без заданного override'а не ошибка.
+func (s *Store) ClearManualRate(ctx context.Context, currency string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE exchange_rate
+		SET manual_rate_to_rub = NULL, manual_set_at = NULL
+		WHERE currency = $1
+	`, currency)
+	if err != nil {
+		return fmt.Errorf("clear manual rate: %w", err)
+	}
+	return nil
+}
+
+// SaveExchangeRate сохраняет или обновляет АВТОМАТИЧЕСКИЙ курс валюты.
+// Колонку manual_rate_to_rub не трогает: ручной курс обязан пережить суточный
+// тик воркера, иначе его затрёт в ближайшие 24 часа (simpleAI-su6l).
 func (s *Store) SaveExchangeRate(ctx context.Context, currency string, rateToRUB float64) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO exchange_rate (currency, rate_to_rub, updated_at)

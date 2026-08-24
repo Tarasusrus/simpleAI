@@ -24,10 +24,7 @@ func TestBuildToolsSystemPrompt_ShareLimitRuleSeparatedFromExpense(t *testing.T)
 		{ID: "safe_to_spend", Description: "safe to spend"},
 	})
 
-	rules := prompt[:strings.Index(prompt, "Доступные инструменты")]
-	if rules == "" {
-		t.Fatal("в промпте нет блока правил до списка инструментов")
-	}
+	rules := rulesBlock(t, prompt)
 
 	mustContain := map[string]string{
 		"set_share_limit":   "нет правила про правку лимита конверта",
@@ -49,4 +46,59 @@ func TestBuildToolsSystemPrompt_ShareLimitRuleSeparatedFromExpense(t *testing.T)
 	if expenseIdx == -1 || limitIdx == -1 || limitIdx < expenseIdx {
 		t.Errorf("правило про лимит должно идти после правила про add_expense (expense=%d, limit=%d)", expenseIdx, limitIdx)
 	}
+}
+
+// Правило про курс живёт в том же блоке ROUTING RULES и разграничено с двумя
+// соседями, на которых оно естественно налипает (simpleAI-su6l):
+//   - «покажи конверты в рублях» — это ПОКАЗ (display_currency), курс не трогаем;
+//   - «на еду хватит 15000» — лимит конверта, там названа КАТЕГОРИЯ.
+//
+// Как и тест выше, доказывает только присутствие правила в промпте. Что модель
+// ему следует — гоняют golden-кейсы r053–r056 на боевой модели.
+func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.T) {
+	prompt := buildToolsSystemPrompt([]plugin.Manifest{
+		{ID: "budget", Description: "budget tracker"},
+		{ID: "safe_to_spend", Description: "safe to spend"},
+	})
+	rules := rulesBlock(t, prompt)
+
+	mustContain := map[string]string{
+		"set_rate":           "нет правила про ручной курс",
+		"clear_rate":         "нет правила про возврат автокурса",
+		"rate_status":        "нет правила про «какой сейчас курс»",
+		"курс авто":          "нет фразы-триггера возврата к автокурсу",
+		"РУБЛЕЙ за один БАТ": "не сказано, что число — курс, а не сумма денег",
+	}
+	for marker, why := range mustContain {
+		if !strings.Contains(rules, marker) {
+			t.Errorf("%s: в ROUTING RULES нет %q", why, marker)
+		}
+	}
+
+	// Правило про курс обязано стоять ПОСЛЕ правил про display_currency и про
+	// лимит: разграничение читается как уточнение к ним, а не наоборот.
+	rateAt := strings.Index(rules, "КУРС БАТА")
+	displayAt := strings.Index(rules, "ВАЛЮТА КОНВЕРТОВ")
+	limitAt := strings.Index(rules, "Правка ЛИМИТА конверта")
+	if rateAt < 0 || displayAt < 0 || limitAt < 0 {
+		t.Fatalf("не найдены заголовки правил: курс=%d показ=%d лимит=%d", rateAt, displayAt, limitAt)
+	}
+	if rateAt < displayAt || rateAt < limitAt {
+		t.Errorf("правило про курс стоит раньше правил, от которых его отделяют (курс=%d показ=%d лимит=%d)",
+			rateAt, displayAt, limitAt)
+	}
+}
+
+// rulesBlock вырезает блок ROUTING RULES — всё до списка инструментов.
+//
+// Отдельной функцией, а не срезом по strings.Index на месте: Index возвращает
+// −1, когда маркера нет, и prompt[:-1] уронил бы тест паникой вместо внятного
+// «в промпте нет блока правил».
+func rulesBlock(t *testing.T, prompt string) string {
+	t.Helper()
+	at := strings.Index(prompt, "Доступные инструменты")
+	if at <= 0 {
+		t.Fatal("в промпте нет блока правил до списка инструментов")
+	}
+	return prompt[:at]
 }

@@ -4,6 +4,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"simpleAI/internal/constants"
@@ -145,6 +146,10 @@ func handleEnvelopeSchedule(ctx context.Context, tctx *Context, text string) (bo
 	}
 	chatID, err := tctx.ChatID()
 	if err != nil {
+		// Чат не определился — команда не наша, отдаём её дальше по цепочке.
+		// Ошибка не проглатывается молча: без неё непонятно, почему фраза
+		// про конверты вдруг ушла в общий обработчик.
+		slog.Default().WarnContext(ctx, "envelope command: chat id missing", "err", err)
 		return false, nil
 	}
 

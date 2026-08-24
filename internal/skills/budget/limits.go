@@ -63,8 +63,10 @@ func (s *BudgetSkill) setShareLimit(ctx context.Context, req budgetInput) (strin
 	slog.Default().InfoContext(ctx, "set_share_limit",
 		"chat_id", chatID, "share", name, "amount", req.Amount, "currency", currency)
 
-	head := fmt.Sprintf("📌 Лимит на «%s» — %.0f %s. Запомнил: применю и к следующим приходам, пока не скажешь «убери лимит на %s».",
-		name, req.Amount, currency, name)
+	// Знак валюты, а не её код: оператор назвал сумму в рублях или батах, и
+	// «15000 RUB» посреди русской фразы читается хуже, чем «15 000 ₽».
+	head := fmt.Sprintf("📌 Лимит на «%s» — %s. Запомнил: применю и к следующим приходам, пока не скажешь «убери лимит на %s».",
+		name, safetospend.FmtAmount(req.Amount, currency), name)
 	return head + s.replanTail(ctx, chatID, req), nil
 }
 
@@ -182,6 +184,7 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64, re
 		History:    history,
 		Recurring:  recurring,
 		From:       h.From,
+		To:         h.To,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 	plan.Shares, err = s.keepCarriedIn(ctx, chatID, env.ID, plan.Shares)
