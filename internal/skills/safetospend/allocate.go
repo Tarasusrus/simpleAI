@@ -144,7 +144,13 @@ func fixedShares(rec []budget.RecurringPayment, rates map[string]float64, from, 
 	// период. Полночь следующих суток берётся именно для этого.
 	periodStart := dayStart(from)
 	periodEnd := dayStart(to).AddDate(0, 0, 1)
-	lookaheadEnd := periodEnd.AddDate(0, 0, upcomingLookaheadDays)
+	// «Впереди» заглядывает РОВНО на один следующий период, а не на фиксированные
+	// 31 день. Блок озаглавлен «из следующего прихода», а приход у оператора
+	// дважды в месяц: месячное окно затянуло бы туда платежи периода ПОСЛЕ
+	// следующего и подписало бы их деньгами, которых к тому моменту ещё нет.
+	// Длина окна равна длине самого периода — так оно следует за горизонтом,
+	// а не за календарным месяцем.
+	lookaheadEnd := periodEnd.AddDate(0, 0, int(periodEnd.Sub(periodStart).Hours()/24))
 
 	fixed = make([]budget.EnvelopeShare, 0, len(rec))
 	for _, r := range rec {

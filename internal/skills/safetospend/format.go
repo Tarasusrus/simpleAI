@@ -40,7 +40,7 @@ func formatReply(d replyData) string {
 	} else {
 		fmt.Fprintf(&b, "❌ Отложить нельзя — не хватает ~%s за %s.\n", m.Fmt(-verdict), d.period)
 	}
-	fmt.Fprintf(&b, "🗓 %s · курс %s ₽/฿\n\n", d.period, decimalComma(d.rubPerTHB))
+	fmt.Fprintf(&b, "🗓 %s · курс %s ₽/฿\n\n", d.period, FmtRate(d.rubPerTHB))
 
 	// 2) Раскладка.
 	fmt.Fprintf(&b, "💰 Приход: %s\n", m.Fmt(r.IncomeTHB))
@@ -141,7 +141,7 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	if carried := TotalCarriedIn(d.Plan.Shares); carried > 0 {
 		fmt.Fprintf(&b, "Перенос с прошлого раза %s\n", m.Fmt(carried))
 	}
-	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(d.RubPerTHB), d.From.Format("02.01"))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(d.RubPerTHB), d.From.Format("02.01"))
 
 	// Один моноблок на всё сообщение: колонка чисел в Telegram держится ТОЛЬКО
 	// внутри pre — системный шрифт пропорциональный, и выравнивания пробелами
@@ -379,11 +379,6 @@ func groupDigits(n int) string {
 	return sign + strings.Join(append([]string{s}, parts...), " ")
 }
 
-// decimalComma — курс с запятой: русский текст, «3.1» в нём читается как сбой.
-func decimalComma(v float64) string {
-	return strings.Replace(fmt.Sprintf("%.1f", v), ".", ",", 1)
-}
-
 func roundInt(v float64) int { return int(math.Round(v)) }
 
 // padRight / padLeft считают ширину В РУНАХ: %-18s в Go меряет БАЙТЫ, и на
@@ -546,7 +541,7 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 	// числа с тем, что видит в банке.
 	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n",
 		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"), daysLeft, pluralDays(daysLeft))
-	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(m.RubPerTHB), now.Format("02.01"))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(m.RubPerTHB), now.Format("02.01"))
 
 	b.WriteString("\n**Что осталось**\n```\n")
 	fmt.Fprintf(&b, "%s%s%s\n",

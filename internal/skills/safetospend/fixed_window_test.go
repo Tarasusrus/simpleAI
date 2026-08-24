@@ -153,3 +153,45 @@ func eqTol(a, b, tol float64) bool {
 	d := a - b
 	return d < tol && d > -tol
 }
+
+// «Впереди» показывает ровно СЛЕДУЮЩИЙ период, а не фиксированный месяц.
+//
+// Блок озаглавлен «из следующего прихода», а приход дважды в месяц. Окно в 31
+// день затягивало бы туда платежи периода ПОСЛЕ следующего и подписывало их
+// деньгами, которых к тому моменту ещё нет.
+func TestFixedShares_LookaheadIsOneNextPeriod(t *testing.T) {
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC) // 14 дней
+	rates := map[string]float64{"RUB": 1, "THB": 2.5351}
+
+	rec := []budget.RecurringPayment{
+		{Name: "аренда", Type: "expense", Amount: 18000, Currency: "THB", Enabled: true,
+			NextDate: time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)}, // следующий период
+		{Name: "страховка", Type: "expense", Amount: 5000, Currency: "THB", Enabled: true,
+			NextDate: time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)}, // период ПОСЛЕ следующего
+	}
+
+	_, upcoming, _ := fixedShares(rec, rates, from, to)
+	if len(upcoming) != 1 {
+		t.Fatalf("в «впереди» %d платежей, ожидался 1 (только аренда): %+v", len(upcoming), upcoming)
+	}
+	if upcoming[0].Name != "аренда" {
+		t.Errorf("в «впереди» попал платёж не следующего периода: %+v", upcoming[0])
+	}
+}
+
+// Курс печатается ОДНИМ форматтером во всех строках: пока их было два,
+// «курс X ₽/฿» выходил как 2,54 в одном ответе и 2,5 в другом.
+func TestFmtRate_SingleFormatterForRate(t *testing.T) {
+	cases := map[float64]string{
+		2:      "2,0", // целый курс всё равно с десятой: «2» читается как количество
+		3.1:    "3,1",
+		2.7:    "2,7",
+		2.5351: "2,54", // заданный словами курс не схлопывается до 2,5
+	}
+	for in, want := range cases {
+		if got := FmtRate(in); got != want {
+			t.Errorf("FmtRate(%v) = %q, ожидалось %q", in, got, want)
+		}
+	}
+}
