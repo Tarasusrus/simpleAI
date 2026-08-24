@@ -11,6 +11,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	botformat "simpleAI/internal/bot/format"
 	"simpleAI/internal/core"
 )
 
@@ -96,22 +97,62 @@ func (a *Adapter) Updates(ctx context.Context) (<-chan core.Update, error) {
 }
 
 func (a *Adapter) Send(ctx context.Context, chatID int64, text string) error {
-	if ctx != nil && ctx.Err() != nil {
-		return ctx.Err()
-	}
-	msg := tgbotapi.NewMessage(chatID, text)
-	_, err := a.bot.Send(msg)
-	return err
+	return a.sendMessage(ctx, chatID, 0, text, nil)
 }
 
 func (a *Adapter) Reply(ctx context.Context, chatID int64, replyTo int, text string) error {
+	return a.sendMessage(ctx, chatID, replyTo, text, nil)
+}
+
+// sendMessage — единственная точка отправки текста. Здесь и только здесь
+// включается parse_mode: разметка обязана быть централизованной, иначе один
+// забытый вызов роняет формат (или, хуже, отправку) уже после ревью.
+//
+// Порядок такой:
+//  1. текст скилла переводится в HTML (экранируется ВСЁ, кроме моноблока и
+//     **жирного** — см. internal/bot/format);
+//  2. режется на куски в пределах лимита Telegram;
+//  3. если Telegram всё же ответил ошибкой на размеченный вариант — тот же
+//     текст уходит простым. Молчание бота хуже, чем звёздочки в чате.
+//
+// Клавиатура вешается на последний кусок: выше неё должен лежать весь текст,
+// к которому она относится.
+func (a *Adapter) sendMessage(ctx context.Context, chatID int64, replyTo int, text string, rows [][]core.Button) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyToMessageID = replyTo
-	_, err := a.bot.Send(msg)
+	chunks := botformat.MessagesHTML(text)
+	if len(chunks) == 0 {
+		return nil
+	}
+	sent, err := a.deliver(chatID, replyTo, chunks, tgbotapi.ModeHTML, rows)
+	if err == nil {
+		return nil
+	}
+	// Фоллбэк — только если не ушло НИЧЕГО. Иначе повтор простым текстом
+	// продублировал бы в чате уже доставленные куски.
+	if sent > 0 {
+		return err
+	}
+	_, err = a.deliver(chatID, replyTo, botformat.MessagesPlain(text), "", rows)
 	return err
+}
+
+func (a *Adapter) deliver(chatID int64, replyTo int, chunks []string, parseMode string, rows [][]core.Button) (int, error) {
+	for i, chunk := range chunks {
+		msg := tgbotapi.NewMessage(chatID, chunk)
+		msg.ParseMode = parseMode
+		if replyTo != 0 && i == 0 {
+			msg.ReplyToMessageID = replyTo
+		}
+		if len(rows) > 0 && i == len(chunks)-1 {
+			msg.ReplyMarkup = toInlineKeyboard(rows)
+		}
+		if _, err := a.bot.Send(msg); err != nil {
+			return i, err
+		}
+	}
+	return len(chunks), nil
 }
 
 func (a *Adapter) SendTyping(ctx context.Context, chatID int64) error {
@@ -126,21 +167,50 @@ func (a *Adapter) SendWithButtons(ctx context.Context, chatID int64, text string
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = toInlineKeyboard(rows)
-	_, err := a.bot.Send(msg)
-	return err
+	return a.sendMessage(ctx, chatID, 0, text, rows)
 }
 
 func (a *Adapter) EditWithButtons(ctx context.Context, chatID int64, messageID int, text string, rows [][]core.Button) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	// Правку резать некуда — сообщение одно. Слишком длинный текст всё же
+	// усекается по лимиту: 400 «message is too long» стёр бы правку целиком.
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, firstChunk(botformat.MessagesHTML(text)))
+	edit.ParseMode = tgbotapi.ModeHTML
+	edit.ReplyMarkup = editKeyboard(rows)
+	if _, err := a.bot.Send(edit); err != nil {
+		// Тот же фоллбэк, что и у отправки: разметка не должна стирать содержимое.
+		plain := tgbotapi.NewEditMessageText(chatID, messageID, firstChunk(botformat.MessagesPlain(text)))
+		plain.ReplyMarkup = editKeyboard(rows)
+		_, err := a.bot.Send(plain)
+		return err
+	}
+	return nil
+}
+
+// editKeyboard решает, что приложить к правке сообщения:
+//   - rows == nil — клавиатуру не трогаем (у сообщения её и не было);
+//   - rows пуст, но не nil — ПУСТАЯ клавиатура, то есть «снять кнопки»;
+//     ровно так вызывающий код гасит инлайн-кнопки после обработки callback-а,
+//     и молчаливый пропуск reply_markup оставил бы их живыми;
+//   - иначе — обычная клавиатура.
+func editKeyboard(rows [][]core.Button) *tgbotapi.InlineKeyboardMarkup {
+	if rows == nil {
+		return nil
+	}
 	kb := toInlineKeyboard(rows)
-	edit.ReplyMarkup = &kb
-	_, err := a.bot.Send(edit)
-	return err
+	if kb.InlineKeyboard == nil {
+		kb.InlineKeyboard = [][]tgbotapi.InlineKeyboardButton{}
+	}
+	return &kb
+}
+
+func firstChunk(chunks []string) string {
+	if len(chunks) == 0 {
+		return ""
+	}
+	return chunks[0]
 }
 
 func (a *Adapter) AnswerCallback(ctx context.Context, callbackID string) error {

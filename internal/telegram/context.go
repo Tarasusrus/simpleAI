@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"simpleAI/internal/core"
+	"simpleAI/internal/notify"
 	"simpleAI/internal/plugin"
 )
 
@@ -34,6 +35,9 @@ type Context struct {
 	RequestID string
 	MediaDir  string
 	Registry  *plugin.Registry
+	// EnvelopeReminders — хранилище расписания утренних конвертов. nil = команда
+	// «присылай конверты по утрам» не обрабатывается (уходит агенту как текст).
+	EnvelopeReminders notify.EnvelopeReminderStore
 }
 
 func (c *Context) ChatID() (int64, error) {

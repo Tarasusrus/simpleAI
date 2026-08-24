@@ -245,6 +245,12 @@ type Reminder struct {
 	NotifyHour   int // 0–23
 	NotifyMinute int // 0–59
 	Timezone     string
+	// Утренний пуш с конвертами — отдельное расписание в той же строке:
+	// оператор может хотеть конверты по утрам, но не хотеть вечернего
+	// напоминания (и наоборот). Пояс общий — он у человека один.
+	EnvelopeEnabled bool
+	EnvelopeHour    int // 0–23
+	EnvelopeMinute  int // 0–59
 }
 
 // CategoryForecast — прогноз трат по одной категории в одной валюте на следующий период.
@@ -300,6 +306,63 @@ type Envelope struct {
 	PeriodStart    time.Time
 	PeriodEnd      time.Time
 	CreatedAt      time.Time
+}
+
+// Виды долей конверта (ADR-008).
+const (
+	ShareKindSpend = "spend" // тратится в этом периоде
+	ShareKindSave  = "save"  // копится, остаток переносится в следующий приход
+	// ShareKindFixed — конверт под конкретный регулярный платёж: сумма и дата
+	// известны заранее, тратить из него нельзя, в дневной лимит он не входит.
+	// Категорий у такой доли нет: её факт — сам recurring-платёж, а транзакции
+	// с recurring_id в факт долей не попадают (ADR-008 §5).
+	ShareKindFixed = "fixed"
+)
+
+// Источник суммы доли (ADR-008).
+const (
+	ShareSourceAuto     = "auto"     // посчитано из истории трат
+	ShareSourceOverride = "override" // поправлено оператором вручную
+)
+
+// FallbackShareName — имя доли, в которую попадают траты без категории
+// (category_id IS NULL) и категории, не привязанные ни к одной доле.
+const FallbackShareName = "прочее"
+
+// EnvelopeShare — одна доля раскладки прихода (ADR-008). Суммы в THB.
+type EnvelopeShare struct {
+	ID         uuid.UUID
+	EnvelopeID uuid.UUID
+	Name       string
+	Kind       string  // ShareKindSpend | ShareKindSave | ShareKindFixed
+	Allocated  float64 // THB
+	CarriedIn  float64 // THB, перенос с прошлого прихода
+	Source     string  // ShareSourceAuto | ShareSourceOverride
+	Position   int
+	// DueDate — дата платежа у доли kind='fixed'; nil у остальных. Может лежать
+	// ЗА границей периода конверта: аренда платится 10.09, период кончается
+	// 06.09, а отложить деньги надо сейчас.
+	DueDate    *time.Time
+	Categories []EnvelopeShareCategory
+}
+
+// EnvelopeShareCategory — категория, отнесённая к доле. Хранится двойным
+// ключом: CategoryID (может быть nil) и нормализованное имя в нижнем регистре,
+// потому что фактический пайплайн трат name-keyed, а часть транзакций вообще
+// без category_id.
+type EnvelopeShareCategory struct {
+	CategoryID   *uuid.UUID
+	CategoryName string // всегда в нижнем регистре
+}
+
+// EnvelopeOverride — ручной лимит доли, заданный оператором. Живёт между
+// приходами и к конкретному конверту не привязан.
+type EnvelopeOverride struct {
+	ChatID    int64
+	ShareName string
+	Amount    float64
+	Currency  string
+	UpdatedAt time.Time
 }
 
 // TopExpense — одна из топ-N самых дорогих расходных транзакций за период,

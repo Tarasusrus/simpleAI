@@ -8,6 +8,7 @@ import (
 
 	"simpleAI/internal/constants"
 	"simpleAI/internal/core"
+	"simpleAI/internal/notify"
 	budgetskill "simpleAI/internal/skills/budget"
 )
 
@@ -92,6 +93,9 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 	if strings.TrimSpace(incoming.Text) == "" {
 		return tctx.Reply("Пустое сообщение. Напиши запрос.")
 	}
+	if handled, err := handleEnvelopeSchedule(ctx, tctx, incoming.Text); handled {
+		return err
+	}
 	if _, err := SaveIngestPayload(ctx, tctx.MediaDir, incoming, nil); err != nil {
 		if tctx.Logger != nil {
 			tctx.Logger.Error("failed to save ingest payload", "err", err)
@@ -123,4 +127,33 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 		return tctx.ReplyWithButtons(ctx, reply, rows)
 	}
 	return tctx.Reply(reply)
+}
+
+// handleEnvelopeSchedule перехватывает «присылай конверты по утрам» / «не
+// присылай конверты» до похода к LLM.
+//
+// Детерминированно и мимо агента: включение рассылки — настройка, а не ответ.
+// Ошибка маршрутизации здесь молчаливая — оператор получил бы вежливый текст и
+// думал, что пуш включён, пока месяц не приходило ни одного.
+func handleEnvelopeSchedule(ctx context.Context, tctx *Context, text string) (bool, error) {
+	if tctx.EnvelopeReminders == nil {
+		return false, nil
+	}
+	cmd, ok := notify.ParseEnvelopeCommand(text)
+	if !ok {
+		return false, nil
+	}
+	chatID, err := tctx.ChatID()
+	if err != nil {
+		return false, nil
+	}
+
+	reply, err := notify.ApplyEnvelopeCommand(ctx, tctx.EnvelopeReminders, chatID, cmd, notify.DefaultEnvelopeTimezone)
+	if err != nil {
+		if tctx.Logger != nil {
+			tctx.Logger.Error("envelope schedule failed", "chat_id", chatID, "err", err)
+		}
+		return true, tctx.Reply("Не удалось сохранить настройку утренних конвертов — попробуй ещё раз.")
+	}
+	return true, tctx.Reply(reply)
 }

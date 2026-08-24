@@ -26,6 +26,7 @@ import (
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 	"simpleAI/internal/db"
+	"simpleAI/internal/envelopepush"
 	"simpleAI/internal/mail"
 	mcpserver "simpleAI/internal/mcp"
 	"simpleAI/internal/notify"
@@ -84,7 +85,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill); err != nil {
+		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill, budget.NewStore(pool)); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -117,6 +118,13 @@ func main() {
 		tg := notify.NewTelegram(cfg.Telegram.Token, "")
 		digest := budgetskill.NewDigestProvider(budgetStore)
 		worker := notify.NewReminderWorker(budgetStore, tg, digest, logger)
+		// Утренние конверты: тело печатает тот же safe_to_spend, что отвечает на
+		// «сколько в конвертах» — формат живёт в скилле, воркер его не дублирует.
+		if skill, ok := registry.Get("safe_to_spend"); ok {
+			worker = worker.WithEnvelopes(envelopepush.New(budgetStore, skill))
+		} else {
+			logger.Warn("safe_to_spend skill not registered: morning envelope push disabled")
+		}
 		logger.Info("reminder worker started")
 		worker.Run(ctx)
 	}()
@@ -147,7 +155,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill) error {
+func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill, envelopeReminders notify.EnvelopeReminderStore) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -226,6 +234,8 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 					RequestID: uuid.NewString(),
 					MediaDir:  cfg.Telegram.MediaDir,
 					Registry:  registry,
+
+					EnvelopeReminders: envelopeReminders,
 				})
 				if err != nil {
 					logger.Error("telegram update error", "err", err)

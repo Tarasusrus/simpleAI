@@ -14,11 +14,23 @@ import (
 type BudgetSkill struct {
 	store   *budget.Store
 	buckets BucketConfig
+	// shareStore — тот же store, но суженный до чтения конверта и долей.
+	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
+	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
+	shareStore shareWarningStore
 }
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
 func NewBudgetSkill(store *budget.Store) *BudgetSkill {
-	return &BudgetSkill{store: store, buckets: defaultBuckets()}
+	s := &BudgetSkill{store: store, buckets: defaultBuckets()}
+	// Присваивать интерфейсное поле безусловно нельзя: nil-указатель, положенный
+	// в интерфейс, даёт typed nil — сравнение `shareStore == nil` становится
+	// false, и guard в shareOverspendWarning пропускает вызов по nil-стору
+	// (паника вместо тихого пропуска). Так вызывают evals/cmd/routing.
+	if store != nil {
+		s.shareStore = store
+	}
+	return s
 }
 
 // WithBuckets заменяет конфигурацию корзин. Возвращает ошибку если config невалиден.
@@ -42,7 +54,12 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
 			"action='add_planned_expense' records a FUTURE planned one-off expense the user wants to set aside ('запланируй трату X на Y', 'будет трата X', 'отложи X на Z', 'плановая трата X') — it is NOT a completed transaction. " +
-			"action='start_envelope' SAVES an arrived income to track its remaining balance over time ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X'). " +
+			"action='start_envelope' SAVES an arrived income and SPLITS it into category envelopes ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X', " +
+			"'пришло X, разложи по конвертам', 'разложи приход X по конвертам', 'раскидай X по конвертам', 'пришло X, разложи'). " +
+			"Any 'разложи / раскидай / распредели ... по конвертам' with an arrived income is start_envelope — it WRITES the envelope and its shares; safe_to_spend only counts and writes nothing. " +
+			"action='set_share_limit' CORRECTS the LIMIT of a category envelope by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
+			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The correction is remembered and applied to every following income until removed. " +
+			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the limit goes back to being computed from spending history; pass name=<категория>. " +
 			"Use budget.summary for plain numerical totals only.",
 		Version: "1.0.0",
 		InputSchema: &plugin.Schema{
@@ -53,7 +70,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope, set_share_limit, clear_share_limit",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -73,7 +90,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"name": map[string]any{
 						"type":        "string",
-						"description": "Name of a savings goal, debt, or recurring payment",
+						"description": "Name of a savings goal, debt, or recurring payment. For set_share_limit / clear_share_limit — the name of the category envelope whose limit is corrected ('еда', 'транспорт', 'развлечения').",
 					},
 					"target_amount": map[string]any{
 						"type":        "number",
@@ -109,7 +126,11 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"currency": map[string]any{
 						"type":        "string",
-						"description": "Transaction currency: RUB (default), USD, EUR, THB, etc. (ISO 4217)",
+						"description": "Currency of the AMOUNT in the message: RUB (default), USD, EUR, THB, etc. (ISO 4217). For set_share_limit pass THB when the user names the limit in baht ('на еду хватит 5000 бат') and RUB when in roubles ('на еду хватит 15000 рублей').",
+					},
+					"display_currency": map[string]any{
+						"type":        "string",
+						"description": "Currency to SHOW envelopes in: THB (default, 'в батах') or RUB ('разложи и покажи в рублях', 'покажи конверты в рублях'). Affects only the printed answer, never the stored amounts. Not the same as currency, which describes the amount in the message.",
 					},
 					"transaction_id": map[string]any{
 						"type":        "string",
@@ -172,34 +193,37 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 
 // budgetInput — входные данные от LLM.
 type budgetInput struct {
-	Action           string  `json:"action"`
-	Amount           float64 `json:"amount,omitempty"`
-	Category         string  `json:"category,omitempty"`
-	Description      string  `json:"description,omitempty"`
-	Period           string  `json:"period,omitempty"`
-	Name             string  `json:"name,omitempty"`
-	TargetAmount     float64 `json:"target_amount,omitempty"`
-	Deadline         string  `json:"deadline,omitempty"`
-	GoalID           string  `json:"goal_id,omitempty"`
-	DebtID           string  `json:"debt_id,omitempty"`
-	Total            float64 `json:"total,omitempty"`
-	Monthly          float64 `json:"monthly,omitempty"`
-	Counterparty     string  `json:"counterparty,omitempty"`
-	Direction        string  `json:"direction,omitempty"`
-	Currency         string  `json:"currency,omitempty"`
-	TransactionID    string  `json:"transaction_id,omitempty"`
-	Keyword          string  `json:"keyword,omitempty"`
-	Date             string  `json:"date,omitempty"`
-	DateFrom         string  `json:"date_from,omitempty"`
-	DateTo           string  `json:"date_to,omitempty"`
-	ReminderEnabled  *bool   `json:"reminder_enabled,omitempty"`
-	ReminderHour     *int    `json:"reminder_hour,omitempty"`
-	ReminderMinute   *int    `json:"reminder_minute,omitempty"`
-	ReminderTimezone string  `json:"reminder_timezone,omitempty"`
-	RecurringID      string  `json:"recurring_id,omitempty"`
-	DayOfMonth       *int    `json:"day_of_month,omitempty"`
-	TransactionType  string  `json:"transaction_type,omitempty"`
-	Months           int     `json:"months,omitempty"`
+	Action       string  `json:"action"`
+	Amount       float64 `json:"amount,omitempty"`
+	Category     string  `json:"category,omitempty"`
+	Description  string  `json:"description,omitempty"`
+	Period       string  `json:"period,omitempty"`
+	Name         string  `json:"name,omitempty"`
+	TargetAmount float64 `json:"target_amount,omitempty"`
+	Deadline     string  `json:"deadline,omitempty"`
+	GoalID       string  `json:"goal_id,omitempty"`
+	DebtID       string  `json:"debt_id,omitempty"`
+	Total        float64 `json:"total,omitempty"`
+	Monthly      float64 `json:"monthly,omitempty"`
+	Counterparty string  `json:"counterparty,omitempty"`
+	Direction    string  `json:"direction,omitempty"`
+	Currency     string  `json:"currency,omitempty"`
+	// DisplayCurrency — валюта ПОКАЗА конвертов (THB по умолчанию). Хранение
+	// долей не трогает: allocated/carried_in всегда в THB (ADR-008 §7).
+	DisplayCurrency  string `json:"display_currency,omitempty"`
+	TransactionID    string `json:"transaction_id,omitempty"`
+	Keyword          string `json:"keyword,omitempty"`
+	Date             string `json:"date,omitempty"`
+	DateFrom         string `json:"date_from,omitempty"`
+	DateTo           string `json:"date_to,omitempty"`
+	ReminderEnabled  *bool  `json:"reminder_enabled,omitempty"`
+	ReminderHour     *int   `json:"reminder_hour,omitempty"`
+	ReminderMinute   *int   `json:"reminder_minute,omitempty"`
+	ReminderTimezone string `json:"reminder_timezone,omitempty"`
+	RecurringID      string `json:"recurring_id,omitempty"`
+	DayOfMonth       *int   `json:"day_of_month,omitempty"`
+	TransactionType  string `json:"transaction_type,omitempty"`
+	Months           int    `json:"months,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.
@@ -257,6 +281,10 @@ func (s *BudgetSkill) Run(ctx context.Context, input string) (string, error) {
 		return s.addPlannedExpense(ctx, req)
 	case "start_envelope":
 		return s.startEnvelope(ctx, req)
+	case "set_share_limit":
+		return s.setShareLimit(ctx, req)
+	case "clear_share_limit":
+		return s.clearShareLimit(ctx, req)
 	default:
 		return "", fmt.Errorf("unknown action: %s", req.Action)
 	}

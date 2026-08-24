@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
@@ -23,6 +25,8 @@ type store interface {
 	PlannedExpensesTHB(ctx context.Context, chatID int64, rates map[string]float64) (float64, int, error)
 	ListPlannedExpenses(ctx context.Context, chatID int64) ([]budget.PlannedExpense, error)
 	GetActiveEnvelope(ctx context.Context, chatID int64) (*budget.Envelope, bool, error)
+	ListShares(ctx context.Context, chatID int64, envelopeID uuid.UUID) ([]budget.EnvelopeShare, error)
+	SpentByCategoryExcludingRecurring(ctx context.Context, from, to time.Time) ([]budget.CategorySpentRow, error)
 }
 
 // SafeToSpendSkill — read-only reasoning skill (ADR-007 фаза H1).
@@ -59,8 +63,12 @@ func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 			"Триггеры EN: 'got X income, how much is free to spend?', 'received X, what's safe to spend?'. " +
 			"РЕЖИМ ОСТАТКА (БЕЗ суммы): показывает, сколько свободно осталось из ранее сохранённого конверта, пересчитывая по фактическим тратам. " +
 			"Триггеры RU: «сколько свободно осталось?», «сколько осталось из прихода?», «остаток по конверту», «сколько ещё могу потратить?», «сколько денег свободно сейчас?». " +
+			"РЕЖИМ КОНВЕРТОВ (БЕЗ суммы): показывает остаток и лимит по КАЖДОМУ категорийному конверту, пробитые видно сразу. Ничего не пишет. " +
+			"Триггеры RU: «сколько в конвертах», «сколько осталось в конвертах», «остаток конвертов», «сколько осталось на еду», «сколько осталось на транспорт». " +
 			"НЕ используй для простой ЗАПИСИ дохода без вопроса о свободных деньгах («пришло X», «запиши доход X», «получил зарплату X» без вопроса) → budget.add_income. " +
 			"НЕ используй для СОХРАНЕНИЯ прихода («запомни приход X», «заведи конверт») → budget.start_envelope. " +
+			"НЕ используй для РАСКЛАДКИ прихода по конвертам («пришло X, разложи по конвертам», «разложи приход X по конвертам», «раскидай X по конвертам») → budget.start_envelope: раскладка ПИШЕТ конверт и его доли, а этот скилл только считает. " +
+			"Триггер «на что распределить X?» здесь — только про устный разбор без сохранения; как только сказано «по конвертам» — это budget.start_envelope. " +
 			"НЕ используй для affordability конкретной покупки («хватит ли на телефон») → advisor.advice. " +
 			"НЕ используй для обзора трат без прихода → advisor.analyze / budget.summary.",
 		InputSchema: &plugin.Schema{
@@ -69,10 +77,11 @@ func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 			JSON: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"amount":   map[string]any{"type": "number", "description": "Сумма пришедшего дохода из сообщения. НЕ указывай в режиме остатка (вопрос без суммы)."},
-					"currency": map[string]any{"type": "string", "description": "Валюта прихода: RUB (по умолчанию), THB, USD, EUR."},
-					"period":   map[string]any{"type": "string", "description": "Горизонт расчёта. По умолчанию (пусто) — ближайшие 2 недели (интервал между приходами). 'month' — до конца текущего месяца; 'YYYY-MM' — конкретный месяц."},
-					"question": map[string]any{"type": "string", "description": "Исходный вопрос пользователя."},
+					"amount":           map[string]any{"type": "number", "description": "Сумма пришедшего дохода из сообщения. НЕ указывай в режиме остатка (вопрос без суммы)."},
+					"currency":         map[string]any{"type": "string", "description": "Валюта прихода: RUB (по умолчанию), THB, USD, EUR."},
+					"period":           map[string]any{"type": "string", "description": "Горизонт расчёта. По умолчанию (пусто) — ближайшие 2 недели (интервал между приходами). 'month' — до конца текущего месяца; 'YYYY-MM' — конкретный месяц."},
+					"question":         map[string]any{"type": "string", "description": "Исходный вопрос пользователя ДОСЛОВНО. Заполняй всегда: по нему различаются режим общего остатка и режим конвертов."},
+					"display_currency": map[string]any{"type": "string", "description": "Валюта, в которой ПОКАЗАТЬ конверты: THB (по умолчанию, «в батах») или RUB («покажи конверты в рублях», «сколько это в рублях»). Не путать с currency — та про сумму прихода из сообщения."},
 				},
 				"required": []string{},
 			},
@@ -85,6 +94,9 @@ type input struct {
 	Currency string  `json:"currency,omitempty"`
 	Period   string  `json:"period,omitempty"`
 	Question string  `json:"question,omitempty"`
+	// DisplayCurrency — валюта ПОКАЗА конвертов (не хранения: доли всегда в THB,
+	// ADR-008 §7). Пусто → разбор фразы, затем дефолт THB.
+	DisplayCurrency string `json:"display_currency,omitempty"`
 }
 
 func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) {
@@ -108,8 +120,12 @@ func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) 
 		return "Не могу посчитать — обнови курс валют командой /rates.", nil
 	}
 
-	// Без суммы: режим «сколько осталось» по активному конверту (ADR-007 T5).
+	// Без суммы: режим остатка. Спрашивают про конверты — раскладка по долям
+	// (ADR-008 §8), иначе общий свободный остаток (ADR-007 T5).
 	if in.Amount <= 0 {
+		if sharesRequested(in.Question) {
+			return s.runShares(ctx, chatID, rates, displayFor(in, rates["THB"]))
+		}
 		return s.runRemaining(ctx, chatID, rates)
 	}
 
@@ -144,6 +160,23 @@ func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) 
 		"chat_id", chatID, "amount", in.Amount, "currency", currency,
 		"free_after_obl_thb", res.FreeAfterObligations, "realistic_free_thb", res.RealisticFree)
 	return reply, nil
+}
+
+// display — валюта показа конвертов. Приоритет: явное поле от LLM → разбор
+// фразы оператора → дефолт THB.
+//
+// Два источника, а не один, потому что у каждого своя дыра: поле модель
+// заполняет не всегда, а фраза может валюты не содержать вовсе. Дефолт при
+// этом один и жёсткий — баты (см. display.go).
+func displayFor(in input, rubPerTHB float64) Display {
+	code := strings.ToUpper(strings.TrimSpace(in.DisplayCurrency))
+	if code == "" {
+		code = ParseDisplayCurrency(in.Question)
+	}
+	if code == "" {
+		code = DefaultDisplayCurrency
+	}
+	return NewDisplay(code, rubPerTHB)
 }
 
 // plannedBreakdown — ручные плановые траты по пунктам (описание→THB) и их итог.
