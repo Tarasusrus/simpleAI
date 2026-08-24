@@ -280,3 +280,53 @@ func shareRemainingForTest(shares []budget.EnvelopeShare, category string) (budg
 }
 
 func itoa(v int) string { return strconv.Itoa(v) }
+
+// TestNewBudgetSkill_NilStore_NoPanic — NewBudgetSkill(nil) (так делает
+// evals/cmd/routing) не должен класть в интерфейсное поле typed nil: иначе
+// guard `st == nil` не срабатывает и первый же вызов стора паникует.
+func TestNewBudgetSkill_NilStore_NoPanic(t *testing.T) {
+	s := NewBudgetSkill(nil)
+	if s.shareStore != nil {
+		t.Fatalf("shareStore при nil-сторе обязан быть nil-интерфейсом, получили %#v", s.shareStore)
+	}
+	got := s.shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}, budgetInput{})
+	if got != "" {
+		t.Fatalf("без стора предупреждения быть не может, получили %q", got)
+	}
+}
+
+// TestShareWarning_NonVariableCategory_NoWarning — трата в НЕ-переменной
+// категории («Переводы», «Кредит», «Аренда») исключена из факта доли
+// (computeShareRemaining, ADR-008 §4), поэтому приписывать ей пробой
+// доли-приёмника «прочее» нельзя: она в этот конверт ничего не вносит.
+func TestShareWarning_NonVariableCategory_NoWarning(t *testing.T) {
+	for _, cat := range []string{"Переводы", "Кредит", "Долг", "Аренда", "Подписки"} {
+		t.Run(cat, func(t *testing.T) {
+			st := &fakeShareStore{
+				env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
+				// «прочее» уже пробита чужой переменной тратой.
+				spent: []budget.CategorySpentRow{{CategoryName: "Развлечения", Currency: "RUB", Amount: 3000}},
+			}
+			got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: cat}, budgetInput{})
+			if got != "" {
+				t.Fatalf("трата в категории %q не входит ни в один конверт, а предупреждение есть: %q", cat, got)
+			}
+		})
+	}
+}
+
+// TestShareWarning_RecurringTransaction_NoWarning — транзакция с recurring_id
+// вычтена как обязательство и не попадает в факт доли (ADR-008 §5),
+// значит и предупреждения о пробое порождать не может.
+func TestShareWarning_RecurringTransaction_NoWarning(t *testing.T) {
+	st := &fakeShareStore{
+		env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
+		spent: []budget.CategorySpentRow{{CategoryName: "Еда", Currency: "RUB", Amount: 12000}},
+	}
+	rec := uuid.New()
+	got := warnSkill(st).shareOverspendWarning(warnCtx(),
+		budget.Transaction{CategoryName: "Еда", RecurringID: &rec}, budgetInput{})
+	if got != "" {
+		t.Fatalf("recurring-трата не входит в факт доли, а предупреждение есть: %q", got)
+	}
+}

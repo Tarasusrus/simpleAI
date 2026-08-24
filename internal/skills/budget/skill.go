@@ -22,7 +22,15 @@ type BudgetSkill struct {
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
 func NewBudgetSkill(store *budget.Store) *BudgetSkill {
-	return &BudgetSkill{store: store, buckets: defaultBuckets(), shareStore: store}
+	s := &BudgetSkill{store: store, buckets: defaultBuckets()}
+	// Присваивать интерфейсное поле безусловно нельзя: nil-указатель, положенный
+	// в интерфейс, даёт typed nil — сравнение `shareStore == nil` становится
+	// false, и guard в shareOverspendWarning пропускает вызов по nil-стору
+	// (паника вместо тихого пропуска). Так вызывают evals/cmd/routing.
+	if store != nil {
+		s.shareStore = store
+	}
+	return s
 }
 
 // WithBuckets заменяет конфигурацию корзин. Возвращает ошибку если config невалиден.

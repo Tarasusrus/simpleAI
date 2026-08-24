@@ -46,6 +46,16 @@ func (s *BudgetSkill) shareOverspendWarning(ctx context.Context, t budget.Transa
 		return ""
 	}
 
+	// Трата, которой по построению нет места ни в одной доле, не может её
+	// пробить. computeShareRemaining берёт в факт только ПЕРЕМЕННЫЕ ежедневные
+	// траты (ADR-008 §4) и только без recurring_id (§5, отсекает
+	// SpentByCategoryExcludingRecurring). Без этой проверки «Переводы» или
+	// платёж по recurring маршрутизировались бы в fallback-долю «прочее» и
+	// печатали чужой пробой, ничего в этот конверт не внося.
+	if t.RecurringID != nil || !budget.IsVariableDailyExpense(t.CategoryName) {
+		return ""
+	}
+
 	env, found, err := st.GetActiveEnvelope(ctx, chatID)
 	if err != nil {
 		slog.Default().WarnContext(ctx, "add_expense: активный конверт не прочитан, предупреждение пропущено",
