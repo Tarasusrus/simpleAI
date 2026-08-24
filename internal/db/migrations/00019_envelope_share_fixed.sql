@@ -14,7 +14,7 @@
 -- Категорий у такой доли нет намеренно: факт по ней — сам recurring-платёж,
 -- а транзакции с recurring_id в факт долей не попадают (ADR-008 §5).
 ALTER TABLE budget_envelope_share
-    DROP CONSTRAINT budget_envelope_share_kind_check;
+    DROP CONSTRAINT IF EXISTS budget_envelope_share_kind_check;
 
 ALTER TABLE budget_envelope_share
     ADD CONSTRAINT budget_envelope_share_kind_check
@@ -24,17 +24,19 @@ ALTER TABLE budget_envelope_share
 -- Может лежать ЗА границей периода конверта: аренда платится 10.09, период
 -- кончается 06.09, а отложить деньги надо сейчас.
 ALTER TABLE budget_envelope_share
-    ADD COLUMN due_date DATE;
+    ADD COLUMN IF NOT EXISTS due_date DATE;
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+-- Доли kind='fixed' в старую схему не влезают — сносим их вместе с категориями
+-- (каскад по share_id) ДО сужения CHECK, иначе ADD CONSTRAINT упадёт.
 DELETE FROM budget_envelope_share WHERE kind = 'fixed';
 
-ALTER TABLE budget_envelope_share DROP COLUMN due_date;
+ALTER TABLE budget_envelope_share DROP COLUMN IF EXISTS due_date;
 
 ALTER TABLE budget_envelope_share
-    DROP CONSTRAINT budget_envelope_share_kind_check;
+    DROP CONSTRAINT IF EXISTS budget_envelope_share_kind_check;
 
 ALTER TABLE budget_envelope_share
     ADD CONSTRAINT budget_envelope_share_kind_check

@@ -3,8 +3,11 @@ package notify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"simpleAI/internal/budget"
 )
@@ -95,7 +98,7 @@ func (f *fakeEnvelopeReminderStore) SetEnvelopeReminder(_ context.Context, r bud
 
 // Настройки нет вовсе → дефолт 08:00 в поясе оператора.
 func TestApplyEnvelopeCommand_EnableDefaults(t *testing.T) {
-	store := &fakeEnvelopeReminderStore{getErr: errors.New("no rows")}
+	store := &fakeEnvelopeReminderStore{getErr: fmt.Errorf("get reminder: %w", pgx.ErrNoRows)}
 	cmd, _ := ParseEnvelopeCommand("присылай конверты по утрам")
 
 	reply, err := ApplyEnvelopeCommand(context.Background(), store, 42, cmd, "Asia/Bangkok")
@@ -157,5 +160,37 @@ func TestApplyEnvelopeCommand_Disable(t *testing.T) {
 	}
 	if strings.TrimSpace(reply) == "" {
 		t.Fatal("reply must not be empty")
+	}
+}
+
+// Временная ошибка БД — НЕ повод считать, что настройки нет: запись дефолтов
+// поверх живой строки стирает вечернее напоминание оператора.
+func TestApplyEnvelopeCommand_DBErrorDoesNotOverwrite(t *testing.T) {
+	boom := errors.New("connection refused")
+	store := &fakeEnvelopeReminderStore{getErr: boom}
+	cmd, _ := ParseEnvelopeCommand("присылай конверты по утрам")
+
+	reply, err := ApplyEnvelopeCommand(context.Background(), store, 42, cmd, "Asia/Bangkok")
+	if !errors.Is(err, boom) {
+		t.Fatalf("ожидалась ошибка чтения, получено err=%v reply=%q", err, reply)
+	}
+	if store.saved != nil {
+		t.Fatalf("при ошибке чтения ничего писать нельзя, записано: %+v", *store.saved)
+	}
+}
+
+// Строки действительно нет (ErrNoRows) — первое включение обязано её создать.
+func TestApplyEnvelopeCommand_NoRowsCreatesSettings(t *testing.T) {
+	store := &fakeEnvelopeReminderStore{getErr: fmt.Errorf("get reminder: %w", pgx.ErrNoRows)}
+	cmd, _ := ParseEnvelopeCommand("присылай конверты по утрам")
+
+	if _, err := ApplyEnvelopeCommand(context.Background(), store, 42, cmd, "Asia/Bangkok"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if store.saved == nil {
+		t.Fatal("первое включение должно создать настройку")
+	}
+	if got := *store.saved; !got.EnvelopeEnabled || got.EnvelopeHour != DefaultEnvelopeHour {
+		t.Fatalf("unexpected saved settings: %+v", got)
 	}
 }

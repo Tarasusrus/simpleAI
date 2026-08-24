@@ -178,21 +178,32 @@ func (a *Adapter) EditWithButtons(ctx context.Context, chatID int64, messageID i
 	// усекается по лимиту: 400 «message is too long» стёр бы правку целиком.
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, firstChunk(botformat.MessagesHTML(text)))
 	edit.ParseMode = tgbotapi.ModeHTML
-	if len(rows) > 0 {
-		kb := toInlineKeyboard(rows)
-		edit.ReplyMarkup = &kb
-	}
-	if _, err := a.bot.Send(edit); err == nil {
+	edit.ReplyMarkup = editKeyboard(rows)
+	if _, err := a.bot.Send(edit); err != nil {
+		// Тот же фоллбэк, что и у отправки: разметка не должна стирать содержимое.
+		plain := tgbotapi.NewEditMessageText(chatID, messageID, firstChunk(botformat.MessagesPlain(text)))
+		plain.ReplyMarkup = editKeyboard(rows)
+		_, err := a.bot.Send(plain)
 		return err
 	}
-	// Тот же фоллбэк, что и у отправки: разметка не должна стирать содержимое.
-	plain := tgbotapi.NewEditMessageText(chatID, messageID, firstChunk(botformat.MessagesPlain(text)))
-	if len(rows) > 0 {
-		kb := toInlineKeyboard(rows)
-		plain.ReplyMarkup = &kb
+	return nil
+}
+
+// editKeyboard решает, что приложить к правке сообщения:
+//   - rows == nil — клавиатуру не трогаем (у сообщения её и не было);
+//   - rows пуст, но не nil — ПУСТАЯ клавиатура, то есть «снять кнопки»;
+//     ровно так вызывающий код гасит инлайн-кнопки после обработки callback-а,
+//     и молчаливый пропуск reply_markup оставил бы их живыми;
+//   - иначе — обычная клавиатура.
+func editKeyboard(rows [][]core.Button) *tgbotapi.InlineKeyboardMarkup {
+	if rows == nil {
+		return nil
 	}
-	_, err := a.bot.Send(plain)
-	return err
+	kb := toInlineKeyboard(rows)
+	if kb.InlineKeyboard == nil {
+		kb.InlineKeyboard = [][]tgbotapi.InlineKeyboardButton{}
+	}
+	return &kb
 }
 
 func firstChunk(chunks []string) string {

@@ -2,6 +2,8 @@ package notify
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -91,9 +93,15 @@ func ApplyEnvelopeCommand(ctx context.Context, store EnvelopeReminderStore, chat
 	}
 
 	r := budget.Reminder{ChatID: chatID, Timezone: defaultTZ, EnvelopeHour: DefaultEnvelopeHour}
-	// Ошибка чтения = настройки ещё нет: строка создаётся первым включением,
-	// и падать из-за её отсутствия нельзя.
-	if cur, err := store.GetReminder(ctx, chatID); err == nil && cur != nil {
+	// Строки может ещё не быть — её создаёт первое включение, и падать из-за
+	// её отсутствия нельзя. А вот ЛЮБАЯ другая ошибка чтения — это неизвестное
+	// состояние: записать поверх дефолты значит стереть вечернее напоминание
+	// оператора (Enabled/NotifyHour/NotifyMinute/Timezone) из-за моргнувшей БД.
+	cur, err := store.GetReminder(ctx, chatID)
+	switch {
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return "", fmt.Errorf("get reminder: %w", err)
+	case err == nil && cur != nil:
 		r = *cur
 		if r.Timezone == "" {
 			r.Timezone = defaultTZ

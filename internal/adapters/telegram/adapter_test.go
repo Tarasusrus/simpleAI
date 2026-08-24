@@ -235,3 +235,48 @@ func TestAdapterEditWithButtons_UsesHTML(t *testing.T) {
 		t.Fatalf("правка ушла без разметки: %#v", calls[0])
 	}
 }
+
+// Пустой (но не nil) набор рядов — это «снять клавиатуру» после обработки
+// callback-а. Не приложить reply_markup здесь значит оставить старые кнопки
+// живыми на уже переписанном сообщении.
+func TestAdapterEditWithButtons_EmptyRowsClearKeyboard(t *testing.T) {
+	f := newFakeTelegram(t)
+	a := newTestAdapter(t, f)
+
+	if err := a.EditWithButtons(context.Background(), 1, 7, "готово", [][]core.Button{}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	calls := f.sendCalls()
+	if len(calls) != 1 {
+		t.Fatalf("ожидался один editMessageText, получено %d", len(calls))
+	}
+	raw, ok := calls[0]["reply_markup"]
+	if !ok {
+		t.Fatal("reply_markup не отправлен — старые кнопки останутся на сообщении")
+	}
+	var kb tgbotapi.InlineKeyboardMarkup
+	if err := json.Unmarshal([]byte(raw), &kb); err != nil {
+		t.Fatalf("клавиатура не разобралась: %v", err)
+	}
+	if len(kb.InlineKeyboard) != 0 {
+		t.Fatalf("ожидалась пустая клавиатура, получено %#v", kb.InlineKeyboard)
+	}
+}
+
+// Правка с кривой разметкой не должна теряться: 400 на HTML → повтор простым текстом.
+func TestAdapterEditWithButtons_FallsBackToPlainOn400(t *testing.T) {
+	f := newFakeTelegram(t)
+	f.failOn = func(call map[string]string) bool { return call["parse_mode"] == "HTML" }
+	a := newTestAdapter(t, f)
+
+	if err := a.EditWithButtons(context.Background(), 1, 7, approvedLayout, nil); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	calls := f.sendCalls()
+	if len(calls) != 2 {
+		t.Fatalf("ожидались HTML-попытка и фоллбэк, получено %d", len(calls))
+	}
+	if calls[1]["parse_mode"] != "" || strings.Contains(calls[1]["text"], "<pre>") {
+		t.Fatalf("фоллбэк ушёл с разметкой: %#v", calls[1])
+	}
+}
