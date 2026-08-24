@@ -41,13 +41,20 @@ func TestManualRate_SurvivesWorkerTick(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		// Вернуть реплику в исходное состояние: тест ходит в живую базу.
+		// Ошибки восстановления не глушим — незамеченный сбой оставит реплику с
+		// чужим курсом, и следующий тест упадёт непонятно почему.
+		restore := func(err error) {
+			if err != nil {
+				t.Errorf("не удалось вернуть реплику в исходное состояние: %v", err)
+			}
+		}
 		if existed && before.Manual {
-			_ = s.SetManualRate(ctx, cur, before.RateToRUB)
+			restore(s.SetManualRate(ctx, cur, before.RateToRUB))
 			return
 		}
-		_ = s.ClearManualRate(ctx, cur)
+		restore(s.ClearManualRate(ctx, cur))
 		if existed {
-			_ = s.SaveExchangeRate(ctx, cur, before.Auto)
+			restore(s.SaveExchangeRate(ctx, cur, before.Auto))
 		}
 	})
 
@@ -112,7 +119,9 @@ func TestManualRate_ClearIsIdempotent(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if existed && before.Manual {
-			_ = s.SetManualRate(ctx, cur, before.RateToRUB)
+			if err := s.SetManualRate(ctx, cur, before.RateToRUB); err != nil {
+				t.Errorf("не удалось вернуть ручной курс: %v", err)
+			}
 		}
 	})
 

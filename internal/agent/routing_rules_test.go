@@ -24,10 +24,7 @@ func TestBuildToolsSystemPrompt_ShareLimitRuleSeparatedFromExpense(t *testing.T)
 		{ID: "safe_to_spend", Description: "safe to spend"},
 	})
 
-	rules := prompt[:strings.Index(prompt, "Доступные инструменты")]
-	if rules == "" {
-		t.Fatal("в промпте нет блока правил до списка инструментов")
-	}
+	rules := rulesBlock(t, prompt)
 
 	mustContain := map[string]string{
 		"set_share_limit":   "нет правила про правку лимита конверта",
@@ -63,7 +60,7 @@ func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.
 		{ID: "budget", Description: "budget tracker"},
 		{ID: "safe_to_spend", Description: "safe to spend"},
 	})
-	rules := prompt[:strings.Index(prompt, "Доступные инструменты")]
+	rules := rulesBlock(t, prompt)
 
 	mustContain := map[string]string{
 		"set_rate":           "нет правила про ручной курс",
@@ -90,4 +87,18 @@ func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.
 		t.Errorf("правило про курс стоит раньше правил, от которых его отделяют (курс=%d показ=%d лимит=%d)",
 			rateAt, displayAt, limitAt)
 	}
+}
+
+// rulesBlock вырезает блок ROUTING RULES — всё до списка инструментов.
+//
+// Отдельной функцией, а не срезом по strings.Index на месте: Index возвращает
+// −1, когда маркера нет, и prompt[:-1] уронил бы тест паникой вместо внятного
+// «в промпте нет блока правил».
+func rulesBlock(t *testing.T, prompt string) string {
+	t.Helper()
+	at := strings.Index(prompt, "Доступные инструменты")
+	if at <= 0 {
+		t.Fatal("в промпте нет блока правил до списка инструментов")
+	}
+	return prompt[:at]
 }

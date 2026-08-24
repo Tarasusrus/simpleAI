@@ -107,8 +107,7 @@ func TestStartEnvelope_WritesSharesAndReply(t *testing.T) {
 	var hasFallback, hasSavings bool
 	for _, sh := range shares {
 		sum += sh.Allocated
-		switch strings.ToLower(sh.Name) {
-		case budget.FallbackShareName:
+		if strings.EqualFold(sh.Name, budget.FallbackShareName) {
 			hasFallback = true
 		}
 		if sh.Kind == budget.ShareKindSave {

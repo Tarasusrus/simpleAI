@@ -121,7 +121,8 @@ func bareAmounts(out string) []string {
 		regexp.MustCompile(`\d+ (день|дня|дней|недел\S*)`), // длина периода
 	}
 	// Число (возможно с пробелами-разрядами), за которым НЕ следует знак валюты.
-	amount := regexp.MustCompile(`\d[\d  ]*\d|\d`)
+	// Разряды бьются ОБЫЧНЫМ пробелом: groupDigits ставит именно его.
+	amount := regexp.MustCompile(`\d[\d ]*\d|\d`)
 
 	var bare []string
 	for _, line := range strings.Split(out, "\n") {

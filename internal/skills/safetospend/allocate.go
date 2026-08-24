@@ -326,7 +326,7 @@ func allocateShares(
 	overrides map[string]float64,
 	history map[string]int,
 ) ([]budget.EnvelopeShare, []string) {
-	drafts, warnings := buildDrafts(free, fc, rates, days, history, nil)
+	drafts, warnings := buildDrafts(fc, rates, days, history, nil)
 	drafts, warnings = applyOverrides(drafts, overrides, warnings)
 	warnings = truncateToFree(drafts, free, warnings)
 
@@ -337,7 +337,6 @@ func allocateShares(
 // мелочь и категории без истории — в «прочее». Последний черновик — всегда
 // «прочее»: доля-приёмник обязана существовать даже с нулевым лимитом.
 func buildDrafts(
-	free float64,
 	fc []budget.CategoryForecast,
 	rates map[string]float64,
 	days int,

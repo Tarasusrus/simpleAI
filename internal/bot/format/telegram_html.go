@@ -65,9 +65,9 @@ func parseItems(src string) []item {
 	inPre := make([]bool, len(lines))
 	skip := make([]bool, len(lines))
 	for i := 0; i+1 < len(fences); i += 2 {
-		open, close := fences[i], fences[i+1]
-		skip[open], skip[close] = true, true
-		for j := open + 1; j < close; j++ {
+		start, end := fences[i], fences[i+1]
+		skip[start], skip[end] = true, true
+		for j := start + 1; j < end; j++ {
 			inPre[j] = true
 		}
 	}
