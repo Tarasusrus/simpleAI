@@ -182,6 +182,7 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64, re
 		History:    history,
 		Recurring:  recurring,
 		From:       h.From,
+		To:         h.To,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 	plan.Shares, err = s.keepCarriedIn(ctx, chatID, env.ID, plan.Shares)

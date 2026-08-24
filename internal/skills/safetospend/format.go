@@ -156,8 +156,33 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	fmt.Fprintf(&b, "\n**На день: %s**\n", m.Fmt(DailyLimit(FlexibleTHB(d.Plan.Shares), days)))
 	b.WriteString(dailyLimitScope(d.Plan.Shares))
 
+	b.WriteString(upcomingBlock(d.Plan.Upcoming, m))
+
 	for _, w := range d.Plan.Warnings {
 		fmt.Fprintf(&b, "\n\n⚠️ %s", w)
+	}
+	return b.String()
+}
+
+// upcomingBlock печатает платежи, которые придутся уже на следующий период.
+//
+// Деньги на них этим приходом не отложены — окно финансирования равно периоду
+// конверта. Но и промолчать нельзя: аренда, не показанная нигде, будет съедена
+// как свободные деньги, а через две недели встретит пустой карман. Блок
+// намеренно стоит ПОСЛЕ дневного лимита и вне моноблока — это не часть колонки,
+// которая сходится с приходом, а напоминание на будущее.
+func upcomingBlock(upcoming []budget.EnvelopeShare, m Display) string {
+	if len(upcoming) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n**Впереди, из следующего прихода**\n")
+	for _, sh := range upcoming {
+		fmt.Fprintf(&b, "%s — %s", normalizeLabel(sh.Name), m.Fmt(sh.Allocated))
+		if sh.DueDate != nil {
+			fmt.Fprintf(&b, ", %s", sh.DueDate.Format("02.01"))
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
