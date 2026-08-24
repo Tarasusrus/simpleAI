@@ -196,20 +196,23 @@ func (s *BudgetSkill) carryFromPrevious(
 		to = prev.PeriodEnd
 	}
 	var spent []budget.CategorySpentRow
-	if !to.Before(prev.PeriodStart) {
+	superseded := to.Before(prev.PeriodStart)
+	if !superseded {
 		spent, err = s.store.SpentByCategoryExcludingRecurring(ctx, prev.PeriodStart, to)
 		if err != nil {
 			return nil, fmt.Errorf("факт прошлого конверта: %w", err)
 		}
 	}
-	// to < period_start — конверт заведён и закрыт в один день: период нулевой
-	// длины, факта за него нет, накопления переносятся целиком.
+	// to < period_start — конверт заведён и закрыт в один день: он не прожил ни
+	// дня и вытесняется повторной раскладкой. Переносить его накопления целиком
+	// нельзя — они профинансированы тем же приходом (simpleAI-faeq.10, баг 1).
 
 	return safetospend.CarryOver(safetospend.CarryInput{
-		PrevShares: prevShares,
-		PrevSpent:  spent,
-		Rates:      rates,
-		NextShares: next,
+		PrevShares:     prevShares,
+		PrevSpent:      spent,
+		Rates:          rates,
+		NextShares:     next,
+		PrevSuperseded: superseded,
 	}), nil
 }
 

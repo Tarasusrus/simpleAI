@@ -80,13 +80,13 @@ func TestAllocateShares(t *testing.T) {
 			free: 27800,
 			fc: []budget.CategoryForecast{
 				fcRUB("Еда", 12000), fcRUB("Транспорт", 4000),
-				fcRUB("Развлечения", 3000), fcRUB("Кафе", 600), // 600 < 3% от 27800 = 834
+				fcRUB("Развлечения", 3000), fcRUB("Кафе", 400), // 400 < minShareMonthlyTHB=500 → в «прочее»
 				fcRUB("Жильё", 50000), fcRUB("Переводы", 90000), // фикс и движение денег — вне раскладки
 			},
 			history: map[string]int{"еда": 3, "транспорт": 3, "развлечения": 3, "кафе": 3},
 			want: map[string]float64{
 				"Еда": 12000, "Транспорт": 4000, "Развлечения": 3000,
-				budget.FallbackShareName: 600, savingsShareName: 8200,
+				budget.FallbackShareName: 400, savingsShareName: 8400,
 			},
 		},
 		{
@@ -313,7 +313,7 @@ func TestAcceptance_Allocate_27800(t *testing.T) {
 
 	fc := []budget.CategoryForecast{
 		fcRUB("Еда", 12000), fcRUB("Транспорт", 4000), fcRUB("Развлечения", 3000),
-		fcRUB("Кафе", 600),    // < 3% от 27800 → в «прочее»
+		fcRUB("Кафе", 400),    // < minShareMonthlyTHB=500 → в «прочее»
 		fcRUB("Одежда", 2000), // история 1 месяц → лимит не назначаем
 		fcRUB("Жильё", 50000), fcRUB("Переводы", 90000),
 	}
@@ -324,7 +324,7 @@ func TestAcceptance_Allocate_27800(t *testing.T) {
 	checkConvergence(t, shares, res.FreeAfterObligations)
 	want := map[string]float64{
 		"Еда": 12000, "Транспорт": 4000, "Развлечения": 3000,
-		budget.FallbackShareName: 600, savingsShareName: 8200,
+		budget.FallbackShareName: 400, savingsShareName: 8400,
 	}
 	got := allocatedByName(shares)
 	if len(got) != len(want) {

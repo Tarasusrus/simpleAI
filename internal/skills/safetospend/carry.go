@@ -14,11 +14,15 @@ import (
 // PrevSpent — сырой факт за период ЗАКРЫВАЕМОГО конверта (уже без recurring).
 // Пустой факт допустим и означает «за конверт не потрачено ничего» — так же
 // выглядит конверт нулевой длины, факт по которому считать нельзя (ADR-008 §10).
+//
+// PrevSuperseded — прошлый конверт закрывается в день своего создания, то есть
+// не прожил ни одного дня и вытесняется повторной раскладкой. См. CarryOver.
 type CarryInput struct {
-	PrevShares []budget.EnvelopeShare
-	PrevSpent  []budget.CategorySpentRow
-	Rates      map[string]float64
-	NextShares []budget.EnvelopeShare
+	PrevShares     []budget.EnvelopeShare
+	PrevSpent      []budget.CategorySpentRow
+	Rates          map[string]float64
+	NextShares     []budget.EnvelopeShare
+	PrevSuperseded bool
 }
 
 // CarryOver проставляет новым долям carried_in по остаткам старых.
@@ -39,9 +43,29 @@ type CarryInput struct {
 //
 // Отрицательный остаток (пробитая save-доля) не переносится: в carried_in это
 // был бы долг, вычитаемый из нового прихода молча, без единой строки в ответе.
+//
+// PrevSuperseded=true — прошлый конверт закрывается в день своего создания
+// (период нулевой длины, ADR-008 §10): он не прожил ни дня и вытесняется
+// повторной раскладкой ТОГО ЖЕ прихода. Переносится только его собственный
+// carried_in — деньги, пришедшие из прошлого, реально прожитого периода;
+// его allocated не переносится вовсе, потому что профинансирован тем же
+// приходом, который в этот момент раскладывается заново.
+//
+// Без этого различения повтор «пришло 127000, разложи» наращивал перенос
+// 0 → 26681 → 53362 → 65335 THB (simpleAI-faeq.10, баг 1): каждая раскладка
+// уносила в carried_in накопления предыдущей, то есть тот же самый приход.
+//
+// Известное ограничение: второй НАСТОЯЩИЙ приход в тот же день неотличим от
+// повтора раскладки — у конверта нет признака «этот приход уже был учтён».
+// Выбор сделан в пользу невозможности напечатать деньги: недосчитаться
+// переноса оператор увидит и поправит словами, а лишние деньги в конвертах
+// он не увидит никогда.
 func CarryOver(in CarryInput) []budget.EnvelopeShare {
 	if len(in.PrevShares) == 0 {
 		return ApplyCarry(in.NextShares, nil)
+	}
+	if in.PrevSuperseded {
+		return ApplyCarry(in.NextShares, ownCarriedIn(in.PrevShares))
 	}
 
 	prevRemaining := computeShareRemaining(in.PrevShares, in.PrevSpent, in.Rates)
@@ -59,6 +83,25 @@ func CarryOver(in CarryInput) []budget.EnvelopeShare {
 		})
 	}
 	return ApplyCarry(in.NextShares, carried)
+}
+
+// ownCarriedIn — то, что вытесненный конверт лишь ПРОНЁС через себя: carried_in
+// его накопительных долей. Факт за нулевой период не считается (его нет), а
+// allocated не переносится — он из текущего прихода.
+func ownCarriedIn(prev []budget.EnvelopeShare) []CarriedAmount {
+	out := make([]CarriedAmount, 0, len(prev))
+	for _, sh := range prev {
+		if sh.Kind != budget.ShareKindSave || sh.CarriedIn <= 0 {
+			continue
+		}
+		out = append(out, CarriedAmount{
+			Name:       sh.Name,
+			Amount:     sh.CarriedIn,
+			Source:     sh.Source,
+			Categories: sh.Categories,
+		})
+	}
+	return out
 }
 
 // CarriedAmount — накопленное, которое обязано пережить перезапись раскладки:

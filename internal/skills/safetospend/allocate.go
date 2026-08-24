@@ -104,8 +104,8 @@ func filterShares(shares []budget.EnvelopeShare, kind string) []budget.EnvelopeS
 //   - history — сколько ПОЛНЫХ месяцев данных есть по категории.
 //
 // Правила (ADR-008):
-//  1. один конверт = одна категория; лимит меньше minShareFraction от free
-//     сливается в «прочее»;
+//  1. один конверт = одна категория; лимит меньше minShareMonthlyTHB (в пересчёте
+//     на длину периода) сливается в «прочее»;
 //  2. категория с историей меньше minHistoryMonths месяцев собственного лимита
 //     НЕ получает вовсе (сумму не выдумываем) — сама категория уходит в
 //     «прочее», чтобы трате было куда падать, плюс warning. Из этого следует:
@@ -150,7 +150,9 @@ func buildDrafts(
 	warnings []string,
 ) ([]*shareDraft, []string) {
 	items, _ := buildForecastBreakdown(fc, rates, days)
-	threshold := free * minShareFraction
+	// Планка мелочи — абсолютная, пропорционально длине периода. От free она
+	// зависеть не имеет права: см. minShareMonthlyTHB (simpleAI-faeq.10, баг 3).
+	threshold := minShareMonthlyTHB * float64(days) / prorationBaseDays
 
 	fallback := &shareDraft{name: budget.FallbackShareName, source: budget.ShareSourceAuto}
 	drafts := make([]*shareDraft, 0, len(items)+1)

@@ -1126,12 +1126,19 @@ func insertEnvelopeTx(ctx context.Context, tx pgx.Tx, chatID int64, incomeAmount
 }
 
 // GetActiveEnvelope возвращает активный конверт chat'а (ok=false если нет).
+//
+// ORDER BY — страховка, а не украшение: активный конверт в чате один
+// структурно (частичный уникальный индекс idx_budget_envelope_active_chat,
+// 00016), но LIMIT 1 без порядка превращает любое нарушение этого правила в
+// НЕДЕТЕРМИНИРОВАННЫЙ выбор конверта, и перенос накоплений уходил бы из
+// случайного. Свежий конверт побеждает всегда.
 func (s *Store) GetActiveEnvelope(ctx context.Context, chatID int64) (*Envelope, bool, error) {
 	var e Envelope
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, chat_id, income_amount, income_currency, period_start, period_end, created_at
 		FROM budget_envelope
 		WHERE chat_id = $1 AND active
+		ORDER BY created_at DESC, id DESC
 		LIMIT 1
 	`, chatID).Scan(&e.ID, &e.ChatID, &e.IncomeAmount, &e.IncomeCurrency, &e.PeriodStart, &e.PeriodEnd, &e.CreatedAt)
 	if err != nil {
