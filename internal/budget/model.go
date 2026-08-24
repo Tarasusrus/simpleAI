@@ -245,6 +245,12 @@ type Reminder struct {
 	NotifyHour   int // 0–23
 	NotifyMinute int // 0–59
 	Timezone     string
+	// Утренний пуш с конвертами — отдельное расписание в той же строке:
+	// оператор может хотеть конверты по утрам, но не хотеть вечернего
+	// напоминания (и наоборот). Пояс общий — он у человека один.
+	EnvelopeEnabled bool
+	EnvelopeHour    int // 0–23
+	EnvelopeMinute  int // 0–59
 }
 
 // CategoryForecast — прогноз трат по одной категории в одной валюте на следующий период.

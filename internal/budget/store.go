@@ -546,13 +546,40 @@ func (s *Store) SetReminder(ctx context.Context, r Reminder) error {
 	return nil
 }
 
+// SetEnvelopeReminder сохраняет расписание утреннего пуша с конвертами.
+// Вечернее напоминание не трогает: у строки два независимых расписания, и
+// включение конвертов не должно молча включать или гасить напоминание.
+func (s *Store) SetEnvelopeReminder(ctx context.Context, r Reminder) error {
+	if r.Timezone == "" {
+		r.Timezone = "UTC"
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO budget_reminder (chat_id, enabled, notify_hour, notify_minute, timezone,
+		                             envelope_enabled, envelope_hour, envelope_minute, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+		ON CONFLICT (chat_id) DO UPDATE
+		SET envelope_enabled = EXCLUDED.envelope_enabled,
+		    envelope_hour = EXCLUDED.envelope_hour,
+		    envelope_minute = EXCLUDED.envelope_minute,
+		    timezone = EXCLUDED.timezone,
+		    updated_at = NOW()
+	`, r.ChatID, r.Enabled, r.NotifyHour, r.NotifyMinute, r.Timezone,
+		r.EnvelopeEnabled, r.EnvelopeHour, r.EnvelopeMinute)
+	if err != nil {
+		return fmt.Errorf("set envelope reminder: %w", err)
+	}
+	return nil
+}
+
 // GetReminder возвращает настройки напоминания для пользователя. Ошибка если не найден.
 func (s *Store) GetReminder(ctx context.Context, chatID int64) (*Reminder, error) {
 	var r Reminder
 	err := s.pool.QueryRow(ctx, `
-		SELECT chat_id, enabled, notify_hour, notify_minute, timezone
+		SELECT chat_id, enabled, notify_hour, notify_minute, timezone,
+		       envelope_enabled, envelope_hour, envelope_minute
 		FROM budget_reminder WHERE chat_id = $1
-	`, chatID).Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone)
+	`, chatID).Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone,
+		&r.EnvelopeEnabled, &r.EnvelopeHour, &r.EnvelopeMinute)
 	if err != nil {
 		return nil, fmt.Errorf("get reminder: %w", err)
 	}
@@ -562,8 +589,9 @@ func (s *Store) GetReminder(ctx context.Context, chatID int64) (*Reminder, error
 // ListActiveReminders возвращает все включённые напоминания.
 func (s *Store) ListActiveReminders(ctx context.Context) ([]Reminder, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT chat_id, enabled, notify_hour, notify_minute, timezone
-		FROM budget_reminder WHERE enabled = true
+		SELECT chat_id, enabled, notify_hour, notify_minute, timezone,
+		       envelope_enabled, envelope_hour, envelope_minute
+		FROM budget_reminder WHERE enabled = true OR envelope_enabled = true
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list reminders: %w", err)
@@ -573,7 +601,8 @@ func (s *Store) ListActiveReminders(ctx context.Context) ([]Reminder, error) {
 	var out []Reminder
 	for rows.Next() {
 		var r Reminder
-		if err := rows.Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone); err != nil {
+		if err := rows.Scan(&r.ChatID, &r.Enabled, &r.NotifyHour, &r.NotifyMinute, &r.Timezone,
+			&r.EnvelopeEnabled, &r.EnvelopeHour, &r.EnvelopeMinute); err != nil {
 			return nil, fmt.Errorf("scan reminder: %w", err)
 		}
 		out = append(out, r)
