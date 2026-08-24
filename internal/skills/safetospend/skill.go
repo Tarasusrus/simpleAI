@@ -77,10 +77,11 @@ func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 			JSON: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"amount":   map[string]any{"type": "number", "description": "Сумма пришедшего дохода из сообщения. НЕ указывай в режиме остатка (вопрос без суммы)."},
-					"currency": map[string]any{"type": "string", "description": "Валюта прихода: RUB (по умолчанию), THB, USD, EUR."},
-					"period":   map[string]any{"type": "string", "description": "Горизонт расчёта. По умолчанию (пусто) — ближайшие 2 недели (интервал между приходами). 'month' — до конца текущего месяца; 'YYYY-MM' — конкретный месяц."},
-					"question": map[string]any{"type": "string", "description": "Исходный вопрос пользователя ДОСЛОВНО. Заполняй всегда: по нему различаются режим общего остатка и режим конвертов."},
+					"amount":           map[string]any{"type": "number", "description": "Сумма пришедшего дохода из сообщения. НЕ указывай в режиме остатка (вопрос без суммы)."},
+					"currency":         map[string]any{"type": "string", "description": "Валюта прихода: RUB (по умолчанию), THB, USD, EUR."},
+					"period":           map[string]any{"type": "string", "description": "Горизонт расчёта. По умолчанию (пусто) — ближайшие 2 недели (интервал между приходами). 'month' — до конца текущего месяца; 'YYYY-MM' — конкретный месяц."},
+					"question":         map[string]any{"type": "string", "description": "Исходный вопрос пользователя ДОСЛОВНО. Заполняй всегда: по нему различаются режим общего остатка и режим конвертов."},
+					"display_currency": map[string]any{"type": "string", "description": "Валюта, в которой ПОКАЗАТЬ конверты: THB (по умолчанию, «в батах») или RUB («покажи конверты в рублях», «сколько это в рублях»). Не путать с currency — та про сумму прихода из сообщения."},
 				},
 				"required": []string{},
 			},
@@ -93,6 +94,9 @@ type input struct {
 	Currency string  `json:"currency,omitempty"`
 	Period   string  `json:"period,omitempty"`
 	Question string  `json:"question,omitempty"`
+	// DisplayCurrency — валюта ПОКАЗА конвертов (не хранения: доли всегда в THB,
+	// ADR-008 §7). Пусто → разбор фразы, затем дефолт THB.
+	DisplayCurrency string `json:"display_currency,omitempty"`
 }
 
 func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) {
@@ -120,7 +124,7 @@ func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) 
 	// (ADR-008 §8), иначе общий свободный остаток (ADR-007 T5).
 	if in.Amount <= 0 {
 		if sharesRequested(in.Question) {
-			return s.runShares(ctx, chatID, rates)
+			return s.runShares(ctx, chatID, rates, displayFor(in, rates["THB"]))
 		}
 		return s.runRemaining(ctx, chatID, rates)
 	}
@@ -156,6 +160,23 @@ func (s *SafeToSpendSkill) Run(ctx context.Context, raw string) (string, error) 
 		"chat_id", chatID, "amount", in.Amount, "currency", currency,
 		"free_after_obl_thb", res.FreeAfterObligations, "realistic_free_thb", res.RealisticFree)
 	return reply, nil
+}
+
+// display — валюта показа конвертов. Приоритет: явное поле от LLM → разбор
+// фразы оператора → дефолт THB.
+//
+// Два источника, а не один, потому что у каждого своя дыра: поле модель
+// заполняет не всегда, а фраза может валюты не содержать вовсе. Дефолт при
+// этом один и жёсткий — баты (см. display.go).
+func displayFor(in input, rubPerTHB float64) Display {
+	code := strings.ToUpper(strings.TrimSpace(in.DisplayCurrency))
+	if code == "" {
+		code = ParseDisplayCurrency(in.Question)
+	}
+	if code == "" {
+		code = DefaultDisplayCurrency
+	}
+	return NewDisplay(code, rubPerTHB)
 }
 
 // plannedBreakdown — ручные плановые траты по пунктам (описание→THB) и их итог.

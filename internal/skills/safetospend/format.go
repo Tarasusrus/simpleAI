@@ -72,7 +72,8 @@ func formatReply(d replyData) string {
 // печатает, не считает (числа не проходят ни через LLM, ни через вёрстку).
 type EnvelopeReply struct {
 	Plan           EnvelopePlan
-	RubPerTHB      float64 // ₽ за 1 ฿
+	RubPerTHB      float64 // ₽ за 1 ฿ (курс показывается всегда, любой валютой)
+	Display        Display // валюта отображения конвертов (дефолт — THB)
 	Period         string  // человекочитаемый горизонт («ближайшие 2 недели»)
 	From, To       time.Time
 	IncomeAmount   float64 // приход как его назвал оператор
@@ -86,13 +87,24 @@ type EnvelopeReply struct {
 // проверить глазами сверху вниз: приход → обязательства → что осталось делить →
 // сами конверты → свободный остаток → факт вне конвертов → предупреждения.
 //
+// Все суммы конвертов печатаются валютой d.Display, хранение — по-прежнему в
+// THB (ADR-008 §7). Заголовок при этом показывает приход ТОЙ валютой, которой
+// его назвал оператор: «пришло 127000₽» обязано остаться 127000₽, иначе
+// оператор не узнает свой собственный приход.
+//
 // «Вне конвертов» показывается ВСЕГДА, даже нулевым: это тот член, из-за
 // которого сумма конвертов не сходится с остатком по ADR-007 (§4 ADR-008).
 // Спрятать его при нуле значит спрятать и объяснение расхождения, когда он
 // перестанет быть нулём.
 func FormatEnvelopePlan(d EnvelopeReply) string {
 	r := d.Plan.Result
-	rub := func(thb float64) float64 { return thb * d.RubPerTHB }
+	m := d.Display
+	if m.RubPerTHB == 0 {
+		m.RubPerTHB = d.RubPerTHB
+	}
+	if m.Code == "" {
+		m = NewDisplay("", d.RubPerTHB)
+	}
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "🧧 Конверт заведён: %.0f %s на %s (%s — %s)\n",
@@ -100,13 +112,13 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 		d.From.Format("02.01"), d.To.Format("02.01"))
 	fmt.Fprintf(&b, "🗓 курс %.2f ₽/฿\n\n", d.RubPerTHB)
 
-	fmt.Fprintf(&b, "💰 Приход: %.0f ₽\n", rub(r.IncomeTHB))
-	fmt.Fprintf(&b, "➖ Обязательства: %.0f ₽ (регулярные %.0f + долги %.0f)\n",
-		rub(r.RecurringTHB+r.DebtTHB), rub(r.RecurringTHB), rub(r.DebtTHB))
+	fmt.Fprintf(&b, "💰 Приход: %s\n", m.Fmt(r.IncomeTHB))
+	fmt.Fprintf(&b, "➖ Обязательства: %s (регулярные %s + долги %s)\n",
+		m.Fmt(r.RecurringTHB+r.DebtTHB), m.Fmt(r.RecurringTHB), m.Fmt(r.DebtTHB))
 	if r.PlannedTHB > 0 {
-		fmt.Fprintf(&b, "➖ Плановые покупки: %.0f ₽\n", rub(r.PlannedTHB))
+		fmt.Fprintf(&b, "➖ Плановые покупки: %s\n", m.Fmt(r.PlannedTHB))
 	}
-	fmt.Fprintf(&b, "= К раскладке: %.0f ₽\n\n", rub(r.FreeAfterObligations))
+	fmt.Fprintf(&b, "= К раскладке: %s\n\n", m.Fmt(r.FreeAfterObligations))
 
 	b.WriteString("📦 Конверты:\n")
 	for _, sh := range SpendShares(d.Plan.Shares) {
@@ -114,7 +126,7 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 		if sh.Source == budget.ShareSourceOverride {
 			mark = " (вручную)"
 		}
-		fmt.Fprintf(&b, "   • %-16s %.0f ₽%s\n", normalizeLabel(sh.Name), rub(sh.Allocated), mark)
+		fmt.Fprintf(&b, "   • %-16s %s%s\n", normalizeLabel(sh.Name), m.Fmt(sh.Allocated), mark)
 	}
 
 	var free float64
@@ -122,18 +134,18 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 		free += sh.Allocated
 	}
 	b.WriteString("   ──────────────────────\n")
-	fmt.Fprintf(&b, "   🆓 Свободно: %.0f ₽ (уходит в накопления)\n", rub(free))
+	fmt.Fprintf(&b, "   🆓 Свободно: %s (уходит в накопления)\n", m.Fmt(free))
 
 	// «Перенесено с прошлого раза» — накопления, пережившие прошлый конверт
 	// (ADR-008 §9). Строка отдельная и не складывается со «Свободно»: там
 	// деньги ЭТОГО прихода, здесь — прошлого. Свернув их в одну сумму, мы бы
 	// показали приход больше, чем он есть.
 	if carried := TotalCarriedIn(d.Plan.Shares); carried != 0 {
-		fmt.Fprintf(&b, "   ↩️ Перенесено с прошлого раза: %.0f ₽ (уже лежит в конвертах накоплений)\n", rub(carried))
+		fmt.Fprintf(&b, "   ↩️ Перенесено с прошлого раза: %s (уже лежит в конвертах накоплений)\n", m.Fmt(carried))
 	}
 
-	fmt.Fprintf(&b, "\n🚪 Вне конвертов: %.0f ₽ — фиксированные траты и платежи по подпискам за период; они уже вычтены в обязательствах.\n",
-		rub(d.OutsideTHB))
+	fmt.Fprintf(&b, "\n🚪 Вне конвертов: %s — фиксированные траты и платежи по подпискам за период; они уже вычтены в обязательствах.\n",
+		m.Fmt(d.OutsideTHB))
 
 	for _, w := range d.Plan.Warnings {
 		fmt.Fprintf(&b, "⚠️ %s\n", w)
@@ -224,8 +236,7 @@ func parseAdviceLines(raw string) []string {
 //
 // По каждой доле видно лимит и остаток, пробитые помечены явно: главный вопрос
 // оператора — «на что уже нельзя тратить», и он не должен вычитать в уме.
-func formatShareRemaining(items []ShareRemaining, rubPerTHB float64, env *budget.Envelope) string {
-	rub := func(thb float64) float64 { return thb * rubPerTHB }
+func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelope) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "🧧 Конверты (%s — %s)\n\n",
@@ -246,16 +257,16 @@ func formatShareRemaining(items []ShareRemaining, rubPerTHB float64, env *budget
 		if it.Kind == budget.ShareKindSave {
 			icon = "🏦"
 		}
-		fmt.Fprintf(&b, "%s %-16s осталось %.0f ₽ из %.0f ₽",
-			icon, normalizeLabel(it.Name), rub(it.Remaining), rub(it.LimitTHB))
+		fmt.Fprintf(&b, "%s %-16s осталось %s из %s",
+			icon, normalizeLabel(it.Name), m.Fmt(it.Remaining), m.Fmt(it.LimitTHB))
 		if it.CarriedIn != 0 {
-			fmt.Fprintf(&b, " (в т.ч. перенос %.0f ₽)", rub(it.CarriedIn))
+			fmt.Fprintf(&b, " (в т.ч. перенос %s)", m.Fmt(it.CarriedIn))
 		}
 		b.WriteString("\n")
 	}
 
 	b.WriteString("   ──────────────────────\n")
-	fmt.Fprintf(&b, "   Итого осталось: %.0f ₽ из %.0f ₽\n", rub(totalRemaining), rub(totalLimit))
+	fmt.Fprintf(&b, "   Итого осталось: %s из %s\n", m.Fmt(totalRemaining), m.Fmt(totalLimit))
 
 	if len(overspent) > 0 {
 		fmt.Fprintf(&b, "\n⚠️ Пробито: %s — дальше тратишь из других конвертов.\n", strings.Join(overspent, ", "))

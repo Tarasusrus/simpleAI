@@ -44,8 +44,15 @@ func (s *BudgetSkill) setShareLimit(ctx context.Context, req budgetInput) (strin
 	}
 	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
 	if currency == "" {
-		// Тот же дефолт, что у add_expense и start_envelope: оператор называет
-		// суммы в рублях. Доли считаются в THB, приведение — при раскладке.
+		// Тот же дефолт, что у add_expense и start_envelope: НЕназванная валюта
+		// суммы — рубли. Это про сумму в сообщении, а не про валюту показа:
+		// показ по умолчанию батовый (display_currency), и путать их нельзя —
+		// иначе «на еду хватит 15000» без валюты молча стало бы 15000 ฿.
+		//
+		// Названную валюту («5000 бат») сюда доносит поле currency, и дальше
+		// она конвертируется РОВНО ОДИН раз — в shareOverrides при раскладке
+		// (budget.ToTHB). Здесь сумма сохраняется как сказана, вместе с кодом
+		// валюты: конвертировать и тут, и там значило бы задвоить курс.
 		currency = "RUB"
 	}
 
@@ -58,7 +65,7 @@ func (s *BudgetSkill) setShareLimit(ctx context.Context, req budgetInput) (strin
 
 	head := fmt.Sprintf("📌 Лимит на «%s» — %.0f %s. Запомнил: применю и к следующим приходам, пока не скажешь «убери лимит на %s».",
 		name, req.Amount, currency, name)
-	return head + s.replanTail(ctx, chatID), nil
+	return head + s.replanTail(ctx, chatID, req), nil
 }
 
 // clearShareLimit снимает ручной лимит: доля снова считается из истории трат.
@@ -81,7 +88,7 @@ func (s *BudgetSkill) clearShareLimit(ctx context.Context, req budgetInput) (str
 	slog.Default().InfoContext(ctx, "clear_share_limit", "chat_id", chatID, "share", name)
 
 	head := fmt.Sprintf("🧹 Лимит на «%s» снят — снова считаю его по истории трат.", name)
-	return head + s.replanTail(ctx, chatID), nil
+	return head + s.replanTail(ctx, chatID, req), nil
 }
 
 // shareLimitName — имя доли из входа LLM. Смотрим и name, и category: доля
@@ -97,8 +104,8 @@ func shareLimitName(req budgetInput) string {
 // replanTail пересчитывает активный конверт и возвращает хвост ответа. Ошибка
 // пересчёта НЕ роняет ответ: сам лимит уже сохранён и применится при следующем
 // приходе, а отказ отвечать вместо этого спрятал бы успешную часть работы.
-func (s *BudgetSkill) replanTail(ctx context.Context, chatID int64) string {
-	res, ok, err := s.replanActiveEnvelope(ctx, chatID)
+func (s *BudgetSkill) replanTail(ctx context.Context, chatID int64, req budgetInput) string {
+	res, ok, err := s.replanActiveEnvelope(ctx, chatID, req)
 	switch {
 	case err != nil:
 		slog.Default().ErrorContext(ctx, "share limit: replan active envelope", "err", err, "chat_id", chatID)
@@ -116,7 +123,7 @@ func (s *BudgetSkill) replanTail(ctx context.Context, chatID int64) string {
 // Приход и горизонт берутся из САМОГО конверта, а не из сообщения: пересчёт
 // обязан делить ту же сумму на том же периоде, иначе правка одного лимита
 // молча переписала бы весь конверт под сегодняшнюю дату.
-func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64) (*replan, bool, error) {
+func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64, req budgetInput) (*replan, bool, error) {
 	env, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
 	if err != nil {
 		return nil, false, fmt.Errorf("активный конверт: %w", err)
@@ -179,7 +186,7 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64) (*
 	slog.Default().InfoContext(ctx, "share limit: envelope replanned",
 		"chat_id", chatID, "envelope_id", env.ID, "shares", len(plan.Shares),
 		"free_after_obl_thb", plan.Result.FreeAfterObligations)
-	return &replan{plan: plan, rubPerTHB: rates["THB"]}, true, nil
+	return &replan{plan: plan, display: envelopeDisplay(req, rates)}, true, nil
 }
 
 // keepCarriedIn сохраняет уже перенесённое (carried_in) в пересчитанной
@@ -221,19 +228,19 @@ func (s *BudgetSkill) keepCarriedIn(
 	return safetospend.ApplyCarry(shares, carried), nil
 }
 
-// replan — результат пересчёта: сама раскладка плюс курс, которым её печатать.
-// Курс идёт рядом с планом, а не берётся форматтером заново: печать обязана
-// показывать ТЕ ЖЕ рубли, по которым посчитаны доли.
+// replan — результат пересчёта: сама раскладка плюс валюта, которой её
+// печатать. Валюта показа идёт рядом с планом, а не берётся форматтером заново:
+// печать обязана показывать ТЕ ЖЕ деньги, по которым посчитаны доли.
 type replan struct {
-	plan      safetospend.EnvelopePlan
-	rubPerTHB float64
+	plan    safetospend.EnvelopePlan
+	display safetospend.Display
 }
 
 // formatReplan печатает пересчитанную раскладку. Форматирование локальное и
 // короткое: полный разбор конверта (приход → обязательства → доли) оператор уже
 // видел при start_envelope, здесь нужен только результат правки.
 func formatReplan(r replan) string {
-	rub := func(thb float64) float64 { return thb * r.rubPerTHB }
+	m := r.display
 	var b strings.Builder
 	b.WriteString("Пересчитал текущий конверт:\n")
 	for _, sh := range safetospend.SpendShares(r.plan.Shares) {
@@ -241,10 +248,10 @@ func formatReplan(r replan) string {
 		if sh.Source == budget.ShareSourceOverride {
 			mark = " (вручную)"
 		}
-		fmt.Fprintf(&b, "   • %s — %.0f ₽%s\n", sh.Name, rub(sh.Allocated), mark)
+		fmt.Fprintf(&b, "   • %s — %s%s\n", sh.Name, m.Fmt(sh.Allocated), mark)
 	}
 	for _, sh := range safetospend.SaveShares(r.plan.Shares) {
-		fmt.Fprintf(&b, "   💰 %s — %.0f ₽\n", sh.Name, rub(sh.Allocated))
+		fmt.Fprintf(&b, "   💰 %s — %s\n", sh.Name, m.Fmt(sh.Allocated))
 	}
 	for _, w := range r.plan.Warnings {
 		fmt.Fprintf(&b, "⚠️ %s\n", w)

@@ -395,3 +395,93 @@ func shareNames(shares []budget.EnvelopeShare) []string {
 	}
 	return out
 }
+
+// Лимит, названный в рублях, и лимит, названный в батах, при одном курсе дают
+// ОДНУ И ТУ ЖЕ долю: 15000 ₽ при 3 ₽/฿ — это те же 5000 ฿. Проверяется место
+// единственной конвертации (overridesToTHB): если бы курс применялся ещё и при
+// записи override'а, рублёвый лимит пришёл бы сюда уже в батах и «сконвертился»
+// второй раз — доля стала бы втрое меньше.
+func TestOverridesToTHB_SameLimitInBothCurrencies(t *testing.T) {
+	rates := map[string]float64{"RUB": 1, "THB": 3}
+
+	got := overridesToTHB([]budget.EnvelopeOverride{
+		{ShareName: "еда", Amount: 15000, Currency: "RUB"},
+		{ShareName: "транспорт", Amount: 5000, Currency: "THB"},
+	}, rates)
+
+	if got["еда"] != 5000 {
+		t.Errorf("лимит 15000 ₽ при курсе 3 ₽/฿ = 5000 ฿, получили %v", got["еда"])
+	}
+	if got["транспорт"] != 5000 {
+		t.Errorf("лимит 5000 ฿ обязан остаться 5000 ฿, получили %v", got["транспорт"])
+	}
+	if got["еда"] != got["транспорт"] {
+		t.Errorf("один и тот же лимит в разных валютах дал разные доли: %v vs %v",
+			got["еда"], got["транспорт"])
+	}
+}
+
+// Валюта без курса не превращается в баты молча: доля просто остаётся
+// авто-лимитом, а не получает выдуманное число.
+func TestOverridesToTHB_UnknownCurrencySkipped(t *testing.T) {
+	got := overridesToTHB([]budget.EnvelopeOverride{
+		{ShareName: "еда", Amount: 100, Currency: "XXX"},
+	}, map[string]float64{"RUB": 1, "THB": 3})
+	if _, ok := got["еда"]; ok {
+		t.Errorf("override без курса попал в раскладку: %v", got)
+	}
+}
+
+// Лимит словами в рублях и лимит словами в батах, задающие одну и ту же сумму
+// по текущему курсу, обязаны дать ОДНУ И ТУ ЖЕ долю в базе (доли хранятся в
+// THB, ADR-008 §7). Тест сквозной — от входа скилла до записанной доли:
+// именно на этом пути и может задвоиться курс, чего чистая функция
+// overridesToTHB одна не покажет.
+func TestSetShareLimit_SameLimitInRubAndBaht(t *testing.T) {
+	store, pool := shareLimitEnv(t)
+	const chatID = int64(-70039)
+	cleanupChat(t, pool, chatID)
+	t.Cleanup(func() { cleanupChat(t, pool, chatID) })
+
+	ctx := context.WithValue(context.Background(), agent.ChatIDKey{}, chatID)
+	from := time.Now()
+	envID, err := store.CreateEnvelope(ctx, chatID, 300000, "RUB", from, from.AddDate(0, 0, 14))
+	if err != nil {
+		t.Fatalf("CreateEnvelope: %v", err)
+	}
+	skill := NewBudgetSkill(store)
+
+	// Сколько бат в 15000 ₽ по текущему курсу — ту же сумму задаём батами.
+	baht := overrideTHB(t, store, 15000, "RUB")
+
+	mustRun(t, skill, ctx, `{"action":"set_share_limit","name":"еда","amount":15000,"currency":"RUB"}`)
+	inRub := mustFindShare(t, store, ctx, chatID, envID, "еда").Allocated
+
+	mustRun(t, skill, ctx, fmt.Sprintf(
+		`{"action":"set_share_limit","name":"еда","amount":%.4f,"currency":"THB"}`, baht))
+	inBaht := mustFindShare(t, store, ctx, chatID, envID, "еда").Allocated
+
+	if diff := inRub - inBaht; diff > 0.01 || diff < -0.01 {
+		t.Fatalf("один и тот же лимит дал разные доли: %.2f ฿ (задан рублями) vs %.2f ฿ (задан батами)",
+			inRub, inBaht)
+	}
+	// Батовый лимит не должен «сконвертиться» второй раз: сумма в базе равна
+	// названной. Именно так выглядело бы задвоение курса.
+	if diff := inBaht - baht; diff > 0.01 || diff < -0.01 {
+		t.Fatalf("лимит %.2f ฿ записан как %.2f ฿ — курс применён лишний раз", baht, inBaht)
+	}
+}
+
+func mustFindShare(t *testing.T, store *budget.Store, ctx context.Context,
+	chatID int64, envID uuid.UUID, name string) budget.EnvelopeShare {
+	t.Helper()
+	shares, err := store.ListShares(ctx, chatID, envID)
+	if err != nil {
+		t.Fatalf("ListShares: %v", err)
+	}
+	sh, ok := findShare(shares, name)
+	if !ok {
+		t.Fatalf("в раскладке нет доли %q: %+v", name, shareNames(shares))
+	}
+	return sh
+}

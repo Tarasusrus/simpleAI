@@ -3,6 +3,7 @@ package safetospend
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,10 +155,64 @@ func TestRunShares_UsesRecurringFreeSource(t *testing.T) {
 	if !st.spentCalled {
 		t.Fatal("режим конвертов не спросил факт у SpentByCategoryExcludingRecurring")
 	}
-	// 10000 − 1000 = 9000 THB; курс 2.6 ₽/฿ → 23400 ₽. Снапшотный факт (100 THB
-	// по «Еда») в остаток попасть не должен.
-	if !regexpContains(out, `Еда\s+осталось 23400 ₽ из 26000 ₽`) {
-		t.Errorf("ожидался остаток «Еда» 23400 ₽ из 26000 ₽, got:\n%s", out)
+	// 10000 − 1000 = 9000 ฿ (валюту не просили — печатаем батами). Снапшотный
+	// факт (100 THB по «Еда») в остаток попасть не должен.
+	if !regexpContains(out, `Еда\s+осталось 9000 ฿ из 10000 ฿`) {
+		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
+	}
+}
+
+// Валюта конвертов по умолчанию — баты: ни одного рублёвого знака в ответе.
+// Мутация «форматтер всегда печатает рубли» роняет этот тест.
+func TestRunShares_DefaultCurrencyIsTHB(t *testing.T) {
+	s := NewSafeToSpendSkill(&shareStore{}, fakeLLM{}, nil)
+	ctx := context.WithValue(context.Background(), agent.ChatIDKey{}, int64(1))
+
+	out, err := s.Run(ctx, `{"question":"сколько осталось в конвертах?"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "₽") {
+		t.Errorf("без просьбы о рублях ответ обязан быть в батах, got:\n%s", out)
+	}
+}
+
+// «Покажи конверты в рублях» — те же доли рублями по курсу конверта:
+// 9000 ฿ × 2.6 = 23400 ₽ из 26000 ₽. Проверяются оба канала валюты — явное
+// поле от LLM и разбор самой фразы (поле модель заполняет не всегда).
+func TestRunShares_DisplayRUB(t *testing.T) {
+	cases := map[string]string{
+		"поле от LLM": `{"question":"покажи конверты","display_currency":"RUB"}`,
+		"фраза":       `{"question":"покажи конверты в рублях"}`,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := NewSafeToSpendSkill(&shareStore{}, fakeLLM{}, nil)
+			ctx := context.WithValue(context.Background(), agent.ChatIDKey{}, int64(1))
+			out, err := s.Run(ctx, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !regexpContains(out, `Еда\s+осталось 23400 ₽ из 26000 ₽`) {
+				t.Errorf("ожидался остаток «Еда» 23400 ₽ из 26000 ₽, got:\n%s", out)
+			}
+			if strings.Contains(out, "฿") {
+				t.Errorf("просили рубли, а в ответе баты:\n%s", out)
+			}
+		})
+	}
+}
+
+// «В батах» словами — тот же дефолт, но названный явно.
+func TestRunShares_DisplayTHBByWords(t *testing.T) {
+	s := NewSafeToSpendSkill(&shareStore{}, fakeLLM{}, nil)
+	ctx := context.WithValue(context.Background(), agent.ChatIDKey{}, int64(1))
+	out, err := s.Run(ctx, `{"question":"покажи конверты в батах"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexpContains(out, `Еда\s+осталось 9000 ฿ из 10000 ฿`) {
+		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
 	}
 }
 

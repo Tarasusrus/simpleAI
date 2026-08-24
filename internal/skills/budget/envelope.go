@@ -123,11 +123,12 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 	slog.Default().InfoContext(ctx, "start_envelope",
 		"chat_id", chatID, "envelope_id", envID, "amount", req.Amount, "currency", currency,
 		"free_after_obl_thb", plan.Result.FreeAfterObligations, "shares", len(plan.Shares),
-		"warnings", len(plan.Warnings))
+		"warnings", len(plan.Warnings), "display", envelopeDisplay(req, rates).Code)
 
 	return safetospend.FormatEnvelopePlan(safetospend.EnvelopeReply{
 		Plan:           plan,
 		RubPerTHB:      rates["THB"],
+		Display:        envelopeDisplay(req, rates),
 		Period:         h.Label,
 		From:           h.From,
 		To:             h.To,
@@ -135,6 +136,24 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		IncomeCurrency: currency,
 		OutsideTHB:     outsideTHB,
 	}), nil
+}
+
+// envelopeDisplay — валюта, которой печатать конверты: то, что попросил
+// оператор, иначе дефолт THB (safetospend.NewDisplay). Одна точка на весь
+// budget-скилл, чтобы раскладка, пересчёт лимита и предупреждение о пробитом
+// конверте не разъехались по валютам.
+func envelopeDisplay(req budgetInput, rates map[string]float64) safetospend.Display {
+	return safetospend.NewDisplay(displayCode(req), rates["THB"])
+}
+
+// displayCode — код валюты показа из входа LLM, со страховкой разбором текста:
+// модель кладёт просьбу «в рублях» то в display_currency, то в description, то
+// не кладёт никуда. Пусто → NewDisplay сам возьмёт дефолт (THB).
+func displayCode(req budgetInput) string {
+	if c := strings.TrimSpace(req.DisplayCurrency); c != "" {
+		return c
+	}
+	return safetospend.ParseDisplayCurrency(req.Description)
 }
 
 // carryFromPrevious переносит накопления прошлого активного конверта в новую
@@ -204,11 +223,22 @@ func (s *BudgetSkill) shareOverrides(ctx context.Context, chatID int64, rates ma
 		slog.Default().WarnContext(ctx, "start_envelope: overrides (continuing without)", "err", err)
 		return nil
 	}
+	return overridesToTHB(list, rates)
+}
+
+// overridesToTHB — единственное место, где ручной лимит переводится в THB.
+//
+// Вынесено чистой функцией нарочно: «лимит в рублях и лимит в батах при одном
+// курсе дают одну и ту же долю» — утверждение про конвертацию, и проверять его
+// надо там, где она происходит, а не через живой стор. Лимит хранится как
+// сказан (сумма + код валюты), курс применяется ровно один раз — здесь; если
+// бы конвертация была ещё и на записи, курс задвоился бы.
+func overridesToTHB(list []budget.EnvelopeOverride, rates map[string]float64) map[string]float64 {
 	out := make(map[string]float64, len(list))
 	for _, o := range list {
 		thb, ok := budget.ToTHB(o.Amount, o.Currency, rates)
 		if !ok {
-			slog.Default().WarnContext(ctx, "start_envelope: override без курса — пропущен",
+			slog.Default().Warn("start_envelope: override без курса — пропущен",
 				"share", o.ShareName, "currency", o.Currency)
 			continue
 		}

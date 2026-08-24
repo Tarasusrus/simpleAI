@@ -56,7 +56,7 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 	// Предупреждение о пробитом конверте — ПОВЕРХ обычного ответа и только для
 	// расхода: транзакция уже записана и не откатывается (ADR-008, задача 7/8).
 	if typ == "expense" {
-		reply += s.shareOverspendWarning(ctx, t)
+		reply += s.shareOverspendWarning(ctx, t, req)
 	}
 	return reply, nil
 }

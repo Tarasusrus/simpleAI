@@ -104,42 +104,63 @@ func TestShareWarning_WithinLimit(t *testing.T) {
 		env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
 		spent: []budget.CategorySpentRow{{CategoryName: "Еда", Currency: "RUB", Amount: 4000}}, // 2000 ฿ из 5000
 	}
-	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"})
+	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}, budgetInput{})
 	if got != "" {
 		t.Fatalf("ожидали пустое предупреждение, получили %q", got)
 	}
 }
 
 // TestShareWarning_Overspent — трата увела долю в минус: в ответе имя доли и
-// величина перерасхода. Лимит 5000 ฿ = 10000 ₽, потрачено 12000 ₽ → минус 2000 ₽.
+// величина перерасхода. Валюты в запросе нет — печатаем батами (дефолт):
+// лимит 5000 ฿, потрачено 12000 ₽ = 6000 ฿ → минус 1000 ฿.
 func TestShareWarning_Overspent(t *testing.T) {
 	st := &fakeShareStore{
 		env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
 		spent: []budget.CategorySpentRow{{CategoryName: "Еда", Currency: "RUB", Amount: 12000}},
 	}
-	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"})
+	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}, budgetInput{})
 	if !strings.Contains(got, "Еда") {
 		t.Fatalf("нет имени доли в предупреждении: %q", got)
 	}
+	if !strings.Contains(got, "1000 ฿") {
+		t.Fatalf("нет величины перерасхода 1000 ฿: %q", got)
+	}
+	if strings.Contains(got, "₽") {
+		t.Fatalf("без просьбы о рублях предупреждение обязано быть в батах: %q", got)
+	}
+}
+
+// TestShareWarning_DisplayRUB — оператор попросил рубли: то же предупреждение
+// печатается рублями. Тот же перерасход 1000 ฿ = 2000 ₽ при курсе 2 ₽/฿.
+func TestShareWarning_DisplayRUB(t *testing.T) {
+	st := &fakeShareStore{
+		env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
+		spent: []budget.CategorySpentRow{{CategoryName: "Еда", Currency: "RUB", Amount: 12000}},
+	}
+	got := warnSkill(st).shareOverspendWarning(warnCtx(),
+		budget.Transaction{CategoryName: "Еда"}, budgetInput{DisplayCurrency: "RUB"})
 	if !strings.Contains(got, "2000 ₽") {
 		t.Fatalf("нет величины перерасхода 2000 ₽: %q", got)
+	}
+	if strings.Contains(got, "฿") {
+		t.Fatalf("просили рубли, а в ответе баты: %q", got)
 	}
 }
 
 // TestShareWarning_FallbackShare — категория без своей доли попадает в
 // «прочее», и предупреждение считается по доле-приёмнику (ADR-008 §6).
-// Лимит «прочее» 1000 ฿ = 2000 ₽, потрачено 3000 ₽ → минус 1000 ₽.
+// Лимит «прочее» 1000 ฿, потрачено 3000 ₽ = 1500 ฿ → минус 500 ฿.
 func TestShareWarning_FallbackShare(t *testing.T) {
 	st := &fakeShareStore{
 		env: warnEnvelope(), shares: warnShares(), rates: warnRates(),
 		spent: []budget.CategorySpentRow{{CategoryName: "Развлечения", Currency: "RUB", Amount: 3000}},
 	}
-	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Развлечения"})
+	got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Развлечения"}, budgetInput{})
 	if !strings.Contains(got, budget.FallbackShareName) {
 		t.Fatalf("предупреждение не по доле-приёмнику: %q", got)
 	}
-	if !strings.Contains(got, "1000 ₽") {
-		t.Fatalf("нет величины перерасхода 1000 ₽: %q", got)
+	if !strings.Contains(got, "500 ฿") {
+		t.Fatalf("нет величины перерасхода 500 ฿: %q", got)
 	}
 	// Доля «Еда» не должна упоминаться: её лимит трата не трогала.
 	if strings.Contains(got, "Еда") {
@@ -150,7 +171,7 @@ func TestShareWarning_FallbackShare(t *testing.T) {
 // TestShareWarning_NoActiveEnvelope — нет активного конверта: ответ прежний.
 func TestShareWarning_NoActiveEnvelope(t *testing.T) {
 	st := &fakeShareStore{rates: warnRates()}
-	if got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}); got != "" {
+	if got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}, budgetInput{}); got != "" {
 		t.Fatalf("без конверта ожидали пустой ответ, получили %q", got)
 	}
 }
@@ -159,7 +180,7 @@ func TestShareWarning_NoActiveEnvelope(t *testing.T) {
 // предупреждения нет, паники нет, запись траты не затронута.
 func TestShareWarning_ComputeFailureIsSilent(t *testing.T) {
 	st := &fakeShareStore{err: errors.New("боль в БД")}
-	if got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}); got != "" {
+	if got := warnSkill(st).shareOverspendWarning(warnCtx(), budget.Transaction{CategoryName: "Еда"}, budgetInput{}); got != "" {
 		t.Fatalf("при сбое ожидали пустой ответ, получили %q", got)
 	}
 }

@@ -78,7 +78,7 @@ func formatRemaining(r RemainingResult, rubPerTHB float64, env *budget.Envelope)
 
 // runShares — режим «сколько осталось в конвертах» (ADR-008 §8). Скилл
 // read-only: остаток считается из фактических транзакций и никуда не пишется.
-func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates map[string]float64) (string, error) {
+func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates map[string]float64, m Display) (string, error) {
 	env, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
 	if err != nil {
 		s.logger.WarnContext(ctx, "safe_to_spend: shares get active envelope", "err", err, "chat_id", chatID)
@@ -119,9 +119,9 @@ func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates ma
 	}
 
 	items := computeShareRemaining(shares, rowsSpent, rates)
-	reply := formatShareRemaining(items, rates["THB"], env)
+	reply := formatShareRemaining(items, m, env)
 	s.logger.InfoContext(ctx, "safe_to_spend.shares",
-		"chat_id", chatID, "envelope_id", env.ID, "shares", len(items))
+		"chat_id", chatID, "envelope_id", env.ID, "shares", len(items), "display", m.Code)
 	return reply, nil
 }
 

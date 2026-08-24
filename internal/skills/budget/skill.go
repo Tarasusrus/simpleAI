@@ -118,7 +118,11 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"currency": map[string]any{
 						"type":        "string",
-						"description": "Transaction currency: RUB (default), USD, EUR, THB, etc. (ISO 4217)",
+						"description": "Currency of the AMOUNT in the message: RUB (default), USD, EUR, THB, etc. (ISO 4217). For set_share_limit pass THB when the user names the limit in baht ('на еду хватит 5000 бат') and RUB when in roubles ('на еду хватит 15000 рублей').",
+					},
+					"display_currency": map[string]any{
+						"type":        "string",
+						"description": "Currency to SHOW envelopes in: THB (default, 'в батах') or RUB ('разложи и покажи в рублях', 'покажи конверты в рублях'). Affects only the printed answer, never the stored amounts. Not the same as currency, which describes the amount in the message.",
 					},
 					"transaction_id": map[string]any{
 						"type":        "string",
@@ -181,34 +185,37 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 
 // budgetInput — входные данные от LLM.
 type budgetInput struct {
-	Action           string  `json:"action"`
-	Amount           float64 `json:"amount,omitempty"`
-	Category         string  `json:"category,omitempty"`
-	Description      string  `json:"description,omitempty"`
-	Period           string  `json:"period,omitempty"`
-	Name             string  `json:"name,omitempty"`
-	TargetAmount     float64 `json:"target_amount,omitempty"`
-	Deadline         string  `json:"deadline,omitempty"`
-	GoalID           string  `json:"goal_id,omitempty"`
-	DebtID           string  `json:"debt_id,omitempty"`
-	Total            float64 `json:"total,omitempty"`
-	Monthly          float64 `json:"monthly,omitempty"`
-	Counterparty     string  `json:"counterparty,omitempty"`
-	Direction        string  `json:"direction,omitempty"`
-	Currency         string  `json:"currency,omitempty"`
-	TransactionID    string  `json:"transaction_id,omitempty"`
-	Keyword          string  `json:"keyword,omitempty"`
-	Date             string  `json:"date,omitempty"`
-	DateFrom         string  `json:"date_from,omitempty"`
-	DateTo           string  `json:"date_to,omitempty"`
-	ReminderEnabled  *bool   `json:"reminder_enabled,omitempty"`
-	ReminderHour     *int    `json:"reminder_hour,omitempty"`
-	ReminderMinute   *int    `json:"reminder_minute,omitempty"`
-	ReminderTimezone string  `json:"reminder_timezone,omitempty"`
-	RecurringID      string  `json:"recurring_id,omitempty"`
-	DayOfMonth       *int    `json:"day_of_month,omitempty"`
-	TransactionType  string  `json:"transaction_type,omitempty"`
-	Months           int     `json:"months,omitempty"`
+	Action       string  `json:"action"`
+	Amount       float64 `json:"amount,omitempty"`
+	Category     string  `json:"category,omitempty"`
+	Description  string  `json:"description,omitempty"`
+	Period       string  `json:"period,omitempty"`
+	Name         string  `json:"name,omitempty"`
+	TargetAmount float64 `json:"target_amount,omitempty"`
+	Deadline     string  `json:"deadline,omitempty"`
+	GoalID       string  `json:"goal_id,omitempty"`
+	DebtID       string  `json:"debt_id,omitempty"`
+	Total        float64 `json:"total,omitempty"`
+	Monthly      float64 `json:"monthly,omitempty"`
+	Counterparty string  `json:"counterparty,omitempty"`
+	Direction    string  `json:"direction,omitempty"`
+	Currency     string  `json:"currency,omitempty"`
+	// DisplayCurrency — валюта ПОКАЗА конвертов (THB по умолчанию). Хранение
+	// долей не трогает: allocated/carried_in всегда в THB (ADR-008 §7).
+	DisplayCurrency  string `json:"display_currency,omitempty"`
+	TransactionID    string `json:"transaction_id,omitempty"`
+	Keyword          string `json:"keyword,omitempty"`
+	Date             string `json:"date,omitempty"`
+	DateFrom         string `json:"date_from,omitempty"`
+	DateTo           string `json:"date_to,omitempty"`
+	ReminderEnabled  *bool  `json:"reminder_enabled,omitempty"`
+	ReminderHour     *int   `json:"reminder_hour,omitempty"`
+	ReminderMinute   *int   `json:"reminder_minute,omitempty"`
+	ReminderTimezone string `json:"reminder_timezone,omitempty"`
+	RecurringID      string `json:"recurring_id,omitempty"`
+	DayOfMonth       *int   `json:"day_of_month,omitempty"`
+	TransactionType  string `json:"transaction_type,omitempty"`
+	Months           int    `json:"months,omitempty"`
 }
 
 // Run выполняет действие и возвращает текстовый ответ.

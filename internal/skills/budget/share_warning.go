@@ -36,7 +36,7 @@ type shareWarningStore interface {
 // Остаток НЕ считается здесь заново: он берётся из safetospend.ShareRemainingFor
 // поверх computeShareRemaining — единственного места, где живёт формула
 // remaining = allocated + carried_in − факт (ADR-008 §8).
-func (s *BudgetSkill) shareOverspendWarning(ctx context.Context, t budget.Transaction) string {
+func (s *BudgetSkill) shareOverspendWarning(ctx context.Context, t budget.Transaction, req budgetInput) string {
 	st := s.shareStore
 	if st == nil {
 		return ""
@@ -89,17 +89,16 @@ func (s *BudgetSkill) shareOverspendWarning(ctx context.Context, t budget.Transa
 	if !ok {
 		return "" // трате некуда падать — нет даже fallback-доли (ADR-008 §6)
 	}
-	return formatShareWarning(rem, rates["THB"])
+	return formatShareWarning(rem, envelopeDisplay(req, rates))
 }
 
 // formatShareWarning — текст предупреждения. Чистая функция: показывать нечего,
-// пока доля не пробита. Суммы в ₽ — той же валютой, что и весь ответ про
-// конверты (доли хранятся в THB, ADR-008 §7).
-func formatShareWarning(rem safetospend.ShareRemaining, rubPerTHB float64) string {
+// пока доля не пробита. Валюта — та же, что и во всём ответе про конверты
+// (по умолчанию баты); хранятся доли всё равно в THB (ADR-008 §7).
+func formatShareWarning(rem safetospend.ShareRemaining, m safetospend.Display) string {
 	if !rem.Overspent() {
 		return ""
 	}
-	over := -rem.Remaining * rubPerTHB
-	return fmt.Sprintf("\n\n⚠️ Конверт «%s» пробит на %.0f ₽ (лимит %.0f ₽, потрачено %.0f ₽).",
-		rem.Name, over, rem.LimitTHB*rubPerTHB, rem.SpentTHB*rubPerTHB)
+	return fmt.Sprintf("\n\n⚠️ Конверт «%s» пробит на %s (лимит %s, потрачено %s).",
+		rem.Name, m.Fmt(-rem.Remaining), m.Fmt(rem.LimitTHB), m.Fmt(rem.SpentTHB))
 }
