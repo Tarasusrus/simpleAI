@@ -164,6 +164,13 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64, re
 		return nil, false, fmt.Errorf("глубина истории: %w", err)
 	}
 
+	// Регулярные платежи — такие же конверты, как еда (simpleAI-faeq.11). Без
+	// них пересчёт раздал бы по гибким долям деньги, уже обещанные аренде.
+	recurring, err := s.store.ListRecurring(ctx, chatID)
+	if err != nil {
+		return nil, false, fmt.Errorf("регулярные платежи: %w", err)
+	}
+
 	plan := safetospend.PlanEnvelope(safetospend.EnvelopePlanInput{
 		IncomeTHB:  incomeTHB,
 		Snapshot:   snap,
@@ -173,6 +180,8 @@ func (s *BudgetSkill) replanActiveEnvelope(ctx context.Context, chatID int64, re
 		Days:       h.Days(),
 		Overrides:  s.shareOverrides(ctx, chatID, rates),
 		History:    history,
+		Recurring:  recurring,
+		From:       h.From,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 	plan.Shares, err = s.keepCarriedIn(ctx, chatID, env.ID, plan.Shares)
@@ -243,6 +252,11 @@ func formatReplan(r replan) string {
 	m := r.display
 	var b strings.Builder
 	b.WriteString("Пересчитал текущий конверт:\n")
+	// Регулярные платежи показываем наравне с гибкими конвертами: делить траты
+	// на «обязательные» и «на жизнь» оператор запретил (simpleAI-faeq.11 §1).
+	for _, sh := range safetospend.FixedShares(r.plan.Shares) {
+		fmt.Fprintf(&b, "   • %s — %s (платёж)\n", sh.Name, m.Fmt(sh.Allocated))
+	}
 	for _, sh := range safetospend.SpendShares(r.plan.Shares) {
 		mark := ""
 		if sh.Source == budget.ShareSourceOverride {

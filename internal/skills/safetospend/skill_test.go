@@ -157,7 +157,7 @@ func TestRunShares_UsesRecurringFreeSource(t *testing.T) {
 	}
 	// 10000 − 1000 = 9000 ฿ (валюту не просили — печатаем батами). Снапшотный
 	// факт (100 THB по «Еда») в остаток попасть не должен.
-	if !regexpContains(out, `Еда\s+осталось 9000 ฿ из 10000 ฿`) {
+	if !regexpContains(out, `Еда\s+осталось 9 000 ฿ из 10 000 ฿`) {
 		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
 	}
 }
@@ -193,7 +193,7 @@ func TestRunShares_DisplayRUB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !regexpContains(out, `Еда\s+осталось 23400 ₽ из 26000 ₽`) {
+			if !regexpContains(out, `Еда\s+осталось 23 400 ₽ из 26 000 ₽`) {
 				t.Errorf("ожидался остаток «Еда» 23400 ₽ из 26000 ₽, got:\n%s", out)
 			}
 			if strings.Contains(out, "฿") {
@@ -211,7 +211,7 @@ func TestRunShares_DisplayTHBByWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexpContains(out, `Еда\s+осталось 9000 ฿ из 10000 ฿`) {
+	if !regexpContains(out, `Еда\s+осталось 9 000 ฿ из 10 000 ฿`) {
 		t.Errorf("ожидался остаток «Еда» 9000 ฿ из 10000 ฿, got:\n%s", out)
 	}
 }

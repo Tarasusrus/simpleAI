@@ -125,7 +125,7 @@ func TestAllocateShares(t *testing.T) {
 			want: map[string]float64{
 				"Еда": 6000, budget.FallbackShareName: 0, savingsShareName: 4000,
 			},
-			wantWarn: "мало данных по «Одежда»",
+			wantWarn: "Мало истории: Одежда",
 		},
 		{
 			name:     "нулевой free: лимитов нет",
@@ -335,7 +335,7 @@ func TestAcceptance_Allocate_27800(t *testing.T) {
 			t.Errorf("доля %q: want %.2f, got %.2f", name, w, got[name])
 		}
 	}
-	if !hasWarning(warnings, "мало данных по «Одежда»") {
+	if !hasWarning(warnings, "Мало истории: Одежда") {
 		t.Errorf("ожидался warning про Одежду, got %v", warnings)
 	}
 }

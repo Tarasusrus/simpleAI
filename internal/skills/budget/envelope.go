@@ -79,6 +79,14 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		return "Не удалось оценить глубину истории трат — попробуй позже.", nil
 	}
 	overrides := s.shareOverrides(ctx, chatID, rates)
+	// Регулярные платежи становятся видимыми конвертами (simpleAI-faeq.11).
+	// Ошибка чтения НЕ проглатывается: без них раскладка разделит между едой и
+	// накоплениями деньги, которые уже обещаны аренде и кредиту.
+	recurring, err := s.store.ListRecurring(ctx, chatID)
+	if err != nil {
+		slog.Default().ErrorContext(ctx, "start_envelope: recurring", "err", err, "chat_id", chatID)
+		return "Не удалось поднять регулярные платежи — без них раскладка обещала бы деньги, которые уже расписаны. Попробуй позже.", nil
+	}
 
 	plan := safetospend.PlanEnvelope(safetospend.EnvelopePlanInput{
 		IncomeTHB:  incomeTHB,
@@ -89,6 +97,8 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		Days:       h.Days(),
 		Overrides:  overrides,
 		History:    history,
+		Recurring:  recurring,
+		From:       h.From,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 
@@ -108,22 +118,16 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		return "Не удалось сохранить конверт — попробуй ещё раз.", nil
 	}
 
-	// «Вне конвертов» — факт с начала конверта по сегодня. Конец периода в
-	// будущем, а факта из будущего не бывает: верхняя граница обрезается по now.
-	outsideTo := time.Now()
-	if outsideTo.After(h.To) {
-		outsideTo = h.To
-	}
-	outsideTHB, err := s.store.SpentOutsideShares(ctx, h.From, outsideTo, rates)
-	if err != nil {
-		slog.Default().WarnContext(ctx, "start_envelope: outside shares (continuing with 0)", "err", err)
-		outsideTHB = 0
-	}
-
 	slog.Default().InfoContext(ctx, "start_envelope",
 		"chat_id", chatID, "envelope_id", envID, "amount", req.Amount, "currency", currency,
 		"free_after_obl_thb", plan.Result.FreeAfterObligations, "shares", len(plan.Shares),
 		"warnings", len(plan.Warnings), "display", envelopeDisplay(req, rates).Code)
+
+	// Строки «вне конвертов» больше нет: она показывала 0 ฿ при аренде 18 000 и
+	// уборке 2 500 за период (simpleAI-faeq.10, баг 4) — потому что считала
+	// ФАКТ прошедших трат, а оператор читал её как «что ещё предстоит». Теперь
+	// каждый предстоящий платёж стоит своей строкой с датой, и объяснять
+	// расхождение отдельной сводкой больше нечем.
 
 	return safetospend.FormatEnvelopePlan(safetospend.EnvelopeReply{
 		Plan:           plan,
@@ -134,7 +138,6 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		To:             h.To,
 		IncomeAmount:   req.Amount,
 		IncomeCurrency: currency,
-		OutsideTHB:     outsideTHB,
 	}), nil
 }
 

@@ -1208,10 +1208,10 @@ func insertSharesTx(ctx context.Context, tx pgx.Tx, envelopeID uuid.UUID, shares
 		var shareID uuid.UUID
 		err := tx.QueryRow(ctx, `
 			INSERT INTO budget_envelope_share
-				(envelope_id, name, kind, allocated, carried_in, source, position)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+				(envelope_id, name, kind, allocated, carried_in, source, position, due_date)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING id
-		`, envelopeID, name, sh.Kind, sh.Allocated, sh.CarriedIn, sh.Source, position).Scan(&shareID)
+		`, envelopeID, name, sh.Kind, sh.Allocated, sh.CarriedIn, sh.Source, position, sh.DueDate).Scan(&shareID)
 		if err != nil {
 			return fmt.Errorf("CreateShares insert share %q: %w", name, err)
 		}
@@ -1237,7 +1237,7 @@ func insertSharesTx(ctx context.Context, tx pgx.Tx, envelopeID uuid.UUID, shares
 // join чужой envelope_id прочитал бы чужую раскладку (ADR-004 изоляция).
 func (s *Store) ListShares(ctx context.Context, chatID int64, envelopeID uuid.UUID) ([]EnvelopeShare, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT sh.id, sh.envelope_id, sh.name, sh.kind, sh.allocated, sh.carried_in, sh.source, sh.position
+		SELECT sh.id, sh.envelope_id, sh.name, sh.kind, sh.allocated, sh.carried_in, sh.source, sh.position, sh.due_date
 		FROM budget_envelope_share sh
 		JOIN budget_envelope e ON e.id = sh.envelope_id
 		WHERE e.id = $1 AND e.chat_id = $2
@@ -1252,7 +1252,7 @@ func (s *Store) ListShares(ctx context.Context, chatID int64, envelopeID uuid.UU
 	byID := map[uuid.UUID]int{}
 	for rows.Next() {
 		var sh EnvelopeShare
-		if err := rows.Scan(&sh.ID, &sh.EnvelopeID, &sh.Name, &sh.Kind, &sh.Allocated, &sh.CarriedIn, &sh.Source, &sh.Position); err != nil {
+		if err := rows.Scan(&sh.ID, &sh.EnvelopeID, &sh.Name, &sh.Kind, &sh.Allocated, &sh.CarriedIn, &sh.Source, &sh.Position, &sh.DueDate); err != nil {
 			return nil, fmt.Errorf("ListShares scan: %w", err)
 		}
 		byID[sh.ID] = len(out)

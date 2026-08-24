@@ -8,10 +8,11 @@ import (
 	"simpleAI/internal/budget"
 )
 
-// planForDisplay — раскладка с одной тратной долей, одной сберегательной и
-// переносом с прошлого раза: в печати участвуют все три строки, валюту которых
-// проверяет тест.
+// planForDisplay — раскладка со всеми тремя видами долей: запертый регулярный
+// платёж, гибкий конверт и накопления с переносом. В печати участвуют все три,
+// и валюту каждой проверяет тест.
 func planForDisplay() EnvelopePlan {
+	due := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
 	return EnvelopePlan{
 		Result: Result{
 			IncomeTHB:            10000,
@@ -20,24 +21,24 @@ func planForDisplay() EnvelopePlan {
 			FreeAfterObligations: 9000,
 		},
 		Shares: []budget.EnvelopeShare{
-			{Name: "еда", Kind: budget.ShareKindSpend, Allocated: 5000, Position: 0},
-			{Name: "накопления", Kind: budget.ShareKindSave, Allocated: 4000, CarriedIn: 2000, Position: 1},
+			{Name: "аренда", Kind: budget.ShareKindFixed, Allocated: 1000, DueDate: &due, Position: 0},
+			{Name: "еда", Kind: budget.ShareKindSpend, Allocated: 5000, Position: 1},
+			{Name: "накопления", Kind: budget.ShareKindSave, Allocated: 4000, CarriedIn: 2000, Position: 2},
 		},
 	}
 }
 
 func replyForDisplay(m Display) EnvelopeReply {
-	now := time.Now()
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
 	return EnvelopeReply{
 		Plan:           planForDisplay(),
 		RubPerTHB:      2,
 		Display:        m,
 		Period:         "ближайшие 2 недели",
-		From:           now,
-		To:             now.AddDate(0, 0, 14),
+		From:           from,
+		To:             from.AddDate(0, 0, 13),
 		IncomeAmount:   20000,
 		IncomeCurrency: "RUB",
-		OutsideTHB:     300,
 	}
 }
 
@@ -47,21 +48,17 @@ func replyForDisplay(m Display) EnvelopeReply {
 func TestFormatEnvelopePlan_DefaultTHB(t *testing.T) {
 	out := FormatEnvelopePlan(replyForDisplay(NewDisplay("", 2)))
 	for _, want := range []string{
-		"💰 Приход: 10000 ฿",
-		"= К раскладке: 9000 ฿",
-		"5000 ฿",
-		"🆓 Свободно: 4000 ฿",
-		"Перенесено с прошлого раза: 2000 ฿",
-		"Вне конвертов: 300 ฿",
+		"Пришло 20 000 ₽ · 10 000 ฿",
+		"Перенос с прошлого раза 2 000 ฿",
+		"Аренда             10.09   1 000",
+		"Еда                        5 000",
+		"Накопления                 6 000",
+		"                          12 000",
+		"**На день: 357 ฿**",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("нет строки %q в батовой раскладке:\n%s", want, out)
 		}
-	}
-	// Заголовок остаётся в валюте прихода: «пришло 20000 ₽» обязано остаться
-	// 20000 ₽, иначе оператор не узнает собственный приход.
-	if !strings.Contains(out, "Конверт заведён: 20000 ₽") {
-		t.Errorf("приход в заголовке потерял валюту оператора:\n%s", out)
 	}
 }
 
@@ -71,12 +68,13 @@ func TestFormatEnvelopePlan_DefaultTHB(t *testing.T) {
 func TestFormatEnvelopePlan_DisplayRUB(t *testing.T) {
 	out := FormatEnvelopePlan(replyForDisplay(NewDisplay("RUB", 2)))
 	for _, want := range []string{
-		"💰 Приход: 20000 ₽",
-		"= К раскладке: 18000 ₽",
-		"10000 ₽",
-		"🆓 Свободно: 8000 ₽",
-		"Перенесено с прошлого раза: 4000 ₽",
-		"Вне конвертов: 600 ₽",
+		"Пришло 20 000 ₽",
+		"Перенос с прошлого раза 4 000 ₽",
+		"Аренда             10.09   2 000",
+		"Еда                       10 000",
+		"Накопления                12 000",
+		"                          24 000",
+		"**На день: 714 ₽**",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("нет строки %q в рублёвой раскладке:\n%s", want, out)

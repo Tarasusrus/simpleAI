@@ -122,7 +122,7 @@ func TestShareWarning_Overspent(t *testing.T) {
 	if !strings.Contains(got, "Еда") {
 		t.Fatalf("нет имени доли в предупреждении: %q", got)
 	}
-	if !strings.Contains(got, "1000 ฿") {
+	if !strings.Contains(got, "1 000 ฿") {
 		t.Fatalf("нет величины перерасхода 1000 ฿: %q", got)
 	}
 	if strings.Contains(got, "₽") {
@@ -139,7 +139,7 @@ func TestShareWarning_DisplayRUB(t *testing.T) {
 	}
 	got := warnSkill(st).shareOverspendWarning(warnCtx(),
 		budget.Transaction{CategoryName: "Еда"}, budgetInput{DisplayCurrency: "RUB"})
-	if !strings.Contains(got, "2000 ₽") {
+	if !strings.Contains(got, "2 000 ₽") {
 		t.Fatalf("нет величины перерасхода 2000 ₽: %q", got)
 	}
 	if strings.Contains(got, "฿") {

@@ -3,6 +3,7 @@ package safetospend
 import (
 	"math"
 	"testing"
+	"time"
 
 	"simpleAI/internal/budget"
 )
@@ -179,5 +180,79 @@ func TestPlanEnvelope_InvariantHolds(t *testing.T) {
 	}
 	if math.Abs(total-in.IncomeTHB) > 0.005 {
 		t.Errorf("Σ allocated = %.2f, приход = %.2f — итог обязан сходиться с приходом до бата", total, in.IncomeTHB)
+	}
+}
+
+// Регулярные платежи становятся видимыми конвертами, а не скрытым вычетом
+// (simpleAI-faeq.11 §1–§4): каждый — своей строкой с датой, включая платёж ЗА
+// границей периода, а итог сходится с приходом до бата.
+func TestPlanEnvelope_RecurringBecomeVisibleShares(t *testing.T) {
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	rec := []budget.RecurringPayment{
+		{Name: "аренда", Type: "expense", Amount: 18000, Currency: "THB", Enabled: true,
+			NextDate: time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)}, // ЗА границей периода
+		{Name: "Кредит потребительский Сбербанк", Type: "expense", Amount: 28500, Currency: "RUB", Enabled: true,
+			NextDate: time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)},
+		{Name: "кредитная карта", Type: "expense", Amount: 12500, Currency: "RUB", Enabled: false,
+			NextDate: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, // выключен — не платёж
+		{Name: "зарплата", Type: "income", Amount: 100000, Currency: "RUB", Enabled: true,
+			NextDate: time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)}, // доход — не расход
+		{Name: "страховка", Type: "expense", Amount: 50000, Currency: "RUB", Enabled: true,
+			NextDate: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}, // вне окна финансирования
+	}
+	rates := map[string]float64{"RUB": 1, "THB": 3.1}
+
+	plan := PlanEnvelope(EnvelopePlanInput{
+		IncomeTHB: 40967.74,
+		// Сводная сумма обязательств из снимка обязана быть ПОДМЕНЕНА суммой
+		// пофамильных конвертов, а не сложена с ней: это одни и те же деньги.
+		Snapshot:  &budget.AdvisorSnapshot{UpcomingRecurring: 99999},
+		Forecast:  []budget.CategoryForecast{{CategoryName: "Еда", Currency: "THB", ForecastAmount: 11571}},
+		Rates:     rates,
+		Days:      14,
+		History:   map[string]int{"еда": 3},
+		Recurring: rec,
+		From:      from,
+	})
+
+	fixed := FixedShares(plan.Shares)
+	if len(fixed) != 2 {
+		t.Fatalf("видимых платежей %d, ожидалось 2 (аренда и кредит): %+v", len(fixed), fixed)
+	}
+	if fixed[0].Name != "аренда" || !eq(fixed[0].Allocated, 18000) {
+		t.Errorf("первым платежом ожидалась аренда 18000: %+v", fixed[0])
+	}
+	if fixed[0].DueDate == nil || fixed[0].DueDate.Format("02.01") != "10.09" {
+		t.Errorf("платёж за границей периода потерял дату: %+v", fixed[0])
+	}
+	if !eq(plan.Result.RecurringTHB, 18000+roundKopecks(28500/3.1)) {
+		t.Errorf("обязательства = %.2f — сводная сумма снимка не подменена суммой конвертов", plan.Result.RecurringTHB)
+	}
+
+	var total float64
+	for _, sh := range plan.Shares {
+		total += sh.Allocated
+	}
+	if math.Abs(total-40967.74) > 0.005 {
+		t.Errorf("Σ конвертов = %.2f, приход = 40967.74 — итог обязан сходиться до бата", total)
+	}
+	checkEnvelopeInvariant(t, plan.Shares, 40967.74, 0)
+}
+
+// Малый приход не ломает раскладку: конверты урезаются, дневной лимит считается
+// от них, а не от прихода (simpleAI-faeq.11 §5).
+func TestPlanEnvelope_TinyIncomeStillPlans(t *testing.T) {
+	plan := PlanEnvelope(EnvelopePlanInput{
+		IncomeTHB: 3.2, // «пришло 10 рублей»
+		Snapshot:  &budget.AdvisorSnapshot{},
+		Forecast:  []budget.CategoryForecast{{CategoryName: "Еда", Currency: "THB", ForecastAmount: 11571}},
+		Rates:     map[string]float64{"RUB": 1, "THB": 3.1},
+		Days:      14,
+		History:   map[string]int{"еда": 3},
+		From:      time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC),
+	})
+	checkEnvelopeInvariant(t, plan.Shares, 3.2, 0)
+	if DailyLimit(FlexibleTHB(plan.Shares), 14) < 0 {
+		t.Error("дневной лимит ушёл в минус")
 	}
 }

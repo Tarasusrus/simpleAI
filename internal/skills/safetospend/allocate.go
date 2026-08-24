@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
+	"time"
 
 	"simpleAI/internal/budget"
 )
@@ -45,6 +47,15 @@ type EnvelopePlanInput struct {
 	Days       int                // длина горизонта конверта
 	Overrides  map[string]float64 // ручные лимиты, THB, ключ нормализован
 	History    map[string]int     // категория → полных месяцев данных
+	// Recurring — ВСЕ регулярные платежи чата. Каждый попавший в окно
+	// финансирования становится отдельным видимым конвертом kind='fixed'.
+	// Заменяет собой Snapshot.UpcomingRecurring: сводная сумма обязательств и
+	// пофамильные конверты — одни и те же деньги, и складывать их значит
+	// вычесть обязательства дважды.
+	Recurring []budget.RecurringPayment
+	// From — начало периода конверта; от него отсчитывается окно
+	// финансирования регулярных платежей.
+	From time.Time
 }
 
 // EnvelopePlan — результат раскладки: детерминированные числа и доли.
@@ -65,11 +76,154 @@ func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
 	if snap == nil {
 		snap = &budget.AdvisorSnapshot{}
 	}
+	fixed, warnings := fixedShares(in.Recurring, in.Rates, in.From)
+
+	// Обязательства снимаются с прихода РОВНО ОДИН раз — суммой пофамильных
+	// fixed-конвертов. Snapshot.UpcomingRecurring здесь подменяется ею, а не
+	// складывается: это одни и те же платежи, посчитанные с разными границами
+	// (снимок режет период конверта, окно финансирования — месяц вперёд).
+	obligations := *snap
+	obligations.UpcomingRecurring = sumAllocatedShares(fixed)
+
 	_, forecastTHB := buildForecastBreakdown(in.Forecast, in.Rates, in.Days)
-	res := computeSafeToSpend(in.IncomeTHB, snap, in.PlannedTHB, forecastTHB)
-	shares, warnings := allocateShares(
+	res := computeSafeToSpend(in.IncomeTHB, &obligations, in.PlannedTHB, forecastTHB)
+
+	flexible, allocWarn := allocateShares(
 		res.FreeAfterObligations, in.Forecast, in.Rates, in.Days, in.Overrides, in.History)
+	warnings = append(warnings, allocWarn...)
+
+	shares := make([]budget.EnvelopeShare, 0, len(fixed)+len(flexible))
+	shares = append(shares, fixed...)
+	shares = append(shares, flexible...)
+	for i := range shares {
+		shares[i].Position = i
+	}
 	return EnvelopePlan{Result: res, Shares: shares, Warnings: warnings}
+}
+
+// fixedShares превращает регулярные платежи в видимые конверты (simpleAI-faeq.11).
+//
+// Почему платежи стали конвертами, а не остались скрытым вычетом: оператор
+// отверг деление трат на «обязательные» и «на жизнь» — «есть мне тоже надо, или
+// ты считаешь что еда необязательна?». Ресёрч конвертного бюджетирования на его
+// стороне: у YNAB обязательные платежи — первые КАТЕГОРИИ плана, финансируемые
+// первыми, а не вычет до раскладки. Скрытый вычет ещё и ломает сходимость: в
+// ответе бота приход не сходился визуально, 12 332 ฿ исчезали без строки.
+//
+// Окно финансирования — месяц вперёд от начала периода, а НЕ период конверта.
+// Аренда платится 10.09, период кончается 06.09, но отложить деньги надо сейчас:
+// иначе приход между 06.09 и 10.09 придётся на пустой карман (sinking fund).
+//
+// Категорий у fixed-доли нет: её факт — сам recurring-платёж, а транзакции с
+// recurring_id в факт долей не попадают (ADR-008 §5). Дай мы ей категорию,
+// платёж посчитался бы и обязательством, и тратой конверта.
+//
+// Порядок — по убыванию суммы: колонка чисел читается сверху вниз, и крупное
+// обязательство должно быть первым (ADR-008 §11 — числа считает Go, не LLM).
+func fixedShares(rec []budget.RecurringPayment, rates map[string]float64, from time.Time) ([]budget.EnvelopeShare, []string) {
+	if len(rec) == 0 {
+		return nil, nil
+	}
+	windowEnd := from.AddDate(0, 0, fixedFundingDays)
+	var warnings []string
+	out := make([]budget.EnvelopeShare, 0, len(rec))
+	for _, r := range rec {
+		if !r.Enabled || r.Type != "expense" {
+			continue
+		}
+		if r.NextDate.Before(dayStart(from)) || !r.NextDate.Before(windowEnd) {
+			continue
+		}
+		thb, ok := budget.ToTHB(r.Amount, r.Currency, rates)
+		if !ok {
+			// Курса нет — выдумывать сумму нельзя, но и молчать нельзя: платёж
+			// исчезнет из плана, а деньги на него всё равно уйдут.
+			warnings = append(warnings, fmt.Sprintf("«%s» — нет курса %s, платёж не заложен", r.Name, r.Currency))
+			continue
+		}
+		due := r.NextDate
+		out = append(out, budget.EnvelopeShare{
+			Name:      r.Name,
+			Kind:      budget.ShareKindFixed,
+			Allocated: roundKopecks(thb),
+			Source:    budget.ShareSourceAuto,
+			DueDate:   &due,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Allocated != out[j].Allocated {
+			return out[i].Allocated > out[j].Allocated
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, warnings
+}
+
+// dayStart — начало суток: next_date хранится DATE (полночь UTC), а from
+// приходит с временем. Без обрезки платёж «сегодня» отсекался бы как прошлый.
+func dayStart(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+func sumAllocatedShares(shares []budget.EnvelopeShare) float64 {
+	var total float64
+	for _, sh := range shares {
+		total += sh.Allocated
+	}
+	return total
+}
+
+// FixedShares — конверты под регулярные платежи: заперты, тратить нельзя.
+func FixedShares(shares []budget.EnvelopeShare) []budget.EnvelopeShare {
+	return filterShares(shares, budget.ShareKindFixed)
+}
+
+// DailyLimit — сколько можно тратить в день: гибкие конверты, делённые на
+// оставшиеся дни (simpleAI-faeq.11 §5).
+//
+// Приход в формуле НЕ участвует. Это не украшение: лимит обязан работать и при
+// приходе в 10 рублей, и при нулевом — конверты уже наполнены прошлым приходом,
+// и вопрос «сколько можно сегодня» от факта нового прихода не зависит.
+//
+// В числитель входят только гибкие доли (kind='spend'): fixed заперты под
+// конкретный платёж, save — накопления. Тратить из них «в день» нельзя.
+//
+// Пересчитывается при каждом показе от ОСТАТКА долей, поэтому потраченные в
+// первый день 2000 ฿ автоматически опускают планку на остаток дней. Это
+// зеркало, а не запрет.
+func DailyLimit(flexibleTHB float64, daysLeft int) float64 {
+	if daysLeft < 1 {
+		daysLeft = 1
+	}
+	if flexibleTHB <= 0 {
+		return 0
+	}
+	return flexibleTHB / float64(daysLeft)
+}
+
+// FlexibleTHB — числитель дневного лимита на момент раскладки: лимиты гибких
+// долей вместе с перенесённым остатком.
+func FlexibleTHB(shares []budget.EnvelopeShare) float64 {
+	var total float64
+	for _, sh := range shares {
+		if sh.Kind == budget.ShareKindSpend {
+			total += sh.Allocated + sh.CarriedIn
+		}
+	}
+	return total
+}
+
+// FlexibleRemainingTHB — тот же числитель, но по ОСТАТКУ долей: им считается
+// дневной лимит после трат. Отдельная функция, а не флаг: у «сколько заложено»
+// и «сколько осталось» разные источники, и путать их нельзя.
+func FlexibleRemainingTHB(items []ShareRemaining) float64 {
+	var total float64
+	for _, it := range items {
+		if it.Kind == budget.ShareKindSpend {
+			total += it.Remaining
+		}
+	}
+	return total
 }
 
 // SpendShares / SaveShares — разрез раскладки для показа: лимиты трат и то, что
@@ -156,12 +310,13 @@ func buildDrafts(
 
 	fallback := &shareDraft{name: budget.FallbackShareName, source: budget.ShareSourceAuto}
 	drafts := make([]*shareDraft, 0, len(items)+1)
+	var lowData []string
 
 	for _, it := range items {
 		norm := normalizeShareName(it.Category)
 		if historyMonths(history, it.Category) < minHistoryMonths {
 			// Лимит не выдумываем: сумма по одному месяцу — не статистика.
-			warnings = append(warnings, fmt.Sprintf("мало данных по «%s» — лимит не назначен", it.Category))
+			lowData = append(lowData, it.Category)
 			fallback.categories = append(fallback.categories, norm)
 			continue
 		}
@@ -191,7 +346,31 @@ func buildDrafts(
 		})
 	}
 
-	return append(drafts, fallback), warnings
+	return append(drafts, fallback), append(warnings, lowDataWarning(lowData)...)
+}
+
+// lowDataWarning сворачивает «мало данных» в ОДНУ строку.
+//
+// По строке на категорию было ровно тем антипаттерном, который ресёрч
+// конвертного бюджетирования называет главной причиной развала метода: живой
+// прогон дал одиннадцать предупреждений подряд — «ресторан», «корм», «связь»,
+// «цветы», «посуда»… Одиннадцать строк шума прячут сам ответ, а действие у
+// оператора на все них одно: подождать, пока накопится статистика, либо
+// назначить лимит словами. Список обрезается — читать хвост из мелких
+// категорий человек всё равно не станет.
+func lowDataWarning(cats []string) []string {
+	if len(cats) == 0 {
+		return nil
+	}
+	shown := cats
+	tail := ""
+	if len(shown) > lowDataNamesShown {
+		tail = fmt.Sprintf(" и ещё %d", len(shown)-lowDataNamesShown)
+		shown = shown[:lowDataNamesShown]
+	}
+	return []string{fmt.Sprintf(
+		"Мало истории: %s%s — пока считаю их в конверте «%s». Скажи «на %s хватит N», если нужен свой лимит.",
+		strings.Join(shown, ", "), tail, budget.FallbackShareName, cats[0])}
 }
 
 // historyMonths — глубина истории по категории. Ключ ищется в нормализованном

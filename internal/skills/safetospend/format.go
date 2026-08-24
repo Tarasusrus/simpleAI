@@ -2,6 +2,7 @@ package safetospend
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -78,26 +79,41 @@ type EnvelopeReply struct {
 	From, To       time.Time
 	IncomeAmount   float64 // приход как его назвал оператор
 	IncomeCurrency string
-	OutsideTHB     float64 // факт «вне конвертов» за период (ADR-008 §4)
 }
 
-// FormatEnvelopePlan печатает раскладку прихода по конвертам.
+// Ширина колонок моноблока. Сумма — 18+6+8 = 32 знака, с запасом под порог 36
+// из ресёрча вёрстки: pre в Telegram НЕ переносит строки по словам, длинная
+// строка уезжает в горизонтальный скролл на узком экране.
 //
-// Порядок строк повторяет порядок расчёта, чтобы каждое число можно было
-// проверить глазами сверху вниз: приход → обязательства → что осталось делить →
-// сами конверты → свободный остаток → факт вне конвертов → предупреждения.
+// Колонок ровно две с половиной: метка, дата платежа (у гибких долей пустая) и
+// сумма по правому краю. Третья полноценная колонка (процент, остаток) на
+// телефоне уже не помещается.
+const (
+	labelWidth  = 18
+	dueWidth    = 6
+	amountWidth = 8
+)
+
+// FormatEnvelopePlan печатает раскладку прихода по конвертам в формате,
+// утверждённом оператором 2026-08-24 (simpleAI-faeq.11).
 //
-// Все суммы конвертов печатаются валютой d.Display, хранение — по-прежнему в
-// THB (ADR-008 §7). Заголовок при этом показывает приход ТОЙ валютой, которой
-// его назвал оператор: «пришло 127000₽» обязано остаться 127000₽, иначе
-// оператор не узнает свой собственный приход.
+// Что здесь принципиально, помимо вёрстки:
 //
-// «Вне конвертов» показывается ВСЕГДА, даже нулевым: это тот член, из-за
-// которого сумма конвертов не сходится с остатком по ADR-007 (§4 ADR-008).
-// Спрятать его при нуле значит спрятать и объяснение расхождения, когда он
-// перестанет быть нулём.
+//  1. Траты НЕ делятся на «обязательные» и «на жизнь» — один список. Прямая
+//     цитата оператора: «есть мне тоже надо, или ты считаешь что еда
+//     необязательна?». Разница между строками только в том, что у части
+//     известны сумма и дата, и это видно самими колонками, а не заголовком.
+//  2. Каждый регулярный платёж — своей строкой с датой и настоящим именем.
+//     Сводная строка «обязательства 12332» прятала и сумму, и повод, из-за чего
+//     приход визуально не сходился.
+//  3. Итог сходится с приходом до бата: колонка складывается ровно в шапку.
+//     Обеспечивается тем, что накопления забирают ошибку округления всех
+//     остальных строк — они и по расчёту непокрытый остаток (ADR-008 §6).
+//  4. Эмодзи нет ни одного внутри pre: в моноширинном блоке эмодзи шириной ≈2
+//     знака и рендерится по-разному на iOS/Android/Desktop — колонка едет.
+//  5. Разделитель блоков — пустая строка. Линия из символов в пропорциональном
+//     шрифте имеет случайную длину и сама становится мусором.
 func FormatEnvelopePlan(d EnvelopeReply) string {
-	r := d.Plan.Result
 	m := d.Display
 	if m.RubPerTHB == 0 {
 		m.RubPerTHB = d.RubPerTHB
@@ -105,54 +121,250 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 	if m.Code == "" {
 		m = NewDisplay("", d.RubPerTHB)
 	}
+	days := envelopeDays(d.From, d.To)
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "🧧 Конверт заведён: %.0f %s на %s (%s — %s)\n",
-		d.IncomeAmount, currencySign(d.IncomeCurrency), d.Period,
-		d.From.Format("02.01"), d.To.Format("02.01"))
-	fmt.Fprintf(&b, "🗓 курс %.2f ₽/฿\n\n", d.RubPerTHB)
-
-	fmt.Fprintf(&b, "💰 Приход: %s\n", m.Fmt(r.IncomeTHB))
-	fmt.Fprintf(&b, "➖ Обязательства: %s (регулярные %s + долги %s)\n",
-		m.Fmt(r.RecurringTHB+r.DebtTHB), m.Fmt(r.RecurringTHB), m.Fmt(r.DebtTHB))
-	if r.PlannedTHB > 0 {
-		fmt.Fprintf(&b, "➖ Плановые покупки: %s\n", m.Fmt(r.PlannedTHB))
+	// Шапка: период, приход, курс. Обычным текстом — крупно и без колонок.
+	fmt.Fprintf(&b, "%s — %s · %d %s\n",
+		d.From.Format("02.01"), d.To.Format("02.01"), days, pluralDays(days))
+	fmt.Fprintf(&b, "Пришло %s\n", incomeLine(d, m))
+	// Перенос — отдельная строка и НЕ складывается с приходом: там деньги
+	// этого прихода, здесь — прошлого. Свернув их в одну сумму, мы показали бы
+	// приход больше, чем он есть. Но в колонку он входит: конверты им наполнены.
+	if carried := TotalCarriedIn(d.Plan.Shares); carried > 0 {
+		fmt.Fprintf(&b, "Перенос с прошлого раза %s\n", m.Fmt(carried))
 	}
-	fmt.Fprintf(&b, "= К раскладке: %s\n\n", m.Fmt(r.FreeAfterObligations))
+	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", decimalComma(d.RubPerTHB), d.From.Format("02.01"))
 
-	b.WriteString("📦 Конверты:\n")
-	for _, sh := range SpendShares(d.Plan.Shares) {
-		mark := ""
-		if sh.Source == budget.ShareSourceOverride {
-			mark = " (вручную)"
-		}
-		fmt.Fprintf(&b, "   • %-16s %s%s\n", normalizeLabel(sh.Name), m.Fmt(sh.Allocated), mark)
+	// Один моноблок на всё сообщение: колонка чисел в Telegram держится ТОЛЬКО
+	// внутри pre — системный шрифт пропорциональный, и выравнивания пробелами
+	// вне моноблока не существует.
+	b.WriteString("\n**Куда уйдут**\n```\n")
+	rows := envelopeRows(d.Plan.Shares, m, roundInt(m.Amount(shareTotalTHB(d.Plan.Shares))))
+	var lineSum int
+	for _, r := range rows {
+		lineSum += r.amount
+		fmt.Fprintf(&b, "%s%s%s\n",
+			padRight(r.label, labelWidth), padLeft(r.due, dueWidth), padLeft(groupDigits(r.amount), amountWidth))
 	}
+	totalStr := groupDigits(lineSum)
+	fmt.Fprintf(&b, "%s\n", padLeft(strings.Repeat("-", utf8.RuneCountInString(totalStr)), labelWidth+dueWidth+amountWidth))
+	fmt.Fprintf(&b, "%s\n```\n", padLeft(totalStr, labelWidth+dueWidth+amountWidth))
 
-	var free float64
-	for _, sh := range SaveShares(d.Plan.Shares) {
-		free += sh.Allocated
-	}
-	b.WriteString("   ──────────────────────\n")
-	fmt.Fprintf(&b, "   🆓 Свободно: %s (уходит в накопления)\n", m.Fmt(free))
-
-	// «Перенесено с прошлого раза» — накопления, пережившие прошлый конверт
-	// (ADR-008 §9). Строка отдельная и не складывается со «Свободно»: там
-	// деньги ЭТОГО прихода, здесь — прошлого. Свернув их в одну сумму, мы бы
-	// показали приход больше, чем он есть.
-	if carried := TotalCarriedIn(d.Plan.Shares); carried != 0 {
-		fmt.Fprintf(&b, "   ↩️ Перенесено с прошлого раза: %s (уже лежит в конвертах накоплений)\n", m.Fmt(carried))
-	}
-
-	fmt.Fprintf(&b, "\n🚪 Вне конвертов: %s — фиксированные траты и платежи по подпискам за период; они уже вычтены в обязательствах.\n",
-		m.Fmt(d.OutsideTHB))
+	// Главное число — одно и внизу отдельным блоком: по нему оператор
+	// действует сегодня. Приход в его формуле не участвует (см. DailyLimit).
+	fmt.Fprintf(&b, "\n**На день: %s**\n", m.Fmt(DailyLimit(FlexibleTHB(d.Plan.Shares), days)))
+	b.WriteString(dailyLimitScope(d.Plan.Shares))
 
 	for _, w := range d.Plan.Warnings {
-		fmt.Fprintf(&b, "⚠️ %s\n", w)
+		fmt.Fprintf(&b, "\n\n⚠️ %s", w)
+	}
+	return b.String()
+}
+
+// envelopeRow — одна строка моноблока: метка, дата платежа (или пусто) и сумма
+// уже в валюте показа и уже целая. Округление делается ОДИН раз здесь, потому
+// что складываться в итог обязаны именно напечатанные числа.
+type envelopeRow struct {
+	label  string
+	due    string
+	amount int
+}
+
+// envelopeRows раскладывает доли по строкам. Порядок: сначала регулярные
+// платежи (у них есть дата и они уже отложены), затем гибкие конверты, затем
+// накопления — тот же порядок, в котором деньги распределяются.
+//
+// total — точная сумма всех долей в валюте показа, целая. Накопления получают
+// РОВНО остаток до неё: округление каждой строки в отдельности даёт расхождение
+// до бата на строку, и без этого шага колонка не сложилась бы в свой же итог.
+//
+// Опорой служит сумма ДОЛЕЙ, а не приход: форматтер не имеет права дописывать
+// деньги, которых в раскладке нет. Что доли складываются ровно в приход —
+// инвариант PlanEnvelope (ADR-008 §4), и проверяется он там, а не здесь.
+func envelopeRows(shares []budget.EnvelopeShare, m Display, total int) []envelopeRow {
+	rows := make([]envelopeRow, 0, len(shares))
+	var savings *envelopeRow
+	var assigned int
+
+	add := func(sh budget.EnvelopeShare) envelopeRow {
+		r := envelopeRow{
+			label:  shareLabel(sh.Name),
+			amount: roundInt(m.Amount(sh.Allocated + sh.CarriedIn)),
+		}
+		if sh.DueDate != nil {
+			r.due = sh.DueDate.Format("02.01")
+		}
+		return r
+	}
+	for _, group := range [][]budget.EnvelopeShare{FixedShares(shares), SpendShares(shares)} {
+		for _, sh := range group {
+			r := add(sh)
+			assigned += r.amount
+			rows = append(rows, r)
+		}
+	}
+	for _, sh := range SaveShares(shares) {
+		r := add(sh)
+		if savings == nil {
+			savings = &r
+			continue
+		}
+		assigned += r.amount
+		rows = append(rows, r)
+	}
+	if savings != nil {
+		// Ошибка округления всех строк оседает здесь — накопления и по расчёту
+		// непокрытый остаток, а не самостоятельный лимит (ADR-008 §6).
+		savings.amount = total - assigned
+		if savings.amount < 0 {
+			savings.amount = 0
+		}
+		rows = append(rows, *savings)
+	}
+	return rows
+}
+
+// shareTotalTHB — точная сумма раскладки: лимиты плюс перенесённое.
+func shareTotalTHB(shares []budget.EnvelopeShare) float64 {
+	var total float64
+	for _, sh := range shares {
+		total += sh.Allocated + sh.CarriedIn
+	}
+	return total
+}
+
+// dailyLimitScope — предложение под дневным лимитом: что в него входит и что
+// уже отложено. Без него число «814 ฿» читается как «всё, что у меня есть».
+func dailyLimitScope(shares []budget.EnvelopeShare) string {
+	flexible := make([]string, 0, len(shares))
+	for i, sh := range SpendShares(shares) {
+		label := shareLabel(sh.Name)
+		if i > 0 {
+			label = lowerFirst(label)
+		}
+		flexible = append(flexible, label)
+	}
+	fixed := make([]string, 0, len(shares))
+	for _, sh := range FixedShares(shares) {
+		fixed = append(fixed, shareLabel(sh.Name))
 	}
 
-	b.WriteString("\nСкажи «на еду хватит 15000», если лимит не тот, или спроси «сколько осталось в конвертах?».")
+	var b strings.Builder
+	if len(flexible) > 0 {
+		fmt.Fprintf(&b, "%s.", strings.Join(flexible, ", "))
+	}
+	if len(fixed) > 0 {
+		if b.Len() > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "%s — уже отложены.", strings.Join(fixed, ", "))
+	}
 	return b.String()
+}
+
+// incomeLine — приход в шапке. Валюту, которой его назвал оператор, показываем
+// первой и всегда: «пришло 127000₽» обязано остаться 127000₽, иначе он не
+// узнает свой собственный приход. Расчётная сумма идёт рядом — и только если
+// это другая валюта, иначе строка дублировала бы сама себя.
+func incomeLine(d EnvelopeReply, m Display) string {
+	own := fmt.Sprintf("%s %s", groupDigits(roundInt(d.IncomeAmount)), currencySign(d.IncomeCurrency))
+	shown := m.Fmt(d.Plan.Result.IncomeTHB)
+	if currencySign(d.IncomeCurrency) == m.Sign() {
+		return shown
+	}
+	return own + " · " + shown
+}
+
+// shareLabel ужимает имя доли под ширину колонки по границе СЛОВА: обрезанное
+// посередине «Кредит потребит…» читается хуже, чем честное «Кредит». Ellipsis
+// остаётся страховкой на случай, когда не помещается даже первое слово.
+func shareLabel(name string) string {
+	label := normalizeLabel(name)
+	if utf8.RuneCountInString(label) <= labelWidth {
+		return label
+	}
+	var out string
+	for _, w := range strings.Fields(label) {
+		next := w
+		if out != "" {
+			next = out + " " + w
+		}
+		if utf8.RuneCountInString(next) > labelWidth {
+			break
+		}
+		out = next
+	}
+	if out != "" {
+		return out
+	}
+	return string([]rune(label)[:labelWidth-1]) + "…"
+}
+
+// envelopeDays — длина периода в днях, обе границы включительно.
+func envelopeDays(from, to time.Time) int {
+	d := int(to.Sub(from).Hours()/24) + 1
+	if d < 1 {
+		d = 1
+	}
+	return d
+}
+
+func pluralDays(n int) string {
+	switch {
+	case n%10 == 1 && n%100 != 11:
+		return "день"
+	case n%10 >= 2 && n%10 <= 4 && (n%100 < 12 || n%100 > 14):
+		return "дня"
+	}
+	return "дней"
+}
+
+// groupDigits — разряды через пробел, без копеек (ресёрч вёрстки: группировка
+// читается в один проход, дробная часть в сводке — шум).
+func groupDigits(n int) string {
+	sign := ""
+	if n < 0 {
+		sign, n = "-", -n
+	}
+	s := fmt.Sprintf("%d", n)
+	var parts []string
+	for len(s) > 3 {
+		parts = append([]string{s[len(s)-3:]}, parts...)
+		s = s[:len(s)-3]
+	}
+	return sign + strings.Join(append([]string{s}, parts...), " ")
+}
+
+// decimalComma — курс с запятой: русский текст, «3.1» в нём читается как сбой.
+func decimalComma(v float64) string {
+	return strings.Replace(fmt.Sprintf("%.1f", v), ".", ",", 1)
+}
+
+func roundInt(v float64) int { return int(math.Round(v)) }
+
+// padRight / padLeft считают ширину В РУНАХ: %-18s в Go меряет БАЙТЫ, и на
+// кириллице колонка разъезжается ровно вдвое.
+func padRight(s string, width int) string {
+	if pad := width - utf8.RuneCountInString(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
+func padLeft(s string, width int) string {
+	if pad := width - utf8.RuneCountInString(s); pad > 0 {
+		return strings.Repeat(" ", pad) + s
+	}
+	return s
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	first, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToLower(first)) + s[size:]
 }
 
 // currencySign — знак валюты для заголовка. Неизвестная валюта печатается своим
@@ -267,6 +479,14 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 
 	b.WriteString("   ──────────────────────\n")
 	fmt.Fprintf(&b, "   Итого осталось: %s из %s\n", m.Fmt(totalRemaining), m.Fmt(totalLimit))
+
+	// Дневной лимит пересчитывается ЗДЕСЬ, от остатка гибких конвертов и
+	// оставшихся дней — то есть после каждой траты (simpleAI-faeq.11 §5).
+	// Приход в формуле не участвует: конверты уже наполнены, и вопрос «сколько
+	// можно сегодня» от факта нового прихода не зависит.
+	daysLeft := envelopeDays(time.Now(), env.PeriodEnd)
+	fmt.Fprintf(&b, "\n👉 На день: %s (%d %s до конца периода)\n",
+		m.Fmt(DailyLimit(FlexibleRemainingTHB(items), daysLeft)), daysLeft, pluralDays(daysLeft))
 
 	if len(overspent) > 0 {
 		fmt.Fprintf(&b, "\n⚠️ Пробито: %s — дальше тратишь из других конвертов.\n", strings.Join(overspent, ", "))

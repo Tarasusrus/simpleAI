@@ -312,6 +312,11 @@ type Envelope struct {
 const (
 	ShareKindSpend = "spend" // тратится в этом периоде
 	ShareKindSave  = "save"  // копится, остаток переносится в следующий приход
+	// ShareKindFixed — конверт под конкретный регулярный платёж: сумма и дата
+	// известны заранее, тратить из него нельзя, в дневной лимит он не входит.
+	// Категорий у такой доли нет: её факт — сам recurring-платёж, а транзакции
+	// с recurring_id в факт долей не попадают (ADR-008 §5).
+	ShareKindFixed = "fixed"
 )
 
 // Источник суммы доли (ADR-008).
@@ -329,11 +334,15 @@ type EnvelopeShare struct {
 	ID         uuid.UUID
 	EnvelopeID uuid.UUID
 	Name       string
-	Kind       string  // ShareKindSpend | ShareKindSave
+	Kind       string  // ShareKindSpend | ShareKindSave | ShareKindFixed
 	Allocated  float64 // THB
 	CarriedIn  float64 // THB, перенос с прошлого прихода
 	Source     string  // ShareSourceAuto | ShareSourceOverride
 	Position   int
+	// DueDate — дата платежа у доли kind='fixed'; nil у остальных. Может лежать
+	// ЗА границей периода конверта: аренда платится 10.09, период кончается
+	// 06.09, а отложить деньги надо сейчас.
+	DueDate    *time.Time
 	Categories []EnvelopeShareCategory
 }
 
