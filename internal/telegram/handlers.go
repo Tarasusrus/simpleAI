@@ -61,7 +61,10 @@ func NewHandleBudgetCallback(skill BudgetCallbackSkill) Handler {
 	return func(ctx context.Context, tctx *Context) error {
 		result, err := skill.HandleCallbackData(ctx, tctx.Update.ChatID, tctx.Update.CallbackData)
 		if err != nil {
-			return tctx.Reply(fmt.Sprintf("Ошибка: %v", err))
+			if tctx.Logger != nil {
+				tctx.Logger.ErrorContext(ctx, "budget callback failed", "err", err, "data", tctx.Update.CallbackData)
+			}
+			return tctx.Reply(constants.MsgSkillFailed)
 		}
 		return tctx.EditWithButtons(ctx, result.Text, result.Buttons)
 	}
@@ -118,7 +121,12 @@ func HandleDefault(ctx context.Context, tctx *Context) error {
 	reply, err := tctx.Agent.AskWithMeta(agentCtx, prompt, &chatID)
 	stopTyping()
 	if err != nil {
-		return tctx.Reply(fmt.Sprintf("Ошибка агента: %v", err))
+		// Наружу — человеческая фраза: текст Go-ошибки пользователю ничего не
+		// объясняет, а деталь внутреннего устройства выдаёт.
+		if tctx.Logger != nil {
+			tctx.Logger.ErrorContext(ctx, "agent failed", "err", err, "chat_id", chatID)
+		}
+		return tctx.Reply(constants.MsgAgentFailed)
 	}
 	if strings.TrimSpace(reply) == "" {
 		reply = "Нет ответа от агента."
