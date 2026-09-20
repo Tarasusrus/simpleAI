@@ -315,6 +315,10 @@ func TestBuildToolsSystemPrompt_MentionsArraySyntax(t *testing.T) {
 	if !strings.Contains(prompt, "[{") {
 		t.Errorf("prompt should mention array syntax for multiple calls, got: %q", prompt)
 	}
+	// Каждый вызов в массиве обязан нести input — прод ловил ответ без него.
+	if !strings.Contains(prompt, "В КАЖДОМ вызове") {
+		t.Errorf("prompt should require input in every call, got: %q", prompt)
+	}
 }
 
 // --- Тест routing rules в system prompt ---
