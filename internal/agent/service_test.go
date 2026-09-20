@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"simpleAI/internal/constants"
 	"simpleAI/internal/plugin"
 )
 
@@ -242,12 +243,16 @@ func TestAsk_UnknownSkill_ErrorInResults_LoopContinues(t *testing.T) {
 	if got != "Понял, инструмент недоступен." {
 		t.Errorf("got %q", got)
 	}
-	// Второй вызов AskWithSystem должен содержать сообщение об ошибке.
+	// Второй вызов AskWithSystem должен сообщать о неудаче инструмента, но
+	// без текста Go-ошибки: этот результат модель возвращает пользователю дословно.
 	if len(llm.calls) < 2 {
 		t.Fatalf("expected at least 2 LLM calls, got %d", len(llm.calls))
 	}
-	if !strings.Contains(llm.calls[1].userPrompt, "Ошибка") {
-		t.Errorf("second LLM call should mention error, got: %q", llm.calls[1].userPrompt)
+	if !strings.Contains(llm.calls[1].userPrompt, constants.MsgSkillFailed) {
+		t.Errorf("second LLM call should mention failure, got: %q", llm.calls[1].userPrompt)
+	}
+	if strings.Contains(llm.calls[1].userPrompt, "unknown skill") {
+		t.Errorf("second LLM call leaks Go error text: %q", llm.calls[1].userPrompt)
 	}
 }
 

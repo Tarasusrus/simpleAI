@@ -125,3 +125,101 @@ func unmarshalCalls(s string) ([]toolCall, bool) {
 
 	return nil, false
 }
+
+// invalidCall — вызов, отбракованный до похода в навык.
+type invalidCall struct {
+	Index  int    // номер вызова в ответе модели, с единицы
+	Skill  string // навык, который модель пыталась вызвать
+	Reason string // чего не хватило — формулировка уходит обратно модели
+}
+
+// validateCalls отбраковывает вызовы, которые заведомо не доедут до навыка:
+// без объекта input и без обязательных полей из схемы навыка.
+//
+// Без этой проверки вызов вида {"skill":"budget"} проходил насквозь:
+// json.Marshal(nil map) даёт "null", Unmarshal("null") ошибки не возвращает,
+// навык получал нулевую структуру и падал на разборе пустого action.
+//
+// Пачка проверяется целиком до выполнения: если хоть один вызов неполон,
+// не выполняется ни один. Иначе половина трат из сообщения записалась бы, а
+// повторный запрос к модели продублировал бы её.
+func validateCalls(calls []toolCall, manifests []plugin.Manifest) []invalidCall {
+	schemas := make(map[string]*plugin.Schema, len(manifests))
+	for _, m := range manifests {
+		schemas[m.ID] = m.InputSchema
+	}
+
+	var bad []invalidCall
+	for i, c := range calls {
+		if reason := validateCall(c, schemas[c.Skill]); reason != "" {
+			bad = append(bad, invalidCall{Index: i + 1, Skill: c.Skill, Reason: reason})
+		}
+	}
+	return bad
+}
+
+// validateCall возвращает причину отбраковки или пустую строку, если вызов цел.
+// Навык без схемы проверяется только на наличие input: набор его полей неизвестен.
+func validateCall(call toolCall, schema *plugin.Schema) string {
+	if call.Input == nil {
+		return `отсутствует объект "input" с параметрами`
+	}
+	for _, f := range requiredFields(schema) {
+		v, ok := call.Input[f]
+		if !ok {
+			return fmt.Sprintf("в input не заполнено обязательное поле %q", f)
+		}
+		if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
+			return fmt.Sprintf("обязательное поле %q пустое", f)
+		}
+		if v == nil {
+			return fmt.Sprintf("обязательное поле %q пустое", f)
+		}
+	}
+	return ""
+}
+
+// requiredFields читает список обязательных полей из JSON-схемы навыка.
+// Схема собирается в коде ([]string) и может приходить после json.Unmarshal ([]any).
+func requiredFields(schema *plugin.Schema) []string {
+	if schema == nil || schema.JSON == nil {
+		return nil
+	}
+	switch v := schema.JSON["required"].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// buildRetryPrompt объясняет модели, чем плох предыдущий ответ, и просит
+// собрать вызовы заново. Исходное сообщение пользователя повторяется: агент
+// stateless, без него модель не знает, что переспрашивают.
+func buildRetryPrompt(userInput string, bad []invalidCall) string {
+	var sb strings.Builder
+	sb.WriteString("Предыдущий ответ некорректен, инструменты не выполнены.\n")
+	for _, b := range bad {
+		fmt.Fprintf(&sb, "- вызов %d (skill=%q): %s\n", b.Index, b.Skill, b.Reason)
+	}
+	sb.WriteString("\nПовтори ответ целиком: у каждого вызова обязательны поле \"skill\" и объект \"input\" со всеми обязательными параметрами. Отвечай только JSON.\n")
+	fmt.Fprintf(&sb, "Сообщение пользователя: %s", userInput)
+	return sb.String()
+}
+
+// describeInvalid сворачивает причины отбраковки в одну строку для лога.
+func describeInvalid(bad []invalidCall) string {
+	parts := make([]string, 0, len(bad))
+	for _, b := range bad {
+		parts = append(parts, fmt.Sprintf("#%d %s: %s", b.Index, b.Skill, b.Reason))
+	}
+	return strings.Join(parts, "; ")
+}
