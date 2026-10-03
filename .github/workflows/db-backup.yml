@@ -1,0 +1,105 @@
+name: DB backup
+
+# Ежедневный бэкап Postgres. Заменяет /home/deploy/backup.sh на сервере:
+# тот грузил релиз через личный PAT, который протухает (июль, октябрь 2026).
+# Здесь релиз создаётся встроенным GITHUB_TOKEN — он выдаётся на каждый запуск
+# и не истекает. Дамп шифруется: репозиторий публичный, а релизы видны всем.
+#
+# Восстановление:
+#   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass pass:"$POSTGRES_PASSWORD" \
+#     -in simpleai-DATE.dump.gz.enc | gunzip | pg_restore -d simpleai --clean --if-exists
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: pg_dump → encrypted release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Dump database
+        id: dump
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          BACKUP_PASS: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          RAW="simpleai-${DATE}.dump.gz"
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'set -o pipefail; docker exec simpleai-postgres pg_dump -U simpleai -d simpleai -Fc | gzip -9' > "$RAW"
+
+          # Проверка: валидный gzip, внутри custom-format дамп (магия PGDMP).
+          gzip -t "$RAW"
+          if [ "$(gunzip -c "$RAW" | head -c 5)" != "PGDMP" ]; then
+            echo "::error::dump is not a pg_dump custom-format archive"; exit 1
+          fi
+
+          FILE="${RAW}.enc"
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASS -in "$RAW" -out "$FILE"
+          rm -f "$RAW"
+
+          {
+            echo "date=${DATE}"
+            echo "file=${FILE}"
+            echo "size=$(du -h "$FILE" | cut -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DATE: ${{ steps.dump.outputs.date }}
+          FILE: ${{ steps.dump.outputs.file }}
+          SIZE: ${{ steps.dump.outputs.size }}
+        run: |
+          set -euo pipefail
+          TAG="backup-${DATE}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$FILE" --repo "$GITHUB_REPOSITORY" \
+              --title "DB Backup ${DATE}" \
+              --notes "Automated daily backup (encrypted, AES-256). Size: ${SIZE}" \
+              --prerelease
+          fi
+
+      - name: Disable legacy server cron backup
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # Старый backup.sh зависит от протухшего PAT и грузит дамп без
+          # шифрования. Комментируем его строку в crontab (обратимо).
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'crontab -l 2>/dev/null | grep -qE "^[^#].*backup\.sh" && crontab -l | sed -E "/^[^#].*backup\.sh/ s/^/# disabled: moved to GitHub Actions db-backup.yml # /" | crontab - ; crontab -l 2>/dev/null | grep backup || true'
+
+      - name: Notify Telegram on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=❌ Backup FAILED ($(date -u +%F)). Лог: ${RUN_URL}" >/dev/null
