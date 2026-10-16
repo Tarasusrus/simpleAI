@@ -18,6 +18,8 @@ import (
 var allowedImports = map[string]bool{
 	"errors": true, "fmt": true, "sort": true, "slices": true, "strings": true,
 	"math": true, "math/bits": true, "time": true,
+	// context нужен только портам (ports.go): интерфейс Reader принимает контекст.
+	"context": true,
 }
 
 // goFiles возвращает НЕ тестовые файлы пакета.
