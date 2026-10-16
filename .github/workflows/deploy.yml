@@ -3,6 +3,7 @@ name: Deploy to production
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -23,12 +24,14 @@ jobs:
           LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          PLAN_WEB_ENABLED: ${{ secrets.PLAN_WEB_ENABLED }}
+          PLAN_WEB_TOKEN: ${{ secrets.PLAN_WEB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: 22
-          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID,LANGFUSE_HOST,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY
+          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID,LANGFUSE_HOST,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY,PLAN_WEB_ENABLED,PLAN_WEB_TOKEN
           script: |
             set -e
 
@@ -73,6 +76,9 @@ jobs:
               echo "LANGFUSE_HOST=$LANGFUSE_HOST"
               echo "LANGFUSE_PUBLIC_KEY=$LANGFUSE_PUBLIC_KEY"
               echo "LANGFUSE_SECRET_KEY=$LANGFUSE_SECRET_KEY"
+              echo ""
+              echo "PLAN_WEB_ENABLED=$PLAN_WEB_ENABLED"
+              echo "PLAN_WEB_TOKEN=$PLAN_WEB_TOKEN"
             } > ~/simpleAI/.env
 
             cd ~/simpleAI
