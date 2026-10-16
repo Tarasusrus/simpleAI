@@ -50,8 +50,9 @@ func main() {
 		server.WithBaseURL("http://localhost:8080"),
 	)
 
-	logger.Info("MCP SSE server starting", "addr", ":8080", "endpoint", "/sse")
-	if err := sseSrv.Start(":8080"); err != nil {
+	addr := tools.MCPAddr()
+	logger.Info("MCP SSE server starting", "addr", addr, "endpoint", "/sse")
+	if err := sseSrv.Start(addr); err != nil {
 		log.Fatal("MCP server error: ", err)
 	}
 }

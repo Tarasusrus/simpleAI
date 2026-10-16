@@ -10,7 +10,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-simpleai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-simpleai}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Только loopback: приложение живёт на этом же хосте, а наружу Postgres
+      # с паролем по умолчанию выставлять нельзя.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
