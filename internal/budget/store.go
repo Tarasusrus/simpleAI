@@ -623,14 +623,45 @@ func (s *Store) AddRecurring(ctx context.Context, r RecurringPayment) error {
 	if r.Type == "" {
 		r.Type = "expense"
 	}
+	// Правило пишется в обе группы колонок: старые (recurrence_type, day_of_month,
+	// next_date) читают бот и воркер, новые (interval_*, anchor_date) — план окна.
+	// Без этого правило, созданное ботом, выпало бы из плана молча (C15).
+	unit, anchor := planRuleColumns(r)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO budget_recurring (id, chat_id, name, type, amount, category_id, currency, recurrence_type, day_of_month, next_date, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
-	`, r.ID, r.ChatID, r.Name, r.Type, r.Amount, r.CategoryID, r.Currency, r.RecurrenceType, r.DayOfMonth, r.NextDate)
+		INSERT INTO budget_recurring (id, chat_id, name, type, amount, category_id, currency, recurrence_type, day_of_month, next_date, enabled,
+		                              interval_n, interval_unit, anchor_date)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, 1, $11, $12)
+	`, r.ID, r.ChatID, r.Name, r.Type, r.Amount, r.CategoryID, r.Currency, r.RecurrenceType, r.DayOfMonth, r.NextDate, unit, anchor)
 	if err != nil {
 		return fmt.Errorf("add recurring: %w", err)
 	}
 	return nil
+}
+
+// planRuleColumns переводит старое описание повтора в новое (шаг 1, единица и
+// якорь). Те же правила, что у бэкфилла миграции 00021: якорь — next_date, а для
+// месячного правила с заданным днём — этот день в месяце next_date, прижатый к
+// концу месяца (сам день остаётся в day_of_month).
+func planRuleColumns(r RecurringPayment) (unit string, anchor time.Time) {
+	switch r.RecurrenceType {
+	case "weekly":
+		unit = "week"
+	case "daily":
+		unit = "day"
+	default:
+		unit = "month"
+	}
+	anchor = r.NextDate
+	if unit == "month" && r.DayOfMonth != nil {
+		y, m, _ := r.NextDate.Date()
+		last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		day := *r.DayOfMonth
+		if day > last {
+			day = last
+		}
+		anchor = time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
+	}
+	return unit, anchor
 }
 
 // ListRecurring возвращает все повторяющиеся платежи для чата (включая отключённые).
@@ -660,14 +691,16 @@ func (s *Store) ListRecurring(ctx context.Context, chatID int64) ([]RecurringPay
 	return out, rows.Err()
 }
 
-// GetDueRecurring возвращает включённые платежи, чья next_date <= date.
+// GetDueRecurring возвращает включённые повторяющиеся РАСХОДЫ, чья next_date <= date.
+// Повторяющиеся поступления воркер не исполняет: факт создаёт владелец кнопкой
+// «пришло» (иначе старый воркер записал бы поступление сам, C14).
 func (s *Store) GetDueRecurring(ctx context.Context, date time.Time) ([]RecurringPayment, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.chat_id, r.name, r.type, r.amount, r.category_id, COALESCE(c.name, ''), r.currency,
 		       r.recurrence_type, r.day_of_month, r.next_date, r.enabled, r.created_at, r.updated_at
 		FROM budget_recurring r
 		LEFT JOIN budget_category c ON c.id = r.category_id
-		WHERE r.enabled = true AND r.next_date <= $1
+		WHERE r.enabled = true AND r.type = 'expense' AND r.next_date <= $1
 	`, date)
 	if err != nil {
 		return nil, fmt.Errorf("get due recurring: %w", err)
@@ -958,6 +991,7 @@ func (s *Store) ListPlannedExpenses(ctx context.Context, chatID int64) ([]Planne
 		SELECT id, chat_id, amount, currency, description
 		FROM budget_planned_expense
 		WHERE chat_id = $1 AND settled = false
+		  AND direction = 'expense' AND amount IS NOT NULL
 		ORDER BY amount DESC
 	`, chatID)
 	if err != nil {
@@ -987,6 +1021,7 @@ func (s *Store) PlannedExpensesTHB(ctx context.Context, chatID int64, rates map[
 		SELECT currency, SUM(amount)::float8, COUNT(*)::int
 		FROM budget_planned_expense
 		WHERE chat_id = $1 AND settled = false
+		  AND direction = 'expense' AND amount IS NOT NULL
 		GROUP BY currency
 	`, chatID)
 	if err != nil {
