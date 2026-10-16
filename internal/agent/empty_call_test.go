@@ -324,7 +324,7 @@ func TestProperty_SkillNeverReceivesIncompleteCall(t *testing.T) {
 			if err := json.Unmarshal([]byte(in), &got); err != nil {
 				rt.Fatalf("навык получил неразбираемый вход %q", in)
 			}
-			action, _ := got["action"].(string)
+			action, _ := got["action"].(string) //nolint:errcheck // отсутствие поля проверяется ниже по пустой строке
 			if strings.TrimSpace(action) == "" {
 				rt.Fatalf("навык получил вызов без action: %q", in)
 			}

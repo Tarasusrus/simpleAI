@@ -16,7 +16,9 @@ import (
 // captureBot запоминает отправленные пользователю тексты.
 type captureBot struct{ sent []string }
 
-func (b *captureBot) Updates(context.Context) (<-chan core.Update, error) { return nil, nil }
+func (b *captureBot) Updates(context.Context) (<-chan core.Update, error) {
+	return make(chan core.Update), nil
+}
 
 func (b *captureBot) Send(_ context.Context, _ int64, text string) error {
 	b.sent = append(b.sent, text)
