@@ -1,6 +1,11 @@
 package plan
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
 
 // Scope — чьи данные читать. Транзакции общие и области не подчиняются (как в
 // боте); chat-таблицы (правила, плановые) фильтруются списком чатов. Граница
@@ -33,4 +38,54 @@ type Snapshot struct {
 // Reader читает данные для плана. Реализует internal/planrepo.
 type Reader interface {
 	Read(ctx context.Context, sc Scope) (Snapshot, error)
+}
+
+// NewItem — новая плановая запись: ожидаемое поступление или плановый платёж.
+type NewItem struct {
+	Kind Kind
+	Name string
+	// Amount nil допустим только у платежа («Права»: сумма пока неизвестна).
+	Amount *Money
+	// Date и WindowStart взаимоисключающие; у поступления обязательна Date.
+	Date        *Date
+	WindowStart *Date
+	Category    string // только у платежа; пусто = без категории
+}
+
+const (
+	maxNameRunes     = 120
+	maxCategoryRunes = 60
+)
+
+// Validate проверяет запись до сохранения: домен отказывает с понятной причиной,
+// а не чинит данные молча.
+func (n NewItem) Validate() error {
+	name := strings.TrimSpace(n.Name)
+	if name == "" {
+		return ErrNameRequired
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes || utf8.RuneCountInString(n.Category) > maxCategoryRunes {
+		return ErrNameTooLong
+	}
+	if n.Date != nil && n.WindowStart != nil {
+		return fmt.Errorf("%w: дата и окно вместе", ErrInvalidEvent)
+	}
+	if n.Kind == KindIncome && (n.WindowStart != nil || n.Category != "") {
+		return fmt.Errorf("%w: у поступления нет окна и категории", ErrInvalidEvent)
+	}
+	return Event{
+		Key: "new", Kind: n.Kind, State: StatePlanned, Name: name,
+		Amount: n.Amount, Date: n.Date, WindowStart: n.WindowStart, Source: SourcePlanned,
+	}.Validate()
+}
+
+// Writer пишет плановые записи. Каждая команда — одна транзакция БД. Область
+// (чаты) принудительно ограничивает и запись, и удаление. Реализует internal/planrepo.
+type Writer interface {
+	// AddPlanned сохраняет запись и возвращает её id.
+	AddPlanned(ctx context.Context, sc Scope, n NewItem) (string, error)
+	// DeletePlanned удаляет плановую запись; чужой чат или нет записи — ErrNotFound.
+	DeletePlanned(ctx context.Context, sc Scope, id string) error
+	// ExpenseCategories — названия категорий расходов для выбора в форме.
+	ExpenseCategories(ctx context.Context) ([]string, error)
 }

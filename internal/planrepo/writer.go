@@ -1,0 +1,89 @@
+package planrepo
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"simpleAI/internal/budget"
+	"simpleAI/internal/plan"
+)
+
+// Sink — то, что писателю нужно от budget.Store.
+type Sink interface {
+	AddPlanItem(ctx context.Context, in budget.PlanItemInput) (uuid.UUID, error)
+	DeletePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID) (bool, error)
+	ExpenseCategoryNames(ctx context.Context) ([]string, error)
+}
+
+// Writer реализует plan.Writer поверх Sink.
+type Writer struct{ sink Sink }
+
+func NewWriter(sink Sink) *Writer { return &Writer{sink: sink} }
+
+var _ plan.Writer = (*Writer)(nil)
+
+func dbDate(d *plan.Date) *time.Time {
+	if d == nil {
+		return nil
+	}
+	t := time.Date(d.Year, time.Month(d.Month), d.Day, 0, 0, 0, 0, time.UTC)
+	return &t
+}
+
+// AddPlanned пишет запись в чат владельца — первый в области. Запись без области
+// запрещена: иначе она осела бы «ни у кого» и экран её не увидел.
+func (w *Writer) AddPlanned(ctx context.Context, sc plan.Scope, n plan.NewItem) (string, error) {
+	if len(sc.ChatIDs) == 0 {
+		return "", fmt.Errorf("planrepo: пустая область чатов")
+	}
+	if err := n.Validate(); err != nil {
+		return "", err
+	}
+	in := budget.PlanItemInput{
+		ChatID:      sc.ChatIDs[0],
+		Direction:   "expense",
+		Description: n.Name,
+		Currency:    string(plan.CurRUB),
+		Category:    n.Category,
+		DueDate:     dbDate(n.Date),
+		WindowStart: dbDate(n.WindowStart),
+	}
+	if n.Kind == plan.KindIncome {
+		in.Direction = "income"
+	}
+	if n.Amount != nil {
+		minor := n.Amount.Minor
+		in.AmountMinor, in.Currency = &minor, string(n.Amount.Cur)
+	}
+	id, err := w.sink.AddPlanItem(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
+// DeletePlanned удаляет запись из области; чужой или несуществующий id — ErrNotFound.
+func (w *Writer) DeletePlanned(ctx context.Context, sc plan.Scope, id string) error {
+	if len(sc.ChatIDs) == 0 {
+		return fmt.Errorf("planrepo: пустая область чатов")
+	}
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return plan.ErrNotFound
+	}
+	ok, err := w.sink.DeletePlanItem(ctx, sc.ChatIDs, u)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return plan.ErrNotFound
+	}
+	return nil
+}
+
+func (w *Writer) ExpenseCategories(ctx context.Context) ([]string, error) {
+	return w.sink.ExpenseCategoryNames(ctx)
+}

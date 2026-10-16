@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow } from './api.js';
+import { initToken, getWindow, deleteItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -22,8 +22,21 @@ function drawCurrency() {
     }, c === 'RUB' ? '₽' : '฿')));
 }
 
+let lastView = null;
+
+// ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
+// тот же, onDelete — убрать плановую запись.
+const ctx = {
+  show: (view) => draw(view),
+  redraw: () => { if (lastView) draw(lastView); },
+  onDelete: async (key) => {
+    try { draw(await deleteItem(cur, key)); } catch (e) { alert(e.message || 'Не удалось убрать.'); }
+  },
+};
+
 function draw(view) {
-  const nodes = blocks.map((b) => b.render(view, view.meta.cur));
+  lastView = view;
+  const nodes = blocks.map((b) => b.render(view, view.meta.cur, ctx));
   if (view.meta.skipped > 0) {
     nodes.push(h('div', { class: 'hint' }, 'Не учтено записей: ' + view.meta.skipped + ' (валюта не бат и не рубль или поступление без даты).'));
   }

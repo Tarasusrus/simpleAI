@@ -63,3 +63,7 @@ td.c{cursor:pointer;text-decoration:underline dotted}.sc{overflow-x:auto}
 .empty{padding:18px 14px;color:var(--mut)}
 .bad{color:var(--bad)}
 .more{width:100%;border-radius:0;background:var(--soft);color:var(--ink);font-weight:500;min-height:0;padding:10px}
+.fi{display:block}
+.forms .top{margin-bottom:12px}
+.hint.err{color:var(--bad)}
+.it .r .x{display:inline-block;margin-left:8px}

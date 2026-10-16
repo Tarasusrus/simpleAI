@@ -20,6 +20,8 @@ var allowedImports = map[string]bool{
 	"math": true, "math/bits": true, "time": true,
 	// context нужен только портам (ports.go): интерфейс Reader принимает контекст.
 	"context": true,
+	// unicode/utf8 — проверка длины названия в портах.
+	"unicode/utf8": true,
 }
 
 // goFiles возвращает НЕ тестовые файлы пакета.

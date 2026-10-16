@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // lookbackDays — на сколько дней назад разворачиваются сроки правил без факта.
@@ -40,31 +41,41 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
+	writer Writer // nil — запись отключена
 	today  Clock
 	scope  Scope
 }
 
-// NewService собирает сервис; все зависимости приходят снаружи.
-func NewService(r Reader, today Clock, sc Scope) *Service {
-	return &Service{reader: r, today: today, scope: sc}
+// NewService собирает сервис; все зависимости приходят снаружи. Writer может быть
+// nil: тогда команды записи возвращают ErrReadOnly.
+func NewService(r Reader, w Writer, today Clock, sc Scope) *Service {
+	return &Service{reader: r, writer: w, today: today, scope: sc}
 }
 
-// View считает окно, в которое попадает «сегодня», в валюте показа cur.
-func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
+// state — снимок и окна, посчитанные от одной «сегодня»; общий для расчёта и
+// для команд, которым нужно знать, какое окно сейчас на экране.
+type state struct {
+	snap    Snapshot
+	today   Date
+	windows []Window
+	events  []Event // платежи: факты, разовые и развёрнутые повторы
+	st      WindowState
+}
+
+func (s *Service) load(ctx context.Context) (state, error) {
 	snap, err := s.reader.Read(ctx, s.scope)
 	if err != nil {
-		return Result{}, err
+		return state{}, err
 	}
 	today := s.today()
 	if !today.Valid() {
-		return Result{}, fmt.Errorf("%w: сегодня %v", ErrBadDate, today)
+		return state{}, fmt.Errorf("%w: сегодня %v", ErrBadDate, today)
 	}
-
 	from := today.AddDays(-lookbackDays)
 	to := Date{today.Year, today.Month, 1}.AddMonths(horizonMonths).AddDays(-1)
 	expanded, err := Expand(snap.Rules, from, to)
 	if err != nil {
-		return Result{}, err
+		return state{}, err
 	}
 	expanded = dropCoveredTerms(expanded, snap.Incomes, snap.Payments)
 
@@ -78,24 +89,55 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 			payments = append(payments, e)
 		}
 	}
+	ws := BuildWindows(incomes)
+	return state{snap: snap, today: today, windows: ws, events: payments, st: Locate(ws, today)}, nil
+}
 
+// focus — окно, которое описывает экран, и «сегодня» для его расчёта. В зазоре
+// между окнами (прошлое закончилось, следующее ещё не началось) экран показывает
+// СЛЕДУЮЩЕЕ окно: именно в нём владелец планирует расходы. Расчёт ведётся от его
+// первого дня, поэтому платежи с датой в зазоре попадают в него.
+func (st state) focus() (idx int, asOf Date, upcoming bool) {
+	switch st.st.Kind {
+	case StateBetween:
+		return st.st.Index + 1, st.windows[st.st.Index+1].Start, true
+	case StateUpcoming:
+		return 0, st.today, true
+	default:
+		return st.st.Index, st.today, false
+	}
+}
+
+// View считает окно, которое видит владелец, в валюте показа cur.
+func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
+	ld, err := s.load(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	asOf, upcoming := ld.today, false
+	if ld.st.Kind == StateBetween {
+		_, asOf, upcoming = ld.focus()
+	}
 	v, err := Compute(ComputeInput{
-		Windows:    BuildWindows(incomes),
-		Events:     payments,
-		Rate:       snap.Rate,
+		Windows:    ld.windows,
+		Events:     ld.events,
+		Rate:       ld.snap.Rate,
 		Cur:        cur,
-		Today:      today,
-		ReservePct: snap.ReservePct,
+		Today:      asOf,
+		ReservePct: ld.snap.ReservePct,
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if upcoming {
+		v.State = StateUpcoming
 	}
 	if err := checkInvariant(v); err != nil {
 		return Result{}, err
 	}
 	return Result{
 		View: v,
-		Meta: Meta{Today: today, RatesManual: snap.RateManual, HasRate: snap.Rate != nil, Skipped: snap.Skipped},
+		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, Skipped: ld.snap.Skipped},
 	}, nil
 }
 
@@ -133,4 +175,116 @@ func checkInvariant(v View) error {
 		return fmt.Errorf("%w: perDay при недостаче", ErrInvariant)
 	}
 	return nil
+}
+
+// WindowChoice — в какое окно поставить платёж без даты.
+type WindowChoice string
+
+const (
+	WindowNone    WindowChoice = ""        // пока без даты, в расчёт не входит
+	WindowCurrent WindowChoice = "current" // в окно, которое сейчас на экране
+	WindowNext    WindowChoice = "next"    // в следующее за ним
+)
+
+// AddIncomeInput — ожидаемое поступление (дата обязательна: оно открывает окно).
+type AddIncomeInput struct {
+	Name   string
+	Amount Money
+	Date   Date
+}
+
+// AddPaymentInput — плановый платёж: либо с датой, либо в выбранное окно, либо без
+// даты. Сумма может быть неизвестна (nil).
+type AddPaymentInput struct {
+	Name     string
+	Amount   *Money
+	Date     *Date
+	Window   WindowChoice
+	Category string
+}
+
+func (s *Service) canWrite() error {
+	if s.writer == nil {
+		return ErrReadOnly
+	}
+	return nil
+}
+
+// AddIncome сохраняет ожидаемое поступление.
+func (s *Service) AddIncome(ctx context.Context, in AddIncomeInput) (string, error) {
+	if err := s.canWrite(); err != nil {
+		return "", err
+	}
+	amount, date := in.Amount, in.Date
+	n := NewItem{Kind: KindIncome, Name: in.Name, Amount: &amount, Date: &date}
+	if err := n.Validate(); err != nil {
+		return "", err
+	}
+	n.Name = strings.TrimSpace(n.Name)
+	return s.writer.AddPlanned(ctx, s.scope, n)
+}
+
+// AddPayment сохраняет плановый платёж. «В окно» превращается в дату начала
+// выбранного окна; если такого окна нет — ErrNoWindow.
+func (s *Service) AddPayment(ctx context.Context, in AddPaymentInput) (string, error) {
+	if err := s.canWrite(); err != nil {
+		return "", err
+	}
+	n := NewItem{Kind: KindPayment, Name: in.Name, Amount: in.Amount, Date: in.Date, Category: strings.TrimSpace(in.Category)}
+	switch in.Window {
+	case WindowNone:
+	case WindowCurrent, WindowNext:
+		if in.Date != nil {
+			return "", fmt.Errorf("%w: дата и окно вместе", ErrInvalidEvent)
+		}
+		ld, err := s.load(ctx)
+		if err != nil {
+			return "", err
+		}
+		ws, err := ld.chosenWindowStart(in.Window)
+		if err != nil {
+			return "", err
+		}
+		n.WindowStart = &ws
+	default:
+		return "", fmt.Errorf("%w: неизвестный выбор окна %q", ErrInvalidEvent, in.Window)
+	}
+	if err := n.Validate(); err != nil {
+		return "", err
+	}
+	n.Name = strings.TrimSpace(n.Name)
+	return s.writer.AddPlanned(ctx, s.scope, n)
+}
+
+// chosenWindowStart — дата, по которой платёж привяжется к окну. Для «следующего»,
+// которого ещё нет, берём день после конца текущего: окно появится, когда владелец
+// добавит поступление, и платёж к нему присоединится.
+func (st state) chosenWindowStart(c WindowChoice) (Date, error) {
+	if len(st.windows) == 0 || st.st.Kind == StateEnded || st.st.Kind == StateNone {
+		return Date{}, ErrNoWindow
+	}
+	idx, _, _ := st.focus()
+	if c == WindowCurrent {
+		return st.windows[idx].Start, nil
+	}
+	if idx+1 < len(st.windows) {
+		return st.windows[idx+1].Start, nil
+	}
+	return st.windows[idx].End().AddDays(1), nil
+}
+
+// Delete удаляет плановую запись по ключу вида "planned:<id>" или по самому id.
+func (s *Service) Delete(ctx context.Context, key string) error {
+	if err := s.canWrite(); err != nil {
+		return err
+	}
+	return s.writer.DeletePlanned(ctx, s.scope, strings.TrimPrefix(key, "planned:"))
+}
+
+// ExpenseCategories — названия категорий расходов для формы.
+func (s *Service) ExpenseCategories(ctx context.Context) ([]string, error) {
+	if err := s.canWrite(); err != nil {
+		return nil, err
+	}
+	return s.writer.ExpenseCategories(ctx)
 }

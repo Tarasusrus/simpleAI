@@ -3,11 +3,11 @@ import { money, plural } from '../fmt.js';
 import { row } from './row.js';
 
 // Платежи без даты и окна: в расчёт не входят.
-export function render(view, cur) {
+export function render(view, cur, ctx) {
   const items = view.inbox || [];
   if (!items.length) return h('div');
   const k = view.kpi;
-  const card = h('div', { class: 'card' }, items.map((r) => row(r, cur)));
+  const card = h('div', { class: 'card' }, items.map((r) => row(r, cur, ctx)));
   return h('section', null,
     h('h2', null, 'Без даты', ' · не входят в расчёт'),
     card,
