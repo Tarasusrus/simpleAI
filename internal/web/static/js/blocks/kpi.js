@@ -12,9 +12,12 @@ export function render(view, cur) {
   const short = k.canSpend < 0;
   // Окно, которое уже закончилось, «до конца» не тратят: это итог окна.
   const closed = view.state === 'ended' || view.state === 'between';
+  const upcoming = view.state === 'upcoming';
   const title = closed
     ? (short ? 'Итог окна: перерасход' : 'Итог окна: остаток')
-    : (short ? 'Не хватает до конца окна' : 'Можно тратить до конца окна');
+    : upcoming
+      ? (short ? 'В будущем окне не хватит' : 'Можно будет потратить в окне')
+      : (short ? 'Не хватает до конца окна' : 'Можно тратить до конца окна');
   const main = card('main',
     title,
     money(short ? -k.canSpend : k.canSpend, cur),

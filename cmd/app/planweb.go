@@ -46,7 +46,7 @@ func runPlanWeb(ctx context.Context, cfg config.Config, logger *slog.Logger, poo
 	}
 
 	reader := planrepo.NewReader(budget.NewStore(pool), logger)
-	svc := plan.NewService(reader, func() plan.Date { return plan.DateOf(time.Now(), loc) }, plan.Scope{ChatIDs: chats})
+	svc := plan.NewService(reader, planrepo.NewWriter(budget.NewStore(pool)), func() plan.Date { return plan.DateOf(time.Now(), loc) }, plan.Scope{ChatIDs: chats})
 	srv, err := web.New(wc, svc, logger)
 	if err != nil {
 		logger.Warn("plan web not started: invalid config", "reason", err.Error())

@@ -11,7 +11,7 @@ function note(r) {
 }
 
 // Одна строка ленты / списка. Название только текстом.
-export function row(r, cur) {
+export function row(r, cur, ctx) {
   const tags = [];
   if (r.expected) tags.push(h('span', { class: 'tag ex' }, 'ожидается'));
   if (r.kind === 'income' && !r.expected) tags.push(h('span', { class: 'tag ex' }, 'получено'));
@@ -23,5 +23,14 @@ export function row(r, cur) {
     h('span', { class: 'd' }, shortDate(r.date)),
     h('span', null, r.name, tags),
     amount,
-    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n));
+    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, removable(r, ctx)));
+}
+
+// Плановую запись (её ключ planned:...) можно убрать; факты и повторы — нет.
+function removable(r, ctx) {
+  if (!ctx || !ctx.onDelete || !String(r.key).startsWith('planned:')) return null;
+  return h('a', {
+    class: 'x', href: '#', title: 'Убрать из плана',
+    onclick: (e) => { e.preventDefault(); if (confirm('Убрать «' + r.name + '» из плана?')) ctx.onDelete(r.key); },
+  }, 'убрать');
 }

@@ -25,6 +25,10 @@ var staticFS embed.FS
 // Planner — то, что вебу нужно от plan.Service (ISP).
 type Planner interface {
 	View(ctx context.Context, cur plan.Currency) (plan.Result, error)
+	AddIncome(ctx context.Context, in plan.AddIncomeInput) (string, error)
+	AddPayment(ctx context.Context, in plan.AddPaymentInput) (string, error)
+	Delete(ctx context.Context, key string) error
+	ExpenseCategories(ctx context.Context) ([]string, error)
 }
 
 const (
@@ -72,6 +76,10 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 		_, _ = w.Write([]byte("ok")) //nolint:errcheck // ответ на healthz
 	})
 	mux.Handle("GET /api/plan/window", s.auth(http.HandlerFunc(s.handleWindow)))
+	mux.Handle("GET /api/plan/categories", s.auth(http.HandlerFunc(s.handleCategories)))
+	mux.Handle("POST /api/plan/income", s.auth(http.HandlerFunc(s.handleAddIncome)))
+	mux.Handle("POST /api/plan/payment", s.auth(http.HandlerFunc(s.handleAddPayment)))
+	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))
 	files := http.FileServerFS(sub)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.

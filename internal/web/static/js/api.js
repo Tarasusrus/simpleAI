@@ -19,12 +19,24 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-export async function getWindow(cur) {
-  const res = await fetch('/api/plan/window?cur=' + encodeURIComponent(cur), {
-    headers: { Authorization: 'Bearer ' + token() },
-  });
+async function call(method, path, payload) {
+  const headers = { Authorization: 'Bearer ' + token() };
+  const init = { method, headers };
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(payload);
+  }
+  const res = await fetch(path, init);
   let body = null;
   try { body = await res.json(); } catch (e) { /* не JSON */ }
   if (!res.ok) throw new ApiError(res.status, (body && body.error) || 'Ошибка ' + res.status);
   return body;
 }
+
+const q = (cur) => '?cur=' + encodeURIComponent(cur);
+
+export const getWindow = (cur) => call('GET', '/api/plan/window' + q(cur));
+export const getCategories = () => call('GET', '/api/plan/categories').then((b) => b.categories || []);
+export const addIncome = (cur, body) => call('POST', '/api/plan/income' + q(cur), body);
+export const addPayment = (cur, body) => call('POST', '/api/plan/payment' + q(cur), body);
+export const deleteItem = (cur, key) => call('DELETE', '/api/plan/item/' + encodeURIComponent(key) + q(cur));

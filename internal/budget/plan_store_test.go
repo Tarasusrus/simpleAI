@@ -139,3 +139,59 @@ func TestPlanReservePct_Default(t *testing.T) {
 		t.Errorf("резерв вне 0..100: %d", pct)
 	}
 }
+
+// Запись плановой записи: сумма в минимальных единицах, категория по имени без
+// регистра, свой чат; удаление — только из своих чатов.
+//
+// Мутация: убрать chat_id = ANY($2) из DeletePlanItem — тест краснеет.
+func TestPlanItems_AddReadDeleteScope(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+
+	amt := int64(123456)
+	ws := d(2026, 3, 19)
+	id, err := s.AddPlanItem(ctx, PlanItemInput{
+		ChatID: planStoreChat, Direction: "expense", Description: "корм", AmountMinor: &amt, Currency: "THB",
+		Category: "еда", WindowStart: &ws,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAmt, err := s.AddPlanItem(ctx, PlanItemInput{ChatID: planStoreChat, Direction: "income", Description: "премия", Currency: "RUB", DueDate: &ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := s.PlanPlannedItems(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[uuid.UUID]PlanPlanned{}
+	for _, x := range items {
+		byID[x.ID] = x
+	}
+	got := byID[id]
+	if got.AmountMinor == nil || *got.AmountMinor != 123456 || got.Currency != "THB" || got.WindowStart == nil || got.DueDate != nil {
+		t.Errorf("запись: %+v", got)
+	}
+	if got.Category == "" {
+		t.Errorf("категория «еда» не нашлась без учёта регистра (нужна в сид-данных): %+v", got)
+	}
+	if byID[noAmt].Direction != "income" || byID[noAmt].AmountMinor != nil {
+		t.Errorf("поступление без суммы: %+v", byID[noAmt])
+	}
+
+	// Чужая область удалить не может; своя — может.
+	ok, err := s.DeletePlanItem(ctx, []int64{planStoreChat - 1}, id)
+	if err != nil || ok {
+		t.Errorf("чужой чат удалил запись: ok=%v err=%v", ok, err)
+	}
+	ok, err = s.DeletePlanItem(ctx, []int64{planStoreChat}, id)
+	if err != nil || !ok {
+		t.Errorf("своя область не смогла удалить: ok=%v err=%v", ok, err)
+	}
+	ok, err = s.DeletePlanItem(ctx, []int64{planStoreChat}, id)
+	if err != nil || ok {
+		t.Errorf("повторное удаление: ok=%v err=%v", ok, err)
+	}
+}

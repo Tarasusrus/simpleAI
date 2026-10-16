@@ -1,0 +1,119 @@
+package planrepo
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"simpleAI/internal/budget"
+	"simpleAI/internal/plan"
+)
+
+type fakeSink struct {
+	added   []budget.PlanItemInput
+	delIDs  [][]int64
+	delOK   bool
+	delErr  error
+	deleted []uuid.UUID
+}
+
+func (f *fakeSink) AddPlanItem(_ context.Context, in budget.PlanItemInput) (uuid.UUID, error) {
+	f.added = append(f.added, in)
+	return uuid.New(), nil
+}
+
+func (f *fakeSink) DeletePlanItem(_ context.Context, ids []int64, id uuid.UUID) (bool, error) {
+	f.delIDs = append(f.delIDs, ids)
+	f.deleted = append(f.deleted, id)
+	return f.delOK, f.delErr
+}
+
+func (f *fakeSink) ExpenseCategoryNames(context.Context) ([]string, error) {
+	return []string{"Еда"}, nil
+}
+
+func dptr(y, m, d int) *plan.Date { x := plan.Date{Year: y, Month: m, Day: d}; return &x }
+
+func TestAddPlanned_MapsIncomeAndPayment(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	sc := plan.Scope{ChatIDs: []int64{7, 9}}
+	ctx := context.Background()
+
+	if _, err := w.AddPlanned(ctx, sc, plan.NewItem{
+		Kind: plan.KindIncome, Name: "аванс", Amount: &plan.Money{Minor: 3_000_000, Cur: plan.CurRUB}, Date: dptr(2026, 3, 20),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.AddPlanned(ctx, sc, plan.NewItem{
+		Kind: plan.KindPayment, Name: "права", WindowStart: dptr(2026, 3, 19), Category: "Еда",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.AddPlanned(ctx, sc, plan.NewItem{
+		Kind: plan.KindPayment, Name: "аренда", Amount: &plan.Money{Minor: 1_800_000, Cur: plan.CurTHB}, Date: dptr(2026, 3, 15),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	in, pay, thb := f.added[0], f.added[1], f.added[2]
+	if in.ChatID != 7 || in.Direction != "income" || *in.AmountMinor != 3_000_000 || in.Currency != "RUB" ||
+		in.DueDate == nil || !in.DueDate.Equal(time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)) || in.WindowStart != nil {
+		t.Errorf("поступление: %+v", in)
+	}
+	if pay.Direction != "expense" || pay.AmountMinor != nil || pay.DueDate != nil || pay.WindowStart == nil || pay.Category != "Еда" {
+		t.Errorf("платёж без суммы в окно: %+v", pay)
+	}
+	if thb.Currency != "THB" || *thb.AmountMinor != 1_800_000 {
+		t.Errorf("платёж в батах: %+v", thb)
+	}
+}
+
+// Пустая область и невалидная запись до хранилища не доходят.
+func TestAddPlanned_RejectsBeforeSink(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	ok := plan.NewItem{Kind: plan.KindPayment, Name: "x"}
+	if _, err := w.AddPlanned(context.Background(), plan.Scope{}, ok); err == nil {
+		t.Error("пустая область принята")
+	}
+	if _, err := w.AddPlanned(context.Background(), plan.Scope{ChatIDs: []int64{1}}, plan.NewItem{Kind: plan.KindIncome, Name: "x", Date: dptr(2026, 3, 20)}); !errors.Is(err, plan.ErrAmountRequired) {
+		t.Errorf("поступление без суммы: %v", err)
+	}
+	if len(f.added) != 0 {
+		t.Errorf("в хранилище ушло %d записей", len(f.added))
+	}
+}
+
+// Удаление ограничено областью: список чатов уходит в хранилище (AC-8.4).
+//
+// Мутация: передавать в DeletePlanItem nil вместо sc.ChatIDs — тест краснеет.
+func TestDeletePlanned_ScopeAndNotFound(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	sc := plan.Scope{ChatIDs: []int64{7, 9}}
+	id := uuid.New().String()
+
+	if err := w.DeletePlanned(context.Background(), sc, id); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("запись не найдена: %v", err)
+	}
+	f.delOK = true
+	if err := w.DeletePlanned(context.Background(), sc, id); err != nil {
+		t.Errorf("удаление: %v", err)
+	}
+	if len(f.delIDs) != 2 || len(f.delIDs[1]) != 2 || f.delIDs[1][0] != 7 || f.delIDs[1][1] != 9 {
+		t.Errorf("область не дошла до хранилища: %v", f.delIDs)
+	}
+	before := len(f.deleted)
+	if err := w.DeletePlanned(context.Background(), sc, "not-a-uuid"); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("кривой id: %v", err)
+	}
+	if len(f.deleted) != before {
+		t.Error("кривой id дошёл до хранилища")
+	}
+	if err := w.DeletePlanned(context.Background(), plan.Scope{}, id); err == nil {
+		t.Error("пустая область принята")
+	}
+}

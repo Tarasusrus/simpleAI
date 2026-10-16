@@ -44,7 +44,7 @@ func baseSnap() Snapshot {
 }
 
 func svc(f *fakeReader, today Date) *Service {
-	return NewService(f, func() Date { return today }, Scope{ChatIDs: []int64{42}})
+	return NewService(f, nil, func() Date { return today }, Scope{ChatIDs: []int64{42}})
 }
 
 // Поступление 100 000, аренда 18 000 ฿ по 2,5 = 45 000, потрачено 5 000, резерв 10 %.

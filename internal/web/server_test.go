@@ -20,7 +20,30 @@ type fakePlanner struct {
 	res  plan.Result
 	err  error
 	curs []plan.Currency
+
+	cmdErr   error
+	incomes  []plan.AddIncomeInput
+	payments []plan.AddPaymentInput
+	deleted  []string
+	cats     []string
 }
+
+func (f *fakePlanner) AddIncome(_ context.Context, in plan.AddIncomeInput) (string, error) {
+	f.incomes = append(f.incomes, in)
+	return "inc-1", f.cmdErr
+}
+
+func (f *fakePlanner) AddPayment(_ context.Context, in plan.AddPaymentInput) (string, error) {
+	f.payments = append(f.payments, in)
+	return "pay-1", f.cmdErr
+}
+
+func (f *fakePlanner) Delete(_ context.Context, key string) error {
+	f.deleted = append(f.deleted, key)
+	return f.cmdErr
+}
+
+func (f *fakePlanner) ExpenseCategories(context.Context) ([]string, error) { return f.cats, f.cmdErr }
 
 func (f *fakePlanner) View(_ context.Context, cur plan.Currency) (plan.Result, error) {
 	f.curs = append(f.curs, cur)
@@ -251,12 +274,12 @@ func TestWindow_Errors(t *testing.T) {
 	}
 }
 
-type panicPlanner struct{}
+type panicPlanner struct{ fakePlanner }
 
-func (panicPlanner) View(context.Context, plan.Currency) (plan.Result, error) { panic("boom") }
+func (*panicPlanner) View(context.Context, plan.Currency) (plan.Result, error) { panic("boom") }
 
 func TestPanicBecomes500(t *testing.T) {
-	s, logs := newServer(t, panicPlanner{})
+	s, logs := newServer(t, &panicPlanner{})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "boom") {
 		t.Errorf("паника: %d %s", rec.Code, rec.Body.String())
