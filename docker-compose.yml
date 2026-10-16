@@ -5,6 +5,10 @@ services:
     image: pgvector/pgvector:pg16
     container_name: simpleai-postgres
     restart: unless-stopped
+    # Потолок памяти Postgres. Раньше правился руками на сервере, и такая правка
+    # блокировала git pull в деплое («local changes would be overwritten»).
+    mem_limit: 384m
+    mem_reservation: 96m
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-simpleai}
       POSTGRES_USER: ${POSTGRES_USER:-simpleai}
