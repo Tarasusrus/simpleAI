@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"simpleAI/internal/constants"
 	"simpleAI/internal/observability"
 	"simpleAI/internal/trace"
 )
@@ -21,10 +22,14 @@ func (s *Service) runAgentLoop(
 	obsTrace *observability.Trace,
 	chatID *int64,
 ) (string, error) {
-	toolSystemPrompt := buildToolsSystemPrompt(s.registry.List())
+	manifests := s.registry.List()
+	toolSystemPrompt := buildToolsSystemPrompt(manifests)
 	currentPrompt := input
 	var accumulatedResults []string
 	iteration := 0
+	// Повторная попытка на неполный вызов — ровно одна за весь диалог,
+	// иначе модель, упорно отвечающая без input, крутила бы цикл до лимита.
+	retriedInvalid := false
 
 	for range maxIterations {
 		iteration++
@@ -51,6 +56,28 @@ func (s *Service) runAgentLoop(
 			return resp, nil
 		}
 
+		if bad := validateCalls(calls, manifests); len(bad) > 0 {
+			s.logger.ErrorContext(ctx, "invalid tool calls",
+				"iteration", iteration,
+				"problems", describeInvalid(bad),
+				"llm_response", resp,
+			)
+			if retriedInvalid {
+				s.appendTrace(ctx, trace.Entry{
+					SessionID:   sessionID,
+					ChatID:      chatID,
+					UserInput:   input,
+					Iteration:   iteration,
+					LLMResponse: resp,
+					IsFinal:     true,
+				})
+				return constants.MsgAgentUnclearRequest, nil
+			}
+			retriedInvalid = true
+			currentPrompt = buildRetryPrompt(input, bad)
+			continue
+		}
+
 		for i, call := range calls {
 			inputJSON, err := json.Marshal(call.Input)
 			if err != nil {
@@ -66,8 +93,13 @@ func (s *Service) runAgentLoop(
 			skillName := call.Skill
 			var skillResult *string
 			if err != nil {
-				msg := fmt.Sprintf("Ошибка: %v", err)
-				skillResult = &msg
+				// Пользователю уедет то, что попало в accumulatedResults:
+				// следующий промпт требует вернуть результат инструмента
+				// дословно. Поэтому наружу — человеческая фраза, сырой err
+				// остаётся в логах и трейсе.
+				msg := constants.MsgSkillFailed
+				traceResult := fmt.Sprintf("skill error: %v", err)
+				skillResult = &traceResult
 				s.logger.ErrorContext(ctx, "skill error",
 					"skill", call.Skill,
 					"input", string(inputJSON),
