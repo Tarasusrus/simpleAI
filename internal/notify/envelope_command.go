@@ -38,7 +38,7 @@ type EnvelopeReminderStore interface {
 // ни одной фразы оператора).
 var (
 	// «в 7:30», «в 7.30», «в 9» — время после предлога, чтобы не подобрать сумму из соседней фразы.
-	envelopeTimeRe = regexp.MustCompile(`(?:^|[^\p{L}])в\s+(\d{1,2})(?:[:.](\d{2}))?(?:[^\d]|$)`)
+	envelopeTimeRe = regexp.MustCompile(`(?:^|[^\p{L}])в\s+(\d{1,2})(?:[:.](\d{2}))?(?:\D|$)`)
 	negationRe     = regexp.MustCompile(`(?:^|[^\p{L}])(не|выключи|отключи|перестань|прекрати|хватит)(?:[^\p{L}]|$)`)
 	positiveRe     = regexp.MustCompile(`(?:^|[^\p{L}])(присылай|шли|высылай|включи|напоминай|показывай|отправляй)(?:[^\p{L}]|$)`)
 )
@@ -70,14 +70,14 @@ func ParseEnvelopeCommand(text string) (EnvelopeCommand, bool) {
 			if err != nil || h > 23 {
 				return cmd, true
 			}
-			min := 0
+			minute := 0
 			if m[2] != "" {
-				min, err = strconv.Atoi(m[2])
-				if err != nil || min > 59 {
+				minute, err = strconv.Atoi(m[2])
+				if err != nil || minute > 59 {
 					return cmd, true
 				}
 			}
-			cmd.HasTime, cmd.Hour, cmd.Minute = true, h, min
+			cmd.HasTime, cmd.Hour, cmd.Minute = true, h, minute
 		}
 		return cmd, true
 	default:

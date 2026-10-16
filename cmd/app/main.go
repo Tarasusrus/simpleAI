@@ -249,10 +249,11 @@ func runMCP(ctx context.Context, logger *slog.Logger, registry *plugin.Registry)
 	mcpSrv := mcpserver.Build(registry, "simpleai", "1.0.0")
 	sseSrv := server.NewSSEServer(mcpSrv, server.WithBaseURL("http://localhost:8080"))
 
+	addr := tools.MCPAddr()
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("MCP SSE server started", "addr", ":8080")
-		errCh <- sseSrv.Start(":8080")
+		logger.Info("MCP SSE server started", "addr", addr)
+		errCh <- sseSrv.Start(addr)
 	}()
 
 	select {

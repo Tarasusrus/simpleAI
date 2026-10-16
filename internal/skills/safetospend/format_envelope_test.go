@@ -61,18 +61,18 @@ const referenceEnvelopeText = "24.08 — 06.09 · 14 дней\n" +
 	"\n" +
 	"**Куда уйдут**\n" +
 	"```\n" +
-	"Аренда             10.09  18 000\n" +
-	"Кредит             27.08   9 194\n" +
-	"Ежемесячный платеж 01.09     968\n" +
-	"Подписка Клауд     10.09     548\n" +
-	"Еда                        5 400\n" +
-	"Транспорт                  1 700\n" +
-	"Здоровье                   1 700\n" +
-	"Развлечения                1 400\n" +
-	"Прочее                     1 200\n" +
-	"Накопления                   858\n" +
-	"                          ------\n" +
-	"                          40 968\n" +
+	"Аренда             10.09  18 000 ฿\n" +
+	"Кредит             27.08   9 194 ฿\n" +
+	"Ежемесячный платеж 01.09     968 ฿\n" +
+	"Подписка Клауд     10.09     548 ฿\n" +
+	"Еда                        5 400 ฿\n" +
+	"Транспорт                  1 700 ฿\n" +
+	"Здоровье                   1 700 ฿\n" +
+	"Развлечения                1 400 ฿\n" +
+	"Прочее                     1 200 ฿\n" +
+	"Накопления                   858 ฿\n" +
+	"                          --------\n" +
+	"                          40 968 ฿\n" +
 	"```\n" +
 	"\n" +
 	"**На день: 814 ฿**\n" +
@@ -118,7 +118,18 @@ func TestFormatEnvelopePlan_ColumnSumsToIncome(t *testing.T) {
 	var sum int
 	var total int
 	seenSeparator := false
+	// Считаем ТОЛЬКО внутри моноблока: с тех пор как знак валюты стоит у каждой
+	// суммы (simpleAI-302i), «Пришло 128 000 ₽ · 50 491 ฿» из шапки тоже
+	// разбирается как сумма и задваивает колонку.
+	inBlock := false
 	for _, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			inBlock = !inBlock
+			continue
+		}
+		if !inBlock {
+			continue
+		}
 		if strings.Contains(line, "------") {
 			seenSeparator = true
 			continue
@@ -144,9 +155,14 @@ func TestFormatEnvelopePlan_ColumnSumsToIncome(t *testing.T) {
 	}
 }
 
-// trailingAmount вытаскивает число из хвоста строки моноблока («18 000» → 18000).
+// trailingAmount вытаскивает число из хвоста строки моноблока
+// («18 000 ฿» → 18000). Знак валюты стоит у КАЖДОЙ строки (simpleAI-302i) и
+// отбрасывается здесь: тест проверяет сходимость колонки, а не вёрстку.
 func trailingAmount(line string) (int, bool) {
 	fields := strings.Fields(line)
+	if n := len(fields); n > 0 && (fields[n-1] == "฿" || fields[n-1] == "₽") {
+		fields = fields[:n-1]
+	}
 	if len(fields) == 0 {
 		return 0, false
 	}

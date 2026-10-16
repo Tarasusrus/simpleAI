@@ -26,10 +26,14 @@ Connect once via SSE, get access to all skills:
 ```json
 {
   "mcpServers": {
-    "simpleai": { "type": "http", "url": "http://your-host:8080/sse" }
+    "simpleai": { "type": "http", "url": "http://localhost:8080/sse" }
   }
 }
 ```
+
+MCP слушает только `127.0.0.1:8080` (без аутентификации). С другой машины — через
+туннель: `ssh -L 8080:127.0.0.1:8080 simpleai`. Открыть порт наружу можно только
+осознанно, переменной `MCP_ADDR`.
 
 ---
 

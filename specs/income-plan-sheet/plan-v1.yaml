@@ -1,0 +1,187 @@
+plan:
+  name: "Общий план прихода: экран с ячейками по категориям, суммами и деталями"
+  note: "Приоритет №0 — видимый экран. Фаза 1 даёт его на существующих данных без миграций. Реализация не начата."
+  phases:
+  - id: phase-1
+    name: "Экран на существующих данных (127.0.0.1, без миграций)"
+    description: "Страница со всеми категориями, лимит/потрачено/осталось/в день, деталями по клику и выгрузкой в Excel. Доступна владельцу через SSH-туннель."
+    tasks:
+    - id: task-1.1
+      name: "Принять ADR-009 (способ публикации и модель доступа)"
+      description: "Утвердить docs/adr/009-plan-web-ui.md у владельца: фаза 1 только 127.0.0.1, токен, заголовки."
+      artifact: "docs/adr/009-plan-web-ui.md, статус Accepted"
+      depends_on: []
+      validation: "Владелец подтвердил; в ADR нет пунктов без решения, кроме выбора прокси для фазы 2"
+    - id: task-1.2
+      name: "Каркас internal/web: PlanReader, маршрут GET /plan/{token}, проверка токена"
+      description: "Интерфейс PlanReader, конструктор с зависимостями, сравнение токена за константное время, 404 без тела при неверном."
+      artifact: "internal/web/server.go, internal/web/server_test.go"
+      depends_on: ["task-1.1"]
+      validation: "go test ./internal/web: верный токен 200, неверный/пустой 404; мутация (всегда 200) краснит тест"
+    - id: task-1.3
+      name: "Модель «строки таблицы» из существующего расчёта"
+      description: "Собрать категории × лимит/потрачено/осталось/в день и итоги из safetospend.PlanEnvelope и budget.Store; «в день» считается в одном месте; сервис не вводит новую формулу раскладки."
+      artifact: "internal/web/model.go + tests на фикстурах"
+      depends_on: ["task-1.2"]
+      validation: "Тесты AC-1.1, 1.2, 1.3, 1.7, 1.8, 2.5; все категории видны, пустые тоже"
+    - id: task-1.4
+      name: "Шаблон страницы и вёрстка 375 px"
+      description: "html/template, порядок блоков по R5, красный перерасход, итог, пустой приход, раскрытие строк маленьким скриптом без внешних CDN."
+      artifact: "internal/web/templates/plan.html"
+      depends_on: ["task-1.3"]
+      validation: "AC-1.6, AC-8.2; снимок экрана на 375 px приложен к PR"
+    - id: task-1.5
+      name: "Детали по клику: GET /plan/{token}/tx"
+      description: "HTML-фрагмент со списком трат ячейки (дата, сумма, валюта, описание, автор), сумма списка равна ячейке."
+      artifact: "internal/web/details.go + тест"
+      depends_on: ["task-1.3"]
+      validation: "AC-1.5: тест сверяет сумму деталей с ячейкой; проверка XSS в описании"
+    - id: task-1.6
+      name: "Выгрузка Excel из той же модели"
+      description: "excelize (версия зафиксирована в go.mod), строки и суммы как на экране, итоги формулами SUM."
+      artifact: "internal/web/export.go + тест чтения xlsx"
+      depends_on: ["task-1.3"]
+      validation: "AC-1.10: тест открывает файл, сверяет значения и формулы"
+    - id: task-1.7
+      name: "Запуск на 127.0.0.1 и показ владельцу"
+      description: "Включение сервера под PLAN_WEB_TOKEN, порт отдельный от MCP :8080, инструкция SSH-туннеля. В эту же задачу входит дешёвый middleware C17a-b (заголовки Referrer-Policy/Cache-Control/noindex и rate limit неверного токена); в фазе 2 остаётся только прокси."
+      artifact: "cmd/app wiring + раздел в CONTEXT.md"
+      depends_on: ["task-1.4", "task-1.5", "task-1.6"]
+      validation: "Владелец открыл страницу через туннель и видит все категории с суммами и деталями"
+    checkpoint:
+      description: "ГЛАВНОЕ: владелец видит свой экран. Принять решение, достаточно ли этого, и утвердить публикацию."
+      criteria: ["Все категории видны с суммами и деталями", "Excel скачивается и совпадает с экраном", "Порт наружу не открыт"]
+
+  - id: phase-2
+    name: "Публикация и безопасность"
+    description: "Открыть страницу партнёру и телефону по HTTPS."
+    tasks:
+    - id: task-2.1
+      name: "Выбрать прокси и домен"
+      description: "Нужен ответ владельца: есть ли домен (открытый вопрос 9); выбрать прокси, дописать ADR-009."
+      artifact: "ADR-009, раздел «Публикация»"
+      depends_on: ["task-1.7"]
+      validation: "Способ утверждён владельцем"
+    - id: task-2.2
+      name: "Реверс-прокси с TLS на отдельном порту/поддомене"
+      description: "Настроить по ADR-009, 443 не трогать."
+      artifact: "конфиг прокси в deploy/"
+      depends_on: ["task-2.1"]
+      validation: "Страница открывается по HTTPS с телефона; 3x-ui не затронут"
+    - id: task-2.3
+      name: "Заголовки, rate limit, маскирование токена в логах"
+      description: "Referrer-Policy, Cache-Control no-store, noindex; лимит неверных токенов; путь /plan/* маскируется в access-логе прокси."
+      artifact: "internal/web/middleware.go, конфиг прокси"
+      depends_on: ["task-2.2"]
+      validation: "AC-6.4, AC-6.5; в логе прокси нет токена"
+    - id: task-2.4
+      name: "Ротация токена и инструкция"
+      description: "Смена PLAN_WEB_TOKEN, перезапуск, как раздать ссылку."
+      artifact: "раздел в CONTEXT.md"
+      depends_on: ["task-2.3"]
+      validation: "Старая ссылка после ротации отдаёт 404"
+    checkpoint:
+      description: "Безопасность публикации"
+      criteria: ["TLS работает", "Токен не попадает в логи и Referer", "Без токена данных нет"]
+
+  - id: phase-3
+    name: "Чистка данных"
+    description: "Слить дубли категорий без потери денег, не сломав конверты и recurring."
+    tasks:
+    - id: task-3.1
+      name: "Таблица соответствий категорий (на утверждение владельцу)"
+      description: "39 категорий → итоговый список; пересчёт перечня FK по information_schema (transaction, recurring, share_category)."
+      artifact: "specs/income-plan-sheet/category-merge.md"
+      depends_on: ["task-1.7"]
+      validation: "Владелец утвердил таблицу"
+    - id: task-3.2
+      name: "Миграция 00021: parent_id, added_by, updated_at, updated_by (с Down)"
+      description: "Отдельно от слияния. Номер подтвердить перед созданием: 00020 живёт в PR #63 (feature/envelope-iter2), в main её ещё нет."
+      artifact: "internal/db/migrations/00021_*.sql"
+      depends_on: ["task-3.1"]
+      validation: "goose up/down на копии; результаты /envelope и остатка до и после совпадают (AC-4.6)"
+    - id: task-3.3
+      name: "Data-миграция слияния одной транзакцией"
+      description: "Перепривязка transaction, recurring, share_category (с конфликтом ключа), самопроверка сумм."
+      artifact: "internal/db/migrations/00022_*.sql"
+      depends_on: ["task-3.2"]
+      validation: "AC-4.1, 4.5, 4.6; тест на копии боевой структуры; мутация (не переносить share_category) краснит тест"
+    - id: task-3.4
+      name: "Обновить код, матчащий категории по названию"
+      description: "IsVariableDailyExpense, buckets.go и другие, найденные по поиску."
+      artifact: "правки + тесты"
+      depends_on: ["task-3.3"]
+      validation: "Поиск по старым названиям пуст, тесты зелёные"
+    - id: task-3.5
+      name: "Разбор дублей и тестовых 10 ₽"
+      description: "12 возможных дублей и три прихода по 10 ₽ — решение владельца по каждому."
+      artifact: "отчёт в specs, правки данных по утверждению"
+      depends_on: ["task-3.1"]
+      validation: "Владелец отметил, что удалить"
+    checkpoint:
+      description: "Данные чистые, деньги сходятся"
+      criteria: ["Суммы до/после совпали", "Ссылок на удалённые категории нет", "Бот отвечает как прежде"]
+
+  - id: phase-4
+    name: "Подкатегории и ввод с экрана"
+    description: "Дерево категорий, форма добавления/правки/удаления, автор записи, история по месяцам."
+    tasks:
+    - id: task-4.1
+      name: "Дерево категорий в модели и шаблоне"
+      description: "Раскрытие, сумма родителя = сумма подкатегорий; доли привязаны к родителю (C34)."
+      artifact: "правки internal/web"
+      depends_on: ["task-3.4"]
+      validation: "AC-1.3, 1.4, 1.11"
+    - id: task-4.2
+      name: "Форма добавления, правки, удаления через общий метод Store"
+      description: "Один путь записи для бота и экрана; оптимистичная блокировка по updated_at."
+      artifact: "internal/web/write.go + тесты"
+      depends_on: ["task-4.1"]
+      validation: "AC-3.1–3.5, 3.7; параллельная правка не даёт 500"
+    - id: task-4.3
+      name: "added_by в боте и в вебе, показ в деталях"
+      description: "Имя пользователя из Telegram или web; старые записи показывают «—»."
+      artifact: "правки bot + web"
+      depends_on: ["task-4.2"]
+      validation: "AC-3.6"
+    - id: task-4.4
+      name: "Вкладка «История» по месяцам"
+      description: "Категории × месяцы, раскрытие трат."
+      artifact: "internal/web/history.go"
+      depends_on: ["task-4.1"]
+      validation: "AC-1.9"
+    checkpoint:
+      description: "Совместная работа"
+      criteria: ["Партнёр вносит и правит", "Бот и экран видят одно и то же"]
+
+  - id: phase-5
+    name: "Долги, «Отложить», период, валюта"
+    description: "Достроить расчётные блоки поверх существующей логики."
+    tasks:
+    - id: task-5.1
+      name: "Ввод долгов и срок закрытия"
+      description: "Использовать budget_debt; пустое состояние с подсказкой; платёж больше остатка закрывает долг."
+      artifact: "internal/web + срок в сервисе"
+      depends_on: ["task-4.2"]
+      validation: "AC-5.1–5.4"
+    - id: task-5.2
+      name: "Строка «Отложить» и «Нераспределено»"
+      description: "Reserve — новый вход расчёта, вычитается из FreeAfterObligations до раскладки (C32)."
+      artifact: "правка safetospend + тест сходимости"
+      depends_on: ["task-5.1"]
+      validation: "AC-2.3, 2.4, 2.6; инвариант ADR-008 §4"
+    - id: task-5.3
+      name: "Ручной сдвиг границ периода"
+      description: "Границы включительно; пересчёт всех ячеек."
+      artifact: "правки модели и формы"
+      depends_on: ["task-4.2"]
+      validation: "AC-1.12, 1.13"
+    - id: task-5.4
+      name: "Переключатель ₽/฿"
+      description: "Курс из GetExchangeRates (ручной перекрывает автоматический)."
+      artifact: "правки модели и шаблона"
+      depends_on: ["task-4.1"]
+      validation: "AC-7.1, 7.2"
+    checkpoint:
+      description: "Финальная приёмка владельцем"
+      criteria: ["Все AC закрыты", "Ответы бота прежние (AC-8.3)", "Владелец видит всё, что хотел"]

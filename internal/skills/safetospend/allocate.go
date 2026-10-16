@@ -53,9 +53,10 @@ type EnvelopePlanInput struct {
 	// пофамильные конверты — одни и те же деньги, и складывать их значит
 	// вычесть обязательства дважды.
 	Recurring []budget.RecurringPayment
-	// From — начало периода конверта; от него отсчитывается окно
-	// финансирования регулярных платежей.
-	From time.Time
+	// From, To — границы периода конверта, ОБЕ включительно. Регулярный платёж
+	// финансируется этим приходом тогда и только тогда, когда его дата лежит
+	// внутри [From, To]; всё, что дальше, — забота следующего конверта.
+	From, To time.Time
 }
 
 // EnvelopePlan — результат раскладки: детерминированные числа и доли.
@@ -64,6 +65,10 @@ type EnvelopePlan struct {
 	Result   Result
 	Shares   []budget.EnvelopeShare
 	Warnings []string
+	// Upcoming — регулярные платежи, попадающие уже в СЛЕДУЮЩИЙ период. Деньги
+	// на них этим приходом не откладываются, но пропасть из виду они не имеют
+	// права: оператор, не увидев аренду, потратит её на еду.
+	Upcoming []budget.EnvelopeShare
 }
 
 // PlanEnvelope — единственная точка входа раскладки для внешних пакетов.
@@ -76,12 +81,13 @@ func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
 	if snap == nil {
 		snap = &budget.AdvisorSnapshot{}
 	}
-	fixed, warnings := fixedShares(in.Recurring, in.Rates, in.From)
+	fixed, upcoming, warnings := fixedShares(in.Recurring, in.Rates, in.From, in.To)
 
 	// Обязательства снимаются с прихода РОВНО ОДИН раз — суммой пофамильных
 	// fixed-конвертов. Snapshot.UpcomingRecurring здесь подменяется ею, а не
-	// складывается: это одни и те же платежи, посчитанные с разными границами
-	// (снимок режет период конверта, окно финансирования — месяц вперёд).
+	// складывается: это одни и те же платежи. Границы у них теперь совпадают
+	// (обе — период конверта), но подмена всё равно обязательна: снимок режет
+	// ещё и долги, а fixed-доли собраны только из recurring.
 	obligations := *snap
 	obligations.UpcomingRecurring = sumAllocatedShares(fixed)
 
@@ -98,10 +104,11 @@ func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
 	for i := range shares {
 		shares[i].Position = i
 	}
-	return EnvelopePlan{Result: res, Shares: shares, Warnings: warnings}
+	return EnvelopePlan{Result: res, Shares: shares, Warnings: warnings, Upcoming: upcoming}
 }
 
-// fixedShares превращает регулярные платежи в видимые конверты (simpleAI-faeq.11).
+// fixedShares превращает регулярные платежи в видимые конверты (simpleAI-faeq.11)
+// и отдельно возвращает те, что придутся уже на следующий период.
 //
 // Почему платежи стали конвертами, а не остались скрытым вычетом: оператор
 // отверг деление трат на «обязательные» и «на жизнь» — «есть мне тоже надо, или
@@ -110,9 +117,18 @@ func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
 // первыми, а не вычет до раскладки. Скрытый вычет ещё и ломает сходимость: в
 // ответе бота приход не сходился визуально, 12 332 ฿ исчезали без строки.
 //
-// Окно финансирования — месяц вперёд от начала периода, а НЕ период конверта.
-// Аренда платится 10.09, период кончается 06.09, но отложить деньги надо сейчас:
-// иначе приход между 06.09 и 10.09 придётся на пустой карман (sinking fund).
+// Окно финансирования — РОВНО период конверта [from, to], обе границы
+// включительно. Раньше здесь стоял месяц вперёд (sinking fund: «аренда 10.09
+// при периоде до 06.09 всё равно должна быть отложена сейчас»), и это отменено
+// оператором 24.08.2026: приход у него ДВАЖДЫ в месяц, период конверта совпадает
+// с ритмом прихода, и платёж следующего периода профинансируется приходом того
+// периода. Месячное окно при этом запирало 18 671 ฿ из 128 000 под платежи,
+// до которых ещё придут деньги, и оператор читал свободный остаток как заниженный.
+// Не возвращать 31 день обратно, не переспросив: на другом ритме прихода
+// (раз в месяц) верным будет ровно прежнее поведение.
+//
+// Отсечённые платежи молча не пропадают — они уходят вторым результатом и
+// печатаются строкой «впереди»: не увидев аренду, оператор потратит её на еду.
 //
 // Категорий у fixed-доли нет: её факт — сам recurring-платёж, а транзакции с
 // recurring_id в факт долей не попадают (ADR-008 §5). Дай мы ей категорию,
@@ -120,18 +136,28 @@ func PlanEnvelope(in EnvelopePlanInput) EnvelopePlan {
 //
 // Порядок — по убыванию суммы: колонка чисел читается сверху вниз, и крупное
 // обязательство должно быть первым (ADR-008 §11 — числа считает Go, не LLM).
-func fixedShares(rec []budget.RecurringPayment, rates map[string]float64, from time.Time) ([]budget.EnvelopeShare, []string) {
+func fixedShares(rec []budget.RecurringPayment, rates map[string]float64, from, to time.Time) (fixed, upcoming []budget.EnvelopeShare, warnings []string) {
 	if len(rec) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	windowEnd := from.AddDate(0, 0, fixedFundingDays)
-	var warnings []string
-	out := make([]budget.EnvelopeShare, 0, len(rec))
+	// Обе границы включительно: платёж день в день с концом периода — ещё этот
+	// период. Полночь следующих суток берётся именно для этого.
+	periodStart := dayStart(from)
+	periodEnd := dayStart(to).AddDate(0, 0, 1)
+	// «Впереди» заглядывает РОВНО на один следующий период, а не на фиксированные
+	// 31 день. Блок озаглавлен «из следующего прихода», а приход у оператора
+	// дважды в месяц: месячное окно затянуло бы туда платежи периода ПОСЛЕ
+	// следующего и подписало бы их деньгами, которых к тому моменту ещё нет.
+	// Длина окна равна длине самого периода — так оно следует за горизонтом,
+	// а не за календарным месяцем.
+	lookaheadEnd := periodEnd.AddDate(0, 0, int(periodEnd.Sub(periodStart).Hours()/24))
+
+	fixed = make([]budget.EnvelopeShare, 0, len(rec))
 	for _, r := range rec {
 		if !r.Enabled || r.Type != "expense" {
 			continue
 		}
-		if r.NextDate.Before(dayStart(from)) || !r.NextDate.Before(windowEnd) {
+		if r.NextDate.Before(periodStart) || !r.NextDate.Before(lookaheadEnd) {
 			continue
 		}
 		thb, ok := budget.ToTHB(r.Amount, r.Currency, rates)
@@ -142,21 +168,36 @@ func fixedShares(rec []budget.RecurringPayment, rates map[string]float64, from t
 			continue
 		}
 		due := r.NextDate
-		out = append(out, budget.EnvelopeShare{
+		share := budget.EnvelopeShare{
 			Name:      r.Name,
 			Kind:      budget.ShareKindFixed,
 			Allocated: roundKopecks(thb),
 			Source:    budget.ShareSourceAuto,
 			DueDate:   &due,
-		})
+		}
+		if r.NextDate.Before(periodEnd) {
+			fixed = append(fixed, share)
+			continue
+		}
+		upcoming = append(upcoming, share)
 	}
+	sortSharesByAmount(fixed)
+	// «Впереди» сортируется по ДАТЕ, а не по сумме: это список ближайших
+	// платежей, и первым читается тот, что наступит раньше.
+	sort.SliceStable(upcoming, func(i, j int) bool {
+		return upcoming[i].DueDate.Before(*upcoming[j].DueDate)
+	})
+	return fixed, upcoming, warnings
+}
+
+// sortSharesByAmount — по убыванию суммы, при равенстве по имени (устойчиво).
+func sortSharesByAmount(out []budget.EnvelopeShare) {
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Allocated != out[j].Allocated {
 			return out[i].Allocated > out[j].Allocated
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, warnings
 }
 
 // dayStart — начало суток: next_date хранится DATE (полночь UTC), а from
@@ -285,7 +326,7 @@ func allocateShares(
 	overrides map[string]float64,
 	history map[string]int,
 ) ([]budget.EnvelopeShare, []string) {
-	drafts, warnings := buildDrafts(free, fc, rates, days, history, nil)
+	drafts, warnings := buildDrafts(fc, rates, days, history, nil)
 	drafts, warnings = applyOverrides(drafts, overrides, warnings)
 	warnings = truncateToFree(drafts, free, warnings)
 
@@ -296,7 +337,6 @@ func allocateShares(
 // мелочь и категории без истории — в «прочее». Последний черновик — всегда
 // «прочее»: доля-приёмник обязана существовать даже с нулевым лимитом.
 func buildDrafts(
-	free float64,
 	fc []budget.CategoryForecast,
 	rates map[string]float64,
 	days int,

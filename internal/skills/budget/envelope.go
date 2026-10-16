@@ -99,6 +99,7 @@ func (s *BudgetSkill) startEnvelope(ctx context.Context, req budgetInput) (strin
 		History:    history,
 		Recurring:  recurring,
 		From:       h.From,
+		To:         h.To,
 	})
 	s.attachCategoryIDs(ctx, plan.Shares)
 

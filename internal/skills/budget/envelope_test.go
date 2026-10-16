@@ -107,8 +107,7 @@ func TestStartEnvelope_WritesSharesAndReply(t *testing.T) {
 	var hasFallback, hasSavings bool
 	for _, sh := range shares {
 		sum += sh.Allocated
-		switch strings.ToLower(sh.Name) {
-		case budget.FallbackShareName:
+		if strings.EqualFold(sh.Name, budget.FallbackShareName) {
 			hasFallback = true
 		}
 		if sh.Kind == budget.ShareKindSave {
@@ -134,10 +133,19 @@ func TestStartEnvelope_WritesSharesAndReply(t *testing.T) {
 			t.Errorf("в ответе нет строки по доле %q:\n%s", sh.Name, reply)
 		}
 	}
-	for _, want := range []string{"Приход", "Обязательства", "К раскладке", "Свободно", "Вне конвертов"} {
+	// Строки утверждённого оператором формата (simpleAI-faeq.11). Прежние
+	// «Приход / Обязательства / К раскладке / Вне конвертов» он отверг: сводная
+	// строка обязательств прятала и сумму, и повод, а «вне конвертов» показывала
+	// 0 ฿ при аренде 18 000, потому что считала ФАКТ прошедших трат.
+	for _, want := range []string{"Пришло", "Курс", "Куда уйдут", "На день"} {
 		if !strings.Contains(reply, want) {
 			t.Errorf("в ответе нет обязательной строки %q:\n%s", want, reply)
 		}
+	}
+	// Знак валюты у каждой суммы (simpleAI-302i): без него колонку нельзя
+	// прочитать — баты там или рубли.
+	if !strings.Contains(reply, "฿") {
+		t.Errorf("в ответе нет знака валюты:\n%s", reply)
 	}
 
 	// Повторный приход деактивирует прошлый конверт, а не плодит второй активный.

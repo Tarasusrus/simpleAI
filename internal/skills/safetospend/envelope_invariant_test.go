@@ -184,15 +184,19 @@ func TestPlanEnvelope_InvariantHolds(t *testing.T) {
 }
 
 // Регулярные платежи становятся видимыми конвертами, а не скрытым вычетом
-// (simpleAI-faeq.11 §1–§4): каждый — своей строкой с датой, включая платёж ЗА
-// границей периода, а итог сходится с приходом до бата.
+// (simpleAI-faeq.11 §1–§4): каждый — своей строкой с датой, а итог сходится с
+// приходом до бата. Платёж ЗА границей периода в конверт не попадает
+// (simpleAI-agz4) — он уходит в Upcoming и проверяется отдельным тестом.
 func TestPlanEnvelope_RecurringBecomeVisibleShares(t *testing.T) {
 	from := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
 	rec := []budget.RecurringPayment{
 		{Name: "аренда", Type: "expense", Amount: 18000, Currency: "THB", Enabled: true,
-			NextDate: time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)}, // ЗА границей периода
+			NextDate: time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)}, // ЗА границей периода — в Upcoming
 		{Name: "Кредит потребительский Сбербанк", Type: "expense", Amount: 28500, Currency: "RUB", Enabled: true,
 			NextDate: time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)},
+		{Name: "уборка", Type: "expense", Amount: 2500, Currency: "THB", Enabled: true,
+			NextDate: time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)}, // день в день с концом — ВНУТРИ
 		{Name: "кредитная карта", Type: "expense", Amount: 12500, Currency: "RUB", Enabled: false,
 			NextDate: time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)}, // выключен — не платёж
 		{Name: "зарплата", Type: "income", Amount: 100000, Currency: "RUB", Enabled: true,
@@ -213,19 +217,23 @@ func TestPlanEnvelope_RecurringBecomeVisibleShares(t *testing.T) {
 		History:   map[string]int{"еда": 3},
 		Recurring: rec,
 		From:      from,
+		To:        to,
 	})
 
 	fixed := FixedShares(plan.Shares)
 	if len(fixed) != 2 {
-		t.Fatalf("видимых платежей %d, ожидалось 2 (аренда и кредит): %+v", len(fixed), fixed)
+		t.Fatalf("видимых платежей %d, ожидалось 2 (кредит и уборка): %+v", len(fixed), fixed)
 	}
-	if fixed[0].Name != "аренда" || !eq(fixed[0].Allocated, 18000) {
-		t.Errorf("первым платежом ожидалась аренда 18000: %+v", fixed[0])
+	if fixed[0].Name != "Кредит потребительский Сбербанк" || !eq(fixed[0].Allocated, roundKopecks(28500/3.1)) {
+		t.Errorf("первым платежом ожидался кредит: %+v", fixed[0])
 	}
-	if fixed[0].DueDate == nil || fixed[0].DueDate.Format("02.01") != "10.09" {
-		t.Errorf("платёж за границей периода потерял дату: %+v", fixed[0])
+	if fixed[1].Name != "уборка" {
+		t.Errorf("платёж день в день с концом периода обязан войти в конверт: %+v", fixed)
 	}
-	if !eq(plan.Result.RecurringTHB, 18000+roundKopecks(28500/3.1)) {
+	if fixed[0].DueDate == nil || fixed[0].DueDate.Format("02.01") != "27.08" {
+		t.Errorf("платёж потерял дату: %+v", fixed[0])
+	}
+	if !eq(plan.Result.RecurringTHB, 2500+roundKopecks(28500/3.1)) {
 		t.Errorf("обязательства = %.2f — сводная сумма снимка не подменена суммой конвертов", plan.Result.RecurringTHB)
 	}
 

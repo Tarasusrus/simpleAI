@@ -12,6 +12,8 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/openai/openai-go v1.12.0
 	github.com/pgvector/pgvector-go v0.2.0
+	github.com/pressly/goose/v3 v3.27.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (
@@ -23,7 +25,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
-	github.com/pressly/goose/v3 v3.27.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
@@ -36,5 +37,4 @@ require (
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	pgregory.net/rapid v1.3.0 // indirect
 )
