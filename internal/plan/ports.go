@@ -52,6 +52,11 @@ type NewItem struct {
 	Category    string // только у платежа; пусто = без категории
 }
 
+// maxAmountMinor — потолок суммы записи: 1 000 000 000 в основных единицах. Без него
+// опечатка в лишний десяток цифр дала бы переполнение при пересчёте, и экран падал
+// бы на КАЖДОМ запросе, пока запись не удалят руками из базы.
+const maxAmountMinor = 100_000_000_000
+
 const (
 	maxNameRunes     = 120
 	maxCategoryRunes = 60
@@ -72,6 +77,9 @@ func (n NewItem) Validate() error {
 	}
 	if n.Kind == KindIncome && (n.WindowStart != nil || n.Category != "") {
 		return fmt.Errorf("%w: у поступления нет окна и категории", ErrInvalidEvent)
+	}
+	if n.Amount != nil && n.Amount.Minor > maxAmountMinor {
+		return ErrAmountTooLarge
 	}
 	return Event{
 		Key: "new", Kind: n.Kind, State: StatePlanned, Name: name,

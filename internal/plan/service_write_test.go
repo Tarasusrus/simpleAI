@@ -68,6 +68,7 @@ func TestService_AddIncome(t *testing.T) {
 		{"нулевая сумма", AddIncomeInput{Name: "x", Amount: Money{0, CurRUB}, Date: d(2026, 3, 20)}, ErrAmountNonPositive},
 		{"чужая валюта", AddIncomeInput{Name: "x", Amount: Money{100, "USD"}, Date: d(2026, 3, 20)}, ErrUnsupportedCurrency},
 		{"битая дата", AddIncomeInput{Name: "x", Amount: *rub(1), Date: d(2026, 2, 30)}, ErrBadDate},
+		{"лишние цифры", AddIncomeInput{Name: "x", Amount: Money{Minor: maxAmountMinor + 1, Cur: CurRUB}, Date: d(2026, 3, 20)}, ErrAmountTooLarge},
 	}
 	for _, c := range bad {
 		before := len(w.added)
@@ -205,5 +206,22 @@ func TestService_AddPayment_NextWindowExists(t *testing.T) {
 	}
 	if ws := w.added[0].WindowStart; ws == nil || *ws != d(2026, 3, 25) {
 		t.Errorf("«в следующее»: %v, ждали 25.03", ws)
+	}
+}
+
+// Предельная сумма принимается, а лишняя цифра — нет; принятая не ломает расчёт.
+//
+// Мутация: убрать проверку maxAmountMinor — тест краснеет.
+func TestService_AmountCap_NoOverflowDownstream(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10))
+	if _, err := s.AddIncome(context.Background(), AddIncomeInput{Name: "max", Amount: Money{Minor: maxAmountMinor, Cur: CurRUB}, Date: d(2026, 3, 20)}); err != nil {
+		t.Fatalf("предельная сумма отвергнута: %v", err)
+	}
+	snap := baseSnap()
+	snap.Incomes = append(snap.Incomes, incomeFact("transaction:big", d(2026, 3, 6), &Money{Minor: maxAmountMinor, Cur: CurRUB}))
+	snap.ReservePct = 100
+	if _, err := svc(&fakeReader{snap: snap}, d(2026, 3, 10)).View(context.Background(), CurTHB); err != nil {
+		t.Errorf("предельная сумма ломает расчёт: %v", err)
 	}
 }

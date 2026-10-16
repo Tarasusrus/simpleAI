@@ -199,6 +199,7 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrNameTooLong:         "Название слишком длинное.",
 		plan.ErrAmountNonPositive:   "Сумма должна быть числом больше нуля (не больше двух знаков после запятой).",
 		plan.ErrAmountRequired:      "Нужна сумма.",
+		plan.ErrAmountTooLarge:      "Сумма слишком большая: проверь, нет ли лишних цифр.",
 		plan.ErrIncomeNoDate:        "У поступления должна быть дата.",
 		plan.ErrBadDate:             "Некорректная дата. Нужен формат ГГГГ-ММ-ДД.",
 		plan.ErrUnsupportedCurrency: "Валюта: RUB или THB.",

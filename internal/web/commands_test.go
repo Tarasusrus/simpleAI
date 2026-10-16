@@ -166,6 +166,11 @@ func TestDeleteAndCategories(t *testing.T) {
 	if rec.Code != http.StatusOK || len(p.deleted) != 1 || p.deleted[0] != "planned:abc" {
 		t.Errorf("удаление: %d %v", rec.Code, p.deleted)
 	}
+	// Фронт кодирует ключ: двоеточие приходит как %3A.
+	rec = do(s, http.MethodDelete, "/api/plan/item/planned%3Adef", goodToken)
+	if rec.Code != http.StatusOK || len(p.deleted) != 2 || p.deleted[1] != "planned:def" {
+		t.Errorf("удаление с кодированным ключом: %d %v", rec.Code, p.deleted)
+	}
 	p.cmdErr = plan.ErrNotFound
 	if c := do(s, http.MethodDelete, "/api/plan/item/zzz", goodToken).Code; c != http.StatusNotFound {
 		t.Errorf("нет записи: %d, ждали 404", c)

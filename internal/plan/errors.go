@@ -16,6 +16,7 @@ var (
 	ErrInvalidEvent        = errors.New("plan: некорректное событие")
 	ErrDuplicateTerm       = errors.New("plan: у одного срока правила и план, и факт")
 	ErrBadReservePct       = errors.New("plan: процент резерва вне 0..100")
+	ErrAmountTooLarge      = errors.New("plan: сумма слишком большая")
 	ErrNameRequired        = errors.New("plan: нужно название")
 	ErrNameTooLong         = errors.New("plan: название слишком длинное")
 	ErrNoWindow            = errors.New("plan: нет окна, в которое можно поставить платёж")
