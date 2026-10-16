@@ -1,0 +1,163 @@
+plan:
+  name: "План окна: общая логика (BFF), экран и Telegram"
+  note: "Реализация не начата. Дизайн утверждён владельцем, архитектура в ADR-009. Принципы: SOLID, DRY, KISS, YAGNI. Экран приоритет №0, но строится поверх чистого домена."
+  phases:
+  - id: phase-1
+    name: "Домен окна: чистая логика без базы"
+    description: "Пакет internal/plan: окна, повторы, расчёт View. Без I/O, всё покрыто тестами."
+    tasks:
+    - id: task-1.0
+      name: "Зафиксировать контракт типов Event и Rule"
+      description: "Event (направление, состояние, сумма?, валюта, дата?, привязка к окну, источник: транзакция / правило / разовая запись), Rule (N, единица, день месяца, until), Scope. Источники и приоритет факт/план по constraints C35–C38."
+      artifact: "specs/income-plan-sheet/domain-types.md"
+      depends_on: []
+      validation: "Архитектор подтвердил типы; каждый AC фазы 1 выражается через эти типы; записано: у повтора сумма обязательна (budget_recurring.amount NOT NULL), события без суммы возможны только у разовых плановых"
+    - id: task-1.1
+      name: "Типы и порты домена"
+      description: "Event, Rule, Window, View, интерфейсы Reader/Writer; запрет импортов инфраструктуры."
+      artifact: "internal/plan/types.go, ports.go, arch_test.go"
+      depends_on: ["task-1.0"]
+      validation: "go test ./internal/plan; arch_test: пакет не импортирует pgx/http/telegram/budget"
+    - id: task-1.2
+      name: "Повторы: Occurrences и Next(rule, after) — единственный движок"
+      description: "Каждые N дней/недель/месяцев/лет, конец месяца (29–31 → последний день, как в nextOccurrence воркера), until."
+      artifact: "internal/plan/recur.go + tests"
+      depends_on: ["task-1.1"]
+      validation: "AC-2.3, AC-2.4; Next и Occurrences используют ОДИН внутренний шаг (не два движка в пакете); характеризационные тесты прежней nextOccurrence: daily, weekly, monthly с day_of_month 29–31, monthly без day_of_month, база сдвига — «сегодня» воркера, а не next_date; мутация краснит тест"
+    - id: task-1.3
+      name: "Окна: BuildWindows и текущее окно по дате"
+      description: "14 дней от поступления, слияние внутри окна, новое после конца."
+      artifact: "internal/plan/windows.go + tests"
+      depends_on: ["task-1.1"]
+      validation: "AC-1.1–1.5"
+    - id: task-1.4
+      name: "Compute: главные числа, лента, следующее окно, без даты"
+      description: "Можно тратить, в день, платежи, потрачено, без суммы, ленты по месяцам."
+      artifact: "internal/plan/compute.go + golden-фикстура из макета"
+      depends_on: ["task-1.2", "task-1.3"]
+      validation: "AC-2.1, 2.2, 3.1–3.4, 4.1–4.3; golden: 98 000 → 45 542"
+    - id: task-1.5
+      name: "Категории: прошлое окно и «сейчас»"
+      description: "Трата по категориям в предыдущем окне и в текущем; подкатегории."
+      artifact: "internal/plan/categories.go + tests"
+      depends_on: ["task-1.4"]
+      validation: "AC-5.3, 5.4"
+    checkpoint:
+      description: "Показать владельцу таблицу фикстур: те же числа, что в макете"
+      criteria: ["Золотой тест совпадает с макетом", "Домен не зависит от инфраструктуры", "Покрытие ветвей проверено мутациями"]
+
+  - id: phase-2
+    name: "Данные и сервис"
+    description: "Миграция, адаптер к budget.Store, plan.Service с командами."
+    tasks:
+    - id: task-2.1
+      name: "Миграция 00021 и фильтры читателей бота (одна задача)"
+      description: "planned: direction DEFAULT 'expense', nullable amount, category_id, window_hint, settled остаётся; recurring: interval_n/unit/until + бэкфилл, старые поля остаются; added_by. В Store: PlannedExpensesTHB и ListPlannedExpenses получают direction='expense' AND amount IS NOT NULL. Номер подтвердить после PR #63."
+      artifact: "internal/db/migrations/00021_*.sql, правки internal/budget/store.go, тесты"
+      depends_on: ["task-1.5"]
+      validation: "AC-8.5: ответы бота до/после совпадают на копии; goose up/down; бэкфилл повторов детерминирован"
+    - id: task-2.2
+      name: "Адаптер planrepo: Reader поверх budget.Store"
+      description: "События, расходы, категории, курс; без дублирования SQL."
+      artifact: "internal/planrepo/reader.go + DB-тест"
+      depends_on: ["task-2.1"]
+      validation: "DB-тест на отдельной базе; окна из реальной истории (A2)"
+    - id: task-2.3
+      name: "Адаптер planrepo: Writer"
+      description: "Добавить/изменить/удалить платёж и поступление, оплачено/пришло (сдвиг правила), курс."
+      artifact: "internal/planrepo/writer.go + DB-тест"
+      depends_on: ["task-2.1"]
+      validation: "AC-2.2, 2.5, 6.2, 6.3; одновременная правка (AC-6.4)"
+    - id: task-2.4
+      name: "Воркер повторов на plan.Next"
+      description: "recurring_worker.go использует plan.Next; nextOccurrence удалить; идемпотентность по recurring_id и дате."
+      artifact: "правки internal/notify/recurring_worker.go + тест"
+      depends_on: ["task-2.1"]
+      validation: "AC-2.5: одно срабатывание = одна транзакция; явный тест «поведение на старых правилах прежнее» (бэкфилл не меняет даты); нет циклов импорта notify → plan → ничего проектного (arch_test)"
+    - id: task-2.5
+      name: "plan.Service"
+      description: "View(now, offset, cur, scope), команды; единая точка для веба и бота; область PLAN_CHAT_IDS."
+      artifact: "internal/plan/service.go + тесты с моками портов"
+      depends_on: ["task-2.2", "task-2.3", "task-2.4"]
+      validation: "AC-4.5, AC-8.4; мок-тесты без базы"
+    checkpoint:
+      description: "Данные и сервис"
+      criteria: ["Миграция обратима", "Бот не изменил ответы", "Service покрыт"]
+
+  - id: phase-3
+    name: "BFF и экран (127.0.0.1)"
+    description: "Тонкий HTTP-слой и модульный фронт по макету."
+    tasks:
+    - id: task-3.1
+      name: "Контракт WindowView + golden-тест JSON"
+      description: "contract.md, версия v, golden JSON."
+      artifact: "specs/income-plan-sheet/contract.md, internal/web/contract_test.go"
+      depends_on: ["task-2.5"]
+      validation: "C7–C9; golden структуры совпадает, значения блоков проверены отдельными тестами"
+    - id: task-3.2
+      name: "internal/web: токен, заголовки, rate limit, GET window"
+      description: "Хэндлер: токен → Service → JSON; 127.0.0.1."
+      artifact: "internal/web/server.go + httptest"
+      depends_on: ["task-3.1"]
+      validation: "AC-8.1–8.3"
+    - id: task-3.3
+      name: "Команды POST/PUT/DELETE"
+      description: "income, payment, paid, rate; ответ — обновлённый WindowView."
+      artifact: "internal/web/commands.go + httptest"
+      depends_on: ["task-3.2"]
+      validation: "AC-6.x, XSS в названии"
+    - id: task-3.4
+      name: "Фронт: модули блоков и реестр"
+      description: "api.js, kpi.js, timeline.js, categories.js, inbox.js, forms.js, history.js; вёрстка из макета, embed."
+      artifact: "internal/web/static/*"
+      depends_on: ["task-3.2"]
+      validation: "AC-5.x, 9.2, 9.3; снимок на 375 px"
+    - id: task-3.5
+      name: "Запуск на 127.0.0.1 и показ владельцу"
+      description: "PLAN_WEB_TOKEN, порт, инструкция SSH-туннеля в CONTEXT.md."
+      artifact: "cmd/app wiring"
+      depends_on: ["task-3.3", "task-3.4"]
+      validation: "Владелец открыл экран через туннель с реальными данными"
+    checkpoint:
+      description: "ГЛАВНОЕ: экран на реальных данных"
+      criteria: ["Числа экрана равны числам домена", "Блок добавляется одним файлом", "Порт наружу закрыт"]
+
+  - id: phase-4
+    name: "Telegram через тот же сервис"
+    description: "Бот и экран видят одно."
+    tasks:
+    - id: task-4.1
+      name: "Действия бота: сколько можно тратить, добавить платёж/поступление, оплачено"
+      description: "Тонкий навык поверх plan.Service; промпт маршрутизации."
+      artifact: "internal/skills/plan/*, правка router prompt, golden-кейсы"
+      depends_on: ["task-3.5"]
+      validation: "AC-7.1, 7.2; evals не краснеют"
+    checkpoint:
+      description: "Бот совпадает с экраном"
+      criteria: ["Число совпадает", "Старые команды работают"]
+
+  - id: phase-5
+    name: "Публикация, чистка категорий, Excel"
+    description: "Нужны домен и решения владельца."
+    tasks:
+    - id: task-5.1
+      name: "Доступ с телефона и партнёру"
+      description: "Рекомендовано Tailscale (tailscale serve, домен не нужен); альтернатива — домен + прокси с TLS; решение владельца; маскирование токена в логах прокси; ADR-009 дополнить."
+      artifact: "deploy/ + ADR-009 дополнение"
+      depends_on: ["task-3.5"]
+      validation: "Страница открывается с телефона по HTTPS; 3x-ui не затронут"
+    - id: task-5.2
+      name: "Слияние дублей категорий"
+      description: "Таблица соответствий утверждается владельцем; одна транзакция; перепривязка transaction/recurring/share_category; добавить parent_id и подкатегории (AC-5.4); разбор тестовых 10 ₽."
+      artifact: "category-merge.md, data-миграция"
+      depends_on: ["task-3.5"]
+      validation: "Суммы до/после равны; бот отвечает как раньше"
+    - id: task-5.3
+      name: "Выгрузка Excel из WindowView"
+      description: "Из той же модели, формулы сумм."
+      artifact: "internal/web/export.go + тест"
+      depends_on: ["task-3.5"]
+      validation: "Файл совпадает с экраном"
+    checkpoint:
+      description: "Финальная приёмка"
+      criteria: ["Все AC закрыты", "Владелец доволен экраном и ботом"]

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет плана</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mut:#6b7686;--line:#e3e7ee;--acc:#1f5fbf;--ok:#1a7f4b;--bad:#c0392b;--warn:#b7791f;--head:#eef2f8;--in:#fff8dc}
+@media(prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1a2029;--ink:#e8edf4;--mut:#93a0b3;--line:#2a3340;--acc:#6aa5ff;--ok:#4cc38a;--bad:#ff7b6b;--warn:#e6b450;--head:#212a36;--in:#3a3420}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:12px 16px 40px}
+h1{font-size:19px;margin:6px 0 2px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:12px}
+.badge{display:inline-block;background:var(--in);border:1px dashed var(--warn);border-radius:6px;padding:3px 8px;font-size:12px;margin-bottom:10px}
+.ctrl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.ctrl label{display:block;font-size:12px;color:var(--mut);margin-bottom:3px}
+.ctrl input[type=number]{width:100%;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--in);color:var(--ink);font-size:15px}
+.ctrl input[type=range]{width:100%}
+.seg button{padding:6px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;font-size:14px}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
+.cd{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.cd .k{font-size:12px;color:var(--mut)}.cd .v{font-size:20px;font-weight:650}
+.tabs{display:flex;gap:6px;margin-bottom:10px}.tabs button{padding:7px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer}
+.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+th{background:var(--head);font-size:12px;color:var(--mut);font-weight:600}
+tr.blk td{background:var(--head);font-weight:650;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+tr.cat{cursor:pointer;font-weight:600}tr.cat:hover{background:var(--head)}
+tr.sub td:first-child{padding-left:30px;color:var(--mut);font-weight:400}
+tr.sub td{font-size:14px}
+tr.det td{background:var(--head);padding:6px 10px 6px 30px;font-size:13px;color:var(--mut);text-align:left}
+tr.tot td{font-weight:700;background:var(--head)}
+.sp{cursor:pointer;text-decoration:underline dotted}
+.neg{color:var(--bad);font-weight:700}.pos{color:var(--ok)}.zero{color:var(--mut)}
+.arr{display:inline-block;width:14px;color:var(--mut)}
+.empty{padding:14px;color:var(--mut);background:var(--card);border:1px dashed var(--line);border-radius:10px;margin-bottom:12px}
+.note{font-size:12px;color:var(--mut)}
+.dl{padding:8px 14px;border:0;border-radius:8px;background:var(--ok);color:#fff;font-size:14px;cursor:default}
+@media(max-width:560px){th,td{padding:7px 5px;font-size:13px}th:nth-child(5),td:nth-child(5){display:none}.cd .v{font-size:17px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>План прихода</h1>
+<div class="sub" id="per"></div>
+<div class="badge">МАКЕТ. Период — будущий (20.10–19.11), трат в нём ещё нет, поэтому «потрачено» пока 0. Лимиты примерные. В блоке «Плановые разовые траты» добавь или убери трату — цифры пересчитаются.</div>
+
+<div class="ctrl">
+ <div><label>Приход, ₽</label><input type="number" id="inc" step="1000"></div>
+ <div><label>Урезать «гибкие» траты на <b id="cutv"></b></label><input type="range" id="cut" min="0" max="60" step="5"></div>
+ <div><label>Отложить, ₽</label><input type="number" id="res" step="1000"></div>
+ <div><label>Курс, ₽ за 1 ฿ <span id="rtw" style="color:var(--bad)"></span></label><input type="number" id="rt" step="0.01" min="0"></div>
+ <div><label>Валюта показа</label><div class="seg"><button id="cR" class="on">₽</button><button id="cT">฿</button></div></div>
+ <div><label>Excel</label><button class="dl" title="В реальной версии скачает файл с теми же цифрами">Скачать Excel</button></div>
+</div>
+
+<div class="cards" id="cards"></div>
+<div class="tabs"><button id="t1" class="on">План</button><button id="t2">История по месяцам</button></div>
+<div id="v1"></div>
+<div class="ctrl" id="pf"><div style="grid-column:1/-1;font-weight:650">Добавить плановую трату (разовую)</div>
+ <div><label>Что</label><input type="text" id="pn" placeholder="Стоматолог" style="width:100%;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--in);color:var(--ink)"></div>
+ <div><label>Сумма</label><input type="number" id="pa" placeholder="2000"></div>
+ <div><label>Валюта</label><select id="pc" style="width:100%;padding:7px;border-radius:6px;border:1px solid var(--line);background:var(--in);color:var(--ink)"><option>THB</option><option>RUB</option></select></div>
+ <div><label>Дата</label><input type="text" id="pd" placeholder="21.10" style="width:100%;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--in);color:var(--ink)"></div>
+ <div><label>Категория</label><select id="pg" style="width:100%;padding:7px;border-radius:6px;border:1px solid var(--line);background:var(--in);color:var(--ink)"></select></div>
+ <div><label>&nbsp;</label><button class="dl" id="padd" style="cursor:pointer">Добавить</button></div>
+</div>
+<div id="v2" style="display:none"></div>
+<p class="note">Подкатегории (кофе, капучино, туалетная бумага, пакет на рынке) показаны даже без трат: ничего не прячется. Лимит ставится на категорию; у подкатегории только «потрачено» и «в день».</p>
+</div>
+<script>
+const D={"planned": [{"name": "Стоматолог", "g": "Здоровье и уход", "amount": 2000, "cur": "THB", "date": "21.10", "done": false}, {"name": "Такси к стоматологу (сумма пример)", "g": "Транспорт и такси", "amount": 300, "cur": "THB", "date": "21.10", "done": false}, {"name": "Оплата школы", "g": "Школа", "amount": 500, "cur": "THB", "date": "21.10", "done": false}], "months": ["12.25", "01.26", "02.26", "03.26", "04.26", "05.26", "06.26", "07.26", "08.26", "09.26", "10.26"], "hist": [{"name": "Жильё", "vals": [0, 652, 0, 50602, 45353, 45825, 45000, 52125, 57750, 45000, 45000]}, {"name": "Кредит Сбер", "vals": [0, 0, 0, 27316, 0, 28500, 28500, 28500, 28500, 31000, 0]}, {"name": "Подписки и связь", "vals": [0, 0, 0, 1385, 7184, 4700, 4700, 10082, 12300, 9392, 4700]}, {"name": "Продукты", "vals": [8011, 13080, 9270, 33464, 41862, 49882, 10574, 24480, 31452, 11740, 5758]}, {"name": "Кафе и кофе", "vals": [1658, 0, 2078, 4417, 5960, 11250, 4500, 2500, 10218, 8365, 0]}, {"name": "Транспорт и такси", "vals": [188, 0, 0, 0, 1500, 1925, 6630, 5450, 6788, 3370, 0]}, {"name": "Дом и быт", "vals": [3302, 362, 0, 2630, 0, 102, 0, 2025, 10000, 500, 0]}, {"name": "Здоровье и уход", "vals": [0, 115, 0, 2588, 5635, 2615, 3125, 10975, 8075, 10350, 0]}, {"name": "Одежда", "vals": [7025, 0, 5908, 9780, 0, 0, 1000, 0, 3298, 7750, 0]}, {"name": "Развлечения и разное", "vals": [18795, 150, 150, 16712, 5389, 17875, 3875, 13025, 16265, 14138, 0]}, {"name": "Школа", "vals": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}], "period": ["20.10.2026", "19.11.2026"], "days": 31, "rate": 2.5, "income": 130000, "cut": 0.3, "reserve": 0, "groups": [{"name": "Жильё", "kind": "fixed", "avg": 48509, "avgT": 19380.0, "avgR": 58.833333333333336, "fixed": 45000, "fixedT": 18000, "subs": []}, {"name": "Кредит Сбер", "kind": "fixed", "avg": 24167, "avgT": 166.66666666666666, "avgR": 23750.0, "fixed": 28500, "fixedT": null, "subs": []}, {"name": "Подписки и связь", "kind": "fixed", "avg": 8060, "avgT": 1088.3333333333333, "avgR": 5339.0, "fixed": 8100.0, "fixedT": null, "subs": []}, {"name": "Продукты", "kind": "flex", "avg": 28332, "avgT": 11051.0, "avgR": 704.3333333333334, "fixed": null, "fixedT": null, "subs": [{"name": "Пакет на рынке", "tx": []}]}, {"name": "Кафе и кофе", "kind": "flex", "avg": 7132, "avgT": 2778.8333333333335, "avgR": 185.0, "fixed": null, "fixedT": null, "subs": [{"name": "Капучино", "tx": []}]}, {"name": "Транспорт и такси", "kind": "flex", "avg": 4277, "avgT": 1677.5, "avgR": 83.33333333333333, "fixed": null, "fixedT": null, "subs": []}, {"name": "Дом и быт", "kind": "flex", "avg": 2105, "avgT": 841.8333333333334, "avgR": 0.0, "fixed": null, "fixedT": null, "subs": [{"name": "Туалетная бумага", "tx": []}]}, {"name": "Здоровье и уход", "kind": "flex", "avg": 6796, "avgT": 2599.0, "avgR": 298.3333333333333, "fixed": null, "fixedT": null, "subs": []}, {"name": "Одежда", "kind": "flex", "avg": 2008, "avgT": 803.1666666666666, "avgR": 0.0, "fixed": null, "fixedT": null, "subs": []}, {"name": "Развлечения и разное", "kind": "flex", "avg": 11761, "avgT": 3704.4166666666665, "avgR": 2500.0, "fixed": null, "fixedT": null, "subs": []}, {"name": "Школа", "kind": "flex", "avg": 0, "avgT": 0.0, "avgR": 0.0, "fixed": null, "fixedT": null, "subs": []}]};
+let cur='RUB';const $=id=>document.getElementById(id);
+const st={rate:D.rate,pl:D.planned,inc:D.income,cut:D.cut*100,res:D.reserve,open:{},det:{}};
+const f=(v)=>{const x=cur==='RUB'?v:v/st.rate;const r=Math.round(x);return (r<0?'−':'')+Math.abs(r).toLocaleString('ru-RU').replace(/ /g,' ')+' '+(cur==='RUB'?'₽':'฿')};
+const rub=p=>p.cur==='THB'?p.amount*st.rate:p.amount;
+const sp=g=>g.subs.reduce((a,s)=>a+s.tx.reduce((b,t)=>b+t.rub,0),0);
+function calc(){
+ const rows=D.groups.map(g=>{const spent=sp(g);const avgNow=g.avgT*st.rate+g.avgR;const base=g.kind==='fixed'?(g.fixedT?g.fixedT*st.rate:(g.name==='Подписки и связь'?Math.round(avgNow/100)*100:g.fixed)):Math.round(avgNow*(1-st.cut/100)/100)*100;
+  const pl=st.pl.filter(p=>p.g===g.name&&!p.done).reduce((a,p)=>a+rub(p),0);const limit=base+pl;
+  return {g,spent,limit,pl,left:limit-spent,day:g.kind==='flex'?limit/D.days:null}});
+ const lim=rows.reduce((a,r)=>a+r.limit,0),spent=rows.reduce((a,r)=>a+r.spent,0),plan=rows.reduce((a,r)=>a+r.pl,0);
+ return {rows,lim,spent,plan,free:st.inc-lim-st.res};
+}
+function cell(v,neg){return `<td class="${neg&&v<0?'neg':(v===0?'zero':'')}">${f(v)}</td>`}
+function render(){
+ const c=calc();
+ $('per').textContent=`Период ${D.period[0]} – ${D.period[1]} · ${D.days} дн. · курс ฿→₽ ${String(st.rate).replace('.',',')}`;
+ $('cutv').textContent=st.cut+'%';
+ $('cards').innerHTML=`<div class="cd"><div class="k">Приход</div><div class="v">${f(st.inc)}</div></div>
+ <div class="cd"><div class="k">Запланировано (в т.ч. разовые ${f(c.plan)})</div><div class="v">${f(c.lim)}</div></div>
+ <div class="cd"><div class="k">Потрачено</div><div class="v">${f(c.spent)}</div></div>
+ <div class="cd"><div class="k">Нераспределено / на долги</div><div class="v ${c.free<0?'neg':'pos'}">${f(c.free)}</div></div>`;
+ let h=`<table><tr><th>Категория</th><th>Лимит</th><th>Потрачено</th><th>Осталось</th><th>В день</th></tr>`;
+ const blk=(t)=>`<tr class="blk"><td colspan="5">${t}</td></tr>`;
+ const part=(kind,title)=>{h+=blk(title);c.rows.filter(r=>r.g.kind===kind).forEach(r=>{
+  const k=r.g.name,o=st.open[k];
+  h+=`<tr class="cat" data-k="${k}"><td><span class="arr">${o?'▾':'▸'}</span>${k}</td><td>${f(r.limit)}${r.pl>0?`<div class="note">в т.ч. плановые ${f(r.pl)}</div>`:''}</td><td class="sp" data-d="${k}|*">${f(r.spent)}</td>${cell(r.left,true)}<td>${r.day==null?'<span class="zero">—</span>':f(r.day)}</td></tr>`;
+  if(st.det[k+'|*'])h+=detRows(r.g.subs.flatMap(s=>s.tx.map(t=>({...t,s:s.name}))));
+  if(o)r.g.subs.forEach(s=>{const sv=s.tx.reduce((a,t)=>a+t.rub,0);
+   h+=`<tr class="sub"><td>${s.name}</td><td class="zero">—</td><td class="${sv?'sp':'zero'}" data-d="${k}|${s.name}">${f(sv)}</td><td class="zero">—</td><td>${f(sv/D.days)}</td></tr>`;
+   if(st.det[k+'|'+s.name])h+=detRows(s.tx.map(t=>({...t,s:s.name})));});
+ })};
+ part('fixed','Обязательные платежи');part('flex','Категории расходов');
+ h+=blk('Плановые разовые траты');
+ if(!st.pl.length)h+=`<tr><td colspan="5" class="zero" style="text-align:left">Пока нет. Добавь форму ниже.</td></tr>`;
+ st.pl.forEach((p,i)=>{h+=`<tr class="pl ${p.done?'zero':''}"><td><input type="checkbox" data-pd="${i}" ${p.done?'checked':''}> ${p.date} · ${p.name} <span class="note">(${p.g})</span></td><td>${f(rub(p))}</td><td colspan="2" class="note" style="text-align:right">${p.done?'оплачено: учтено в «потрачено»':'ждёт оплаты'}</td><td><a href="#" data-px="${i}">убрать</a></td></tr>`});
+ h+=blk('Долги');
+ h+=`<tr><td colspan="5" class="zero" style="text-align:left">Долги не внесены. В реальной версии: остаток, платёж, процент и срок закрытия. Сейчас известен платёж Сберу 28 500 ₽/мес.</td></tr>`;
+ h+=blk('Отложить');h+=`<tr><td>Резерв</td><td>${f(st.res)}</td><td colspan="3"></td></tr>`;
+ h+=`<tr class="tot"><td>ИТОГО запланировано</td><td>${f(c.lim+st.res)}</td><td>${f(c.spent)}</td><td class="${st.inc-c.lim-st.res-0<0?'neg':''}">${f(c.lim+st.res-c.spent)}</td><td></td></tr>`;
+ h+=`<tr class="tot"><td>Нераспределено (пойдёт на долги сверх платежа)</td><td class="${c.free<0?'neg':'pos'}" colspan="4" style="text-align:right">${c.free<0?'НЕ ХВАТАЕТ '+f(-c.free)+': урежь траты или подними приход':f(c.free)}</td></tr></table>`;
+ $('v1').innerHTML=h;
+ let t=`<table><tr><th>Категория</th>${D.months.map(m=>`<th>${m}</th>`).join('')}</tr>`;
+ D.hist.forEach(r=>{t+=`<tr><td>${r.name}</td>${r.vals.map(v=>`<td class="${v?'':'zero'}">${f(v)}</td>`).join('')}</tr>`});
+ t+=`<tr class="tot"><td>Итого</td>${D.months.map((m,i)=>`<td>${f(D.hist.reduce((a,r)=>a+r.vals[i],0))}</td>`).join('')}</tr></table><p class="note">В истории ячейка месяца тоже раскрывается в список трат (в макете не кликается). Первый и последний месяцы неполные.</p>`;
+ $('v2').innerHTML=t;
+}
+function detRows(l){if(!l.length)return `<tr class="det"><td colspan="5">Трат за период нет</td></tr>`;
+ return l.sort((a,b)=>a.d<b.d?1:-1).map(t=>`<tr class="det"><td colspan="5">${t.d} · <b>${Math.round(t.amount).toLocaleString('ru-RU')} ${t.cur==='THB'?'฿':t.cur==='RUB'?'₽':t.cur}</b> · ${t.s} · ${t.desc.replace(/</g,'&lt;')} · внёс: ${t.by}</td></tr>`).join('')}
+document.addEventListener('click',e=>{
+ const sp=e.target.closest('[data-d]');if(sp){const k=sp.dataset.d;st.det[k]=!st.det[k];render();return}
+ const px=e.target.closest('[data-px]');if(px){e.preventDefault();st.pl.splice(+px.dataset.px,1);render();return}
+ const r=e.target.closest('tr.cat');if(r){st.open[r.dataset.k]=!st.open[r.dataset.k];render()}});
+$('pg').innerHTML=D.groups.map(g=>`<option>${g.name}</option>`).join('');
+$('padd').onclick=()=>{const a=+$('pa').value;if(!a||!$('pn').value)return;st.pl.push({name:$('pn').value,g:$('pg').value,amount:a,cur:$('pc').value,date:$('pd').value||'—',done:false});$('pn').value='';$('pa').value='';render()};
+document.addEventListener('change',e=>{if(e.target.dataset.pd!==undefined){st.pl[+e.target.dataset.pd].done=e.target.checked;render()}});
+$('rt').value=String(st.rate);
+$('rt').oninput=e=>{const v=parseFloat(String(e.target.value).replace(',','.'));if(!(v>0)){$('rtw').textContent='введи курс';return}
+ $('rtw').textContent=(v<1||v>10)?'(странный курс: обычно 2–4)':'';st.rate=v;render()};
+$('inc').value=st.inc;$('res').value=st.res;$('cut').value=st.cut;
+$('inc').oninput=e=>{st.inc=+e.target.value||0;render()};$('res').oninput=e=>{st.res=+e.target.value||0;render()};$('cut').oninput=e=>{st.cut=+e.target.value;render()};
+$('cR').onclick=()=>{cur='RUB';$('cR').classList.add('on');$('cT').classList.remove('on');render()};
+$('cT').onclick=()=>{cur='THB';$('cT').classList.add('on');$('cR').classList.remove('on');render()};
+$('t1').onclick=()=>{$('v1').style.display='';$('v2').style.display='none';$('t1').classList.add('on');$('t2').classList.remove('on')};
+$('t2').onclick=()=>{$('v2').style.display='';$('v1').style.display='none';$('t2').classList.add('on');$('t1').classList.remove('on')};
+render();
+</script>
+</body>
+</html>
