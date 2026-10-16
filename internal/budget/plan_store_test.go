@@ -12,16 +12,14 @@ const planStoreChat int64 = -88002
 func cleanPlanStore(t *testing.T, s *Store, ctx context.Context) {
 	t.Helper()
 	del := func() {
+		if _, err := s.pool.Exec(ctx, `DELETE FROM budget_transaction WHERE description LIKE 'plan-store-test%'`); err != nil {
+			t.Errorf("очистка транзакций: %v", err)
+		}
 		for _, q := range []string{
-			`DELETE FROM budget_transaction WHERE description LIKE 'plan-store-test%'`,
 			`DELETE FROM budget_recurring WHERE chat_id IN ($1, $2)`,
 			`DELETE FROM budget_planned_expense WHERE chat_id IN ($1, $2)`,
 		} {
-			args := []any{}
-			if q[len(q)-1] == ')' {
-				args = append(args, planStoreChat, planStoreChat-1)
-			}
-			if _, err := s.pool.Exec(ctx, q, args...); err != nil {
+			if _, err := s.pool.Exec(ctx, q, planStoreChat, planStoreChat-1); err != nil {
 				t.Errorf("очистка: %v", err)
 			}
 		}
