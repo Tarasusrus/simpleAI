@@ -99,6 +99,13 @@ func main() {
 		}
 	}()
 
+	// --- Экран плана окна (выключен по умолчанию: PLAN_WEB_ENABLED) ---
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runPlanWeb(ctx, cfg, logger, pool)
+	}()
+
 	// --- Mail worker (только если настроены аккаунты) ---
 	if len(cfg.Mail.Accounts) > 0 {
 		wg.Add(1)

@@ -236,3 +236,6 @@ func getenvOrDefault(key, def string) string {
 	}
 	return def
 }
+
+// ParseChatIDs разбирает список chat_id через запятую (для PLAN_CHAT_IDS и т. п.).
+func ParseChatIDs(raw string) []int64 { return parseChatIDs(raw) }
