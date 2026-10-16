@@ -104,3 +104,13 @@ func TestStatic_ServedPublicly(t *testing.T) {
 		}
 	}
 }
+
+// Каталоги статики не листаются.
+func TestStatic_NoDirectoryListing(t *testing.T) {
+	s, _ := newServer(t, &fakePlanner{})
+	for _, p := range []string{"/js/", "/js/blocks/"} {
+		if rec := do(s, http.MethodGet, p, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, ждали 404", p, rec.Code)
+		}
+	}
+}

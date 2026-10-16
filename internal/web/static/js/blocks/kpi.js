@@ -10,10 +10,16 @@ export function render(view, cur) {
   const k = view.kpi;
   if (view.state === 'none') return h('div', { class: 'kpis' });
   const short = k.canSpend < 0;
+  // Окно, которое уже закончилось, «до конца» не тратят: это итог окна.
+  const closed = view.state === 'ended' || view.state === 'between';
+  const title = closed
+    ? (short ? 'Итог окна: перерасход' : 'Итог окна: остаток')
+    : (short ? 'Не хватает до конца окна' : 'Можно тратить до конца окна');
   const main = card('main',
-    short ? 'Не хватает до конца окна' : 'Можно тратить до конца окна',
+    title,
     money(short ? -k.canSpend : k.canSpend, cur),
-    (k.perDay != null && view.window)
+    closed ? 'добавь поступление — откроется новое окно'
+    : (k.perDay != null && view.window)
       ? money(k.perDay, cur) + ' в день · ' + view.window.daysLeft + ' ' + plural(view.window.daysLeft, 'день', 'дня', 'дней')
       : (short ? 'платежи и траты больше поступлений' : ''));
   const income = card('', 'Поступления', money(k.received + k.expectedIncome, cur),

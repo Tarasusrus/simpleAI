@@ -72,7 +72,15 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 		_, _ = w.Write([]byte("ok")) //nolint:errcheck // ответ на healthz
 	})
 	mux.Handle("GET /api/plan/window", s.auth(http.HandlerFunc(s.handleWindow)))
-	mux.Handle("GET /", http.FileServerFS(sub))
+	files := http.FileServerFS(sub)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		// Без листинга каталогов: отдаём только сами файлы.
+		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
 	s.handler = s.recoverer(s.secure(s.logRequests(mux)))
 	return s, nil
 }
