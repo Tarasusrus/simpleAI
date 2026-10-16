@@ -1615,7 +1615,9 @@ func AggregateForecast(rows []MonthlyCategoryExpense, rates map[string]float64) 
 // вызывающему не приходилось помнить про override.
 func (s *Store) GetExchangeRates(ctx context.Context) (map[string]float64, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT currency, COALESCE(manual_rate_to_rub, rate_to_rub) FROM exchange_rate`)
+		`SELECT currency, COALESCE(manual_rate_to_rub, rate_to_rub)
+		 FROM exchange_rate
+		 WHERE COALESCE(manual_rate_to_rub, rate_to_rub) IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("get exchange rates: %w", err)
 	}
@@ -1638,6 +1640,7 @@ type RateSource struct {
 	Currency  string
 	RateToRUB float64   // действующий курс: ручной, если задан, иначе автоматический
 	Auto      float64   // последний курс из API — остаётся жить и под override'ом
+	HasAuto   bool      // воркер уже приносил автокурс; false — есть только ручной
 	Manual    bool      // курс задан руками
 	UpdatedAt time.Time // когда действующий курс появился
 }
@@ -1648,6 +1651,7 @@ type RateSource struct {
 func (s *Store) GetRateSource(ctx context.Context, currency string) (RateSource, bool, error) {
 	var (
 		out    = RateSource{Currency: currency}
+		auto   *float64
 		manual *float64
 		mAt    *time.Time
 		aAt    time.Time
@@ -1655,14 +1659,20 @@ func (s *Store) GetRateSource(ctx context.Context, currency string) (RateSource,
 	err := s.pool.QueryRow(ctx, `
 		SELECT rate_to_rub, updated_at, manual_rate_to_rub, manual_set_at
 		FROM exchange_rate WHERE currency = $1
-	`, currency).Scan(&out.Auto, &aAt, &manual, &mAt)
+	`, currency).Scan(&auto, &aAt, &manual, &mAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, false, nil
 	}
 	if err != nil {
 		return out, false, fmt.Errorf("get rate source: %w", err)
 	}
-	out.RateToRUB, out.UpdatedAt = out.Auto, aAt
+	if auto == nil && manual == nil {
+		return out, false, nil
+	}
+	if auto != nil {
+		out.Auto, out.HasAuto = *auto, true
+		out.RateToRUB, out.UpdatedAt = *auto, aAt
+	}
 	if manual != nil {
 		out.RateToRUB, out.Manual = *manual, true
 		if mAt != nil {
@@ -1687,13 +1697,12 @@ func (s *Store) SetManualRate(ctx context.Context, currency string, rateToRUB fl
 		return fmt.Errorf("set manual rate: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		// Валюты нет в таблице — воркер её ещё не приносил. Заводим строку с
-		// ручным курсом в обеих колонках: без rate_to_rub (NOT NULL по схеме)
-		// вставка не пройдёт, а «курс авто» до первого тика воркера честно
-		// вернёт ровно то же число.
+		// Валюты нет в таблице — воркер её ещё не приносил. Строка заводится
+		// с rate_to_rub = NULL: ручное число в колонке автокурса после
+		// «курс авто» выдавало бы себя за межбанковский курс.
 		_, err = s.pool.Exec(ctx, `
 			INSERT INTO exchange_rate (currency, rate_to_rub, updated_at, manual_rate_to_rub, manual_set_at)
-			VALUES ($1, $2, NOW(), $2, NOW())
+			VALUES ($1, NULL, NOW(), $2, NOW())
 			ON CONFLICT (currency) DO UPDATE
 			SET manual_rate_to_rub = EXCLUDED.manual_rate_to_rub, manual_set_at = NOW()
 		`, currency, rateToRUB)
@@ -1714,6 +1723,12 @@ func (s *Store) ClearManualRate(ctx context.Context, currency string) error {
 	`, currency)
 	if err != nil {
 		return fmt.Errorf("clear manual rate: %w", err)
+	}
+	// Строка, заведённая ручным курсом до первого тика воркера, после снятия
+	// override'а пуста — убираем её, чтобы читатели не спотыкались о NULL.
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM exchange_rate WHERE currency = $1 AND rate_to_rub IS NULL AND manual_rate_to_rub IS NULL`, currency); err != nil {
+		return fmt.Errorf("clear manual rate (cleanup): %w", err)
 	}
 	return nil
 }

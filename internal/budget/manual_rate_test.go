@@ -143,3 +143,44 @@ func TestManualRate_RejectsNonPositive(t *testing.T) {
 		}
 	}
 }
+
+// Ручной курс, заведённый РАНЬШЕ первого тика воркера, не должен выдавать себя
+// за автоматический: после «курс авто» действующего курса нет вовсе, а не
+// «автокурс», равный ручному числу.
+//
+// Мутация: вернуть в SetManualRate вставку $2 в rate_to_rub — тест краснеет.
+func TestManualRate_BeforeWorkerTick_NoFakeAuto(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	const cur = "ZZT" // валюта, которой нет в боевых данных
+
+	t.Cleanup(func() {
+		if _, err := s.pool.Exec(ctx, `DELETE FROM exchange_rate WHERE currency = $1`, cur); err != nil {
+			t.Errorf("не удалось убрать тестовую валюту: %v", err)
+		}
+	})
+
+	if err := s.SetManualRate(ctx, cur, 2.7); err != nil {
+		t.Fatalf("set manual rate: %v", err)
+	}
+	src, ok, err := s.GetRateSource(ctx, cur)
+	if err != nil || !ok {
+		t.Fatalf("read rate source: err=%v ok=%v", err, ok)
+	}
+	if !src.Manual || src.RateToRUB != 2.7 {
+		t.Errorf("источник %+v, ожидался ручной 2,7", src)
+	}
+	if src.HasAuto {
+		t.Errorf("автокурс %v появился из ручного ввода", src.Auto)
+	}
+
+	if err := s.ClearManualRate(ctx, cur); err != nil {
+		t.Fatalf("clear manual rate: %v", err)
+	}
+	rates, err := s.GetExchangeRates(ctx)
+	if err != nil {
+		t.Fatalf("get rates: %v", err)
+	}
+	if got, has := rates[cur]; has {
+		t.Errorf("после «курс авто» действует курс %v, хотя воркер ничего не приносил", got)
+	}
+}

@@ -23,6 +23,32 @@ const rateCurrency = "THB"
 // конверты в десять раз убедительно выглядящими числами.
 const maxPlausibleRate = 10.0
 
+// minPlausibleRate — нижний потолок правдоподобия. Бат дороже рубля с запасом, и
+// «курс 0,27» почти наверняка опечатка или курс в обратную сторону (бат за
+// рубль): принять его молча значит уменьшить все конверты примерно в десять раз.
+const minPlausibleRate = 1.0
+
+// rateVerdict — результат проверки названного курса на правдоподобие.
+type rateVerdict int
+
+const (
+	rateOK rateVerdict = iota
+	rateTooLow
+	rateTooHigh
+)
+
+// checkRate отделяет правдоподобный курс от опечатки. Границы включительные.
+// Чистая функция: проверку можно прогнать без базы.
+func checkRate(rate float64) rateVerdict {
+	switch {
+	case rate < minPlausibleRate:
+		return rateTooLow
+	case rate > maxPlausibleRate:
+		return rateTooHigh
+	}
+	return rateOK
+}
+
 // setRate задаёт ручной курс бата (simpleAI-su6l).
 //
 // Зачем это вообще: автокурс приходит из open.er-api.com — межбанк. Оператор
@@ -36,13 +62,22 @@ func (s *BudgetSkill) setRate(ctx context.Context, req budgetInput) (string, err
 	if rate <= 0 {
 		return "Не понял курс. Скажи «курс 2,7» — сколько рублей за один бат.", nil
 	}
-	// Курс бата к рублю живёт в единицах, а не в десятках: «курс 27» — это почти
-	// наверняка «2,7», сказанное без запятой. Молча принять такое значение
-	// нельзя: конверты раздуются в десять раз и будут выглядеть правдоподобно.
-	if rate > maxPlausibleRate {
-		return fmt.Sprintf("Курс %s ₽/฿ — это в разы больше обычного (около 2,5). "+
-			"Если правда столько, скажи ещё раз с десятыми: «курс %s».",
-			safetospend.FmtRate(rate), safetospend.FmtRate(rate/10)), nil
+	// Курс бата к рублю живёт в единицах, а не в десятках и не в долях: «курс 27»
+	// — почти наверняка «2,7» без запятой, «курс 0,27» — опечатка или обратный
+	// курс. Молча принять такое значение нельзя: конверты исказятся в десять раз
+	// и будут выглядеть правдоподобно.
+	switch checkRate(rate) {
+	case rateOK:
+		// правдоподобный курс — сохраняем ниже
+	case rateTooHigh:
+		msg := fmt.Sprintf("Курс %s ₽/฿ — это в разы больше обычного%s.", safetospend.FmtRate(rate), s.currentRateHint(ctx))
+		if hint := rate / 10; checkRate(hint) == rateOK {
+			msg += fmt.Sprintf(" Если имелось в виду с десятыми, скажи ещё раз: «курс %s».", safetospend.FmtRate(hint))
+		}
+		return msg, nil
+	case rateTooLow:
+		return fmt.Sprintf("Курс %s ₽/฿ — меньше рубля за бат, так не бывает%s. Скажи ещё раз: «курс 2,7» — сколько рублей за один бат.",
+			safetospend.FmtRate(rate), s.currentRateHint(ctx)), nil
 	}
 
 	if err := s.store.SetManualRate(ctx, rateCurrency, rate); err != nil {
@@ -55,6 +90,17 @@ func (s *BudgetSkill) setRate(ctx context.Context, req budgetInput) (string, err
 		safetospend.FmtRate(rate)), nil
 }
 
+// currentRateHint — «, сейчас 2,54» для сообщений об отклонённом курсе. Берётся
+// действующий курс из базы, а не зашитое число: оно устарело бы при первом
+// же сдвиге курса. Нет данных — пустая строка, сообщение остаётся осмысленным.
+func (s *BudgetSkill) currentRateHint(ctx context.Context) string {
+	src, ok, err := s.store.GetRateSource(ctx, rateCurrency)
+	if err != nil || !ok {
+		return ""
+	}
+	return fmt.Sprintf(" (сейчас %s)", safetospend.FmtRate(src.RateToRUB))
+}
+
 // clearRate возвращает автоматический курс. Идемпотентно: «курс авто» без
 // заданного ручного — не ошибка, а подтверждение того же состояния.
 func (s *BudgetSkill) clearRate(ctx context.Context) (string, error) {
@@ -63,9 +109,12 @@ func (s *BudgetSkill) clearRate(ctx context.Context) (string, error) {
 		return "Не удалось вернуть автоматический курс — попробуй ещё раз.", nil
 	}
 	src, ok, err := s.store.GetRateSource(ctx, rateCurrency)
-	if err != nil || !ok {
-		slog.Default().WarnContext(ctx, "clear_rate: read back", "err", err, "found", ok)
+	if err != nil {
+		slog.Default().WarnContext(ctx, "clear_rate: read back", "err", err)
 		return "💱 Вернул автоматический курс.", nil
+	}
+	if !ok || !src.HasAuto {
+		return "💱 Ручной курс снят. Автоматический подтянется в ближайшие сутки.", nil
 	}
 	return fmt.Sprintf("💱 Вернул автоматический курс %s ₽/฿ (обновлён %s).",
 		safetospend.FmtRate(src.RateToRUB), src.UpdatedAt.Local().Format("02.01 15:04")), nil
@@ -87,6 +136,10 @@ func (s *BudgetSkill) rateStatus(ctx context.Context) (string, error) {
 	if src.Manual {
 		fmt.Fprintf(&b, "💱 Курс: %s ₽/฿ (вручную, задан %s).",
 			safetospend.FmtRate(src.RateToRUB), src.UpdatedAt.Local().Format("02.01 15:04"))
+		if !src.HasAuto {
+			b.WriteString("\nАвтоматического курса пока нет — скажи «курс авто», чтобы снять ручной.")
+			return b.String(), nil
+		}
 		fmt.Fprintf(&b, "\nАвтоматический сейчас %s ₽/฿ — скажи «курс авто», чтобы вернуться к нему.",
 			safetospend.FmtRate(src.Auto))
 		return b.String(), nil
