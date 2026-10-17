@@ -20,7 +20,10 @@ export class ApiError extends Error {
 }
 
 async function call(method, path, payload) {
-  const headers = { Authorization: 'Bearer ' + token() };
+  // Без токена заголовок не шлём: за nginx с логином браузер сам подставит Basic-доступ,
+  // а токен nginx добавит на своей стороне.
+  const headers = {};
+  if (token()) headers.Authorization = 'Bearer ' + token();
   const init = { method, headers };
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -40,3 +43,5 @@ export const getCategories = () => call('GET', '/api/plan/categories').then((b) 
 export const addIncome = (cur, body) => call('POST', '/api/plan/income' + q(cur), body);
 export const addPayment = (cur, body) => call('POST', '/api/plan/payment' + q(cur), body);
 export const deleteItem = (cur, key) => call('DELETE', '/api/plan/item/' + encodeURIComponent(key) + q(cur));
+export const settleItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/done' + q(cur), body);
+export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));

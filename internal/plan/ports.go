@@ -94,6 +94,12 @@ type Writer interface {
 	AddPlanned(ctx context.Context, sc Scope, n NewItem) (string, error)
 	// DeletePlanned удаляет плановую запись; чужой чат или нет записи — ErrNotFound.
 	DeletePlanned(ctx context.Context, sc Scope, id string) error
+	// SettlePlanned закрывает плановую запись фактом на дату date. actual задаёт
+	// сумму, если у записи её не было, и заменяет плановую, если задана. Нет записи
+	// или она уже закрыта — ErrNotFound.
+	SettlePlanned(ctx context.Context, sc Scope, id string, actual *Money, date Date) error
+	// SkipTerm добавляет срок правила повтора в пропущенные; чужое правило — ErrNotFound.
+	SkipTerm(ctx context.Context, sc Scope, ruleID string, term Date) error
 	// ExpenseCategories — названия категорий расходов для выбора в форме.
 	ExpenseCategories(ctx context.Context) ([]string, error)
 }

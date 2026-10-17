@@ -15,6 +15,8 @@ import (
 type Sink interface {
 	AddPlanItem(ctx context.Context, in budget.PlanItemInput) (uuid.UUID, error)
 	DeletePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID) (bool, error)
+	SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, actual *budget.PlanAmount, date time.Time) (bool, error)
+	SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID uuid.UUID, term time.Time) (bool, error)
 	ExpenseCategoryNames(ctx context.Context) ([]string, error)
 }
 
@@ -75,6 +77,49 @@ func (w *Writer) DeletePlanned(ctx context.Context, sc plan.Scope, id string) er
 		return plan.ErrNotFound
 	}
 	ok, err := w.sink.DeletePlanItem(ctx, sc.ChatIDs, u)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return plan.ErrNotFound
+	}
+	return nil
+}
+
+// SettlePlanned закрывает плановую запись фактом; чужой, закрытый или несуществующий
+// id — ErrNotFound. Сумма нужна, если записи её не задавали.
+func (w *Writer) SettlePlanned(ctx context.Context, sc plan.Scope, id string, actual *plan.Money, date plan.Date) error {
+	if len(sc.ChatIDs) == 0 {
+		return fmt.Errorf("planrepo: пустая область чатов")
+	}
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return plan.ErrNotFound
+	}
+	var amt *budget.PlanAmount
+	if actual != nil {
+		amt = &budget.PlanAmount{Minor: actual.Minor, Currency: string(actual.Cur)}
+	}
+	ok, err := w.sink.SettlePlanItem(ctx, sc.ChatIDs, u, amt, *dbDate(&date))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return plan.ErrNotFound
+	}
+	return nil
+}
+
+// SkipTerm пропускает срок правила; чужое или несуществующее правило — ErrNotFound.
+func (w *Writer) SkipTerm(ctx context.Context, sc plan.Scope, ruleID string, term plan.Date) error {
+	if len(sc.ChatIDs) == 0 {
+		return fmt.Errorf("planrepo: пустая область чатов")
+	}
+	u, err := uuid.Parse(ruleID)
+	if err != nil {
+		return plan.ErrNotFound
+	}
+	ok, err := w.sink.SkipRecurringTerm(ctx, sc.ChatIDs, u, *dbDate(&term))
 	if err != nil {
 		return err
 	}

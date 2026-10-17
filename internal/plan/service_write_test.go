@@ -10,7 +10,15 @@ type fakeWriter struct {
 	added   []NewItem
 	scopes  []Scope
 	deleted []string
+	settled []settleCall
+	skipped []string
 	err     error
+}
+
+type settleCall struct {
+	id     string
+	actual *Money
+	date   Date
 }
 
 func (f *fakeWriter) AddPlanned(_ context.Context, sc Scope, n NewItem) (string, error) {
@@ -21,6 +29,16 @@ func (f *fakeWriter) AddPlanned(_ context.Context, sc Scope, n NewItem) (string,
 
 func (f *fakeWriter) DeletePlanned(_ context.Context, _ Scope, id string) error {
 	f.deleted = append(f.deleted, id)
+	return f.err
+}
+
+func (f *fakeWriter) SettlePlanned(_ context.Context, _ Scope, id string, actual *Money, date Date) error {
+	f.settled = append(f.settled, settleCall{id, actual, date})
+	return f.err
+}
+
+func (f *fakeWriter) SkipTerm(_ context.Context, _ Scope, ruleID string, term Date) error {
+	f.skipped = append(f.skipped, ruleID+"@"+term.String())
 	return f.err
 }
 
@@ -223,5 +241,70 @@ func TestService_AmountCap_NoOverflowDownstream(t *testing.T) {
 	snap.ReservePct = 100
 	if _, err := svc(&fakeReader{snap: snap}, d(2026, 3, 10)).View(context.Background(), CurTHB); err != nil {
 		t.Errorf("предельная сумма ломает расчёт: %v", err)
+	}
+}
+
+func TestService_Settle(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10))
+	ctx := context.Background()
+	if err := s.Settle(ctx, "planned:abc", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.settled[0]; got.id != "abc" || got.actual != nil || got.date != d(2026, 3, 10) {
+		t.Errorf("закрыто как %+v", got)
+	}
+	if err := s.Settle(ctx, "planned:abc", rub(500)); err != nil || w.settled[1].actual.Minor != 50000 {
+		t.Errorf("сумма не дошла: %v %+v", err, w.settled)
+	}
+	n := len(w.settled)
+	for name, tc := range map[string]struct {
+		key    string
+		actual *Money
+		want   error
+	}{
+		"повтор нельзя закрыть вручную": {"recurring:r@2026-03-10", nil, ErrInvalidEvent},
+		"факт нельзя закрыть":           {"transaction:1", nil, ErrInvalidEvent},
+		"нулевая сумма":                 {"planned:abc", &Money{Minor: 0, Cur: CurRUB}, ErrAmountNonPositive},
+		"чужая валюта":                  {"planned:abc", &Money{Minor: 1, Cur: "USD"}, ErrUnsupportedCurrency},
+		"слишком большая":               {"planned:abc", &Money{Minor: maxAmountMinor + 1, Cur: CurRUB}, ErrAmountTooLarge},
+	} {
+		if err := s.Settle(ctx, tc.key, tc.actual); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, ждали %v", name, err, tc.want)
+		}
+	}
+	if len(w.settled) != n {
+		t.Errorf("невалидные команды дошли до писателя")
+	}
+	if err := svc(&fakeReader{snap: baseSnap()}, d(2026, 3, 10)).Settle(ctx, "planned:abc", nil); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("без писателя: %v", err)
+	}
+}
+
+func TestService_Skip(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10))
+	ctx := context.Background()
+	if err := s.Skip(ctx, "recurring:rule-1@2026-03-15"); err != nil || w.skipped[0] != "rule-1@2026-03-15" {
+		t.Fatalf("%v %v", err, w.skipped)
+	}
+	for _, key := range []string{"planned:abc", "recurring:@2026-03-15", "recurring:r", "recurring:r@2026-13-01", "recurring:r@15.03.2026"} {
+		if err := s.Skip(ctx, key); err == nil {
+			t.Errorf("%q принят", key)
+		}
+	}
+	if len(w.skipped) != 1 {
+		t.Errorf("невалидные ключи дошли до писателя: %v", w.skipped)
+	}
+}
+
+func TestParseDate(t *testing.T) {
+	if got, err := ParseDate(" 2026-03-05 "); err != nil || got != d(2026, 3, 5) {
+		t.Errorf("%v %v", got, err)
+	}
+	for _, in := range []string{"", "2026-3-5", "2026-02-30", "26-03-05", "2026-03-05x", "2026/03/05"} {
+		if _, err := ParseDate(in); !errors.Is(err, ErrBadDate) {
+			t.Errorf("%q: %v", in, err)
+		}
 	}
 }

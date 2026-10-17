@@ -187,3 +187,47 @@ func TestDeleteAndCategories(t *testing.T) {
 		t.Errorf("категории: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDone_WithAndWithoutAmount(t *testing.T) {
+	p := &fakePlanner{}
+	s, logs := newServer(t, p)
+	rec := post(s, "/api/plan/item/planned:abc/done?cur=THB", "", "", goodToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("код %d: %s", rec.Code, rec.Body.String())
+	}
+	if p.settled[0] != "planned:abc" || p.actuals[0] != nil {
+		t.Errorf("без тела: %v %v", p.settled, p.actuals)
+	}
+	rec = post(s, "/api/plan/item/planned:abc/done", "application/json", `{"amount":1500.5,"currency":"thb"}`, goodToken)
+	if rec.Code != http.StatusOK || p.actuals[1] == nil || p.actuals[1].Minor != 150050 || p.actuals[1].Cur != plan.CurTHB {
+		t.Errorf("с суммой: %d %+v", rec.Code, p.actuals[1])
+	}
+	if c := post(s, "/api/plan/item/planned:abc/done", "application/json", `{"amount":-1}`, goodToken).Code; c != http.StatusBadRequest {
+		t.Errorf("минус: %d", c)
+	}
+	if len(p.settled) != 2 {
+		t.Errorf("невалидный запрос дошёл до сервиса: %v", p.settled)
+	}
+	if out := logs.String(); !strings.Contains(out, "command=done") || strings.Contains(out, goodToken) {
+		t.Errorf("лог: %s", out)
+	}
+	if c := post(s, "/api/plan/item/planned:abc/done", "", "", "").Code; c != http.StatusUnauthorized {
+		t.Errorf("без токена %d", c)
+	}
+}
+
+func TestSkipAndDoneErrors(t *testing.T) {
+	p := &fakePlanner{}
+	s, _ := newServer(t, p)
+	if c := post(s, "/api/plan/item/recurring:r@2026-03-15/skip", "", "", goodToken).Code; c != http.StatusOK || p.skipped[0] != "recurring:r@2026-03-15" {
+		t.Errorf("skip: %d %v", c, p.skipped)
+	}
+	p.cmdErr = plan.ErrNotFound
+	if c := post(s, "/api/plan/item/planned:x/done", "", "", goodToken).Code; c != http.StatusNotFound {
+		t.Errorf("нет записи: %d", c)
+	}
+	p.cmdErr = plan.ErrInvalidEvent
+	if c := post(s, "/api/plan/item/planned:x/skip", "", "", goodToken).Code; c != http.StatusBadRequest {
+		t.Errorf("неверный ключ: %d", c)
+	}
+}

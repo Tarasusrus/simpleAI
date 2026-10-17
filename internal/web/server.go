@@ -28,6 +28,8 @@ type Planner interface {
 	AddIncome(ctx context.Context, in plan.AddIncomeInput) (string, error)
 	AddPayment(ctx context.Context, in plan.AddPaymentInput) (string, error)
 	Delete(ctx context.Context, key string) error
+	Settle(ctx context.Context, key string, actual *plan.Money) error
+	Skip(ctx context.Context, key string) error
 	ExpenseCategories(ctx context.Context) ([]string, error)
 }
 
@@ -79,6 +81,8 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("GET /api/plan/categories", s.auth(http.HandlerFunc(s.handleCategories)))
 	mux.Handle("POST /api/plan/income", s.auth(http.HandlerFunc(s.handleAddIncome)))
 	mux.Handle("POST /api/plan/payment", s.auth(http.HandlerFunc(s.handleAddPayment)))
+	mux.Handle("POST /api/plan/item/{key}/done", s.auth(http.HandlerFunc(s.handleDone)))
+	mux.Handle("POST /api/plan/item/{key}/skip", s.auth(http.HandlerFunc(s.handleSkip)))
 	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))
 	files := http.FileServerFS(sub)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {

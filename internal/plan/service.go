@@ -281,6 +281,52 @@ func (s *Service) Delete(ctx context.Context, key string) error {
 	return s.writer.DeletePlanned(ctx, s.scope, strings.TrimPrefix(key, "planned:"))
 }
 
+// Settle закрывает плановую запись («оплачено» / «пришло»): факт ложится на сегодня.
+// Сумма нужна, если у записи её не было; если задана — заменяет плановую.
+func (s *Service) Settle(ctx context.Context, key string, actual *Money) error {
+	if err := s.canWrite(); err != nil {
+		return err
+	}
+	id, ok := strings.CutPrefix(key, "planned:")
+	if !ok {
+		return fmt.Errorf("%w: закрыть можно только плановую запись", ErrInvalidEvent)
+	}
+	if actual != nil {
+		if actual.Minor <= 0 {
+			return ErrAmountNonPositive
+		}
+		if !actual.Cur.Supported() {
+			return ErrUnsupportedCurrency
+		}
+		if actual.Minor > maxAmountMinor {
+			return ErrAmountTooLarge
+		}
+	}
+	today := s.today()
+	if !today.Valid() {
+		return fmt.Errorf("%w: сегодня %v", ErrBadDate, today)
+	}
+	return s.writer.SettlePlanned(ctx, s.scope, id, actual, today)
+}
+
+// Skip пропускает один срок повторяющегося правила («пропустить этот раз»); ключ
+// вида "recurring:<ruleID>@YYYY-MM-DD".
+func (s *Service) Skip(ctx context.Context, key string) error {
+	if err := s.canWrite(); err != nil {
+		return err
+	}
+	rest, ok := strings.CutPrefix(key, "recurring:")
+	ruleID, termStr, found := strings.Cut(rest, "@")
+	if !ok || !found || ruleID == "" {
+		return fmt.Errorf("%w: пропустить можно только срок повтора", ErrInvalidEvent)
+	}
+	term, err := ParseDate(termStr)
+	if err != nil {
+		return err
+	}
+	return s.writer.SkipTerm(ctx, s.scope, ruleID, term)
+}
+
 // ExpenseCategories — названия категорий расходов для формы.
 func (s *Service) ExpenseCategories(ctx context.Context) ([]string, error) {
 	if err := s.canWrite(); err != nil {

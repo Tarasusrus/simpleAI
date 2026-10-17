@@ -26,6 +26,20 @@ type fakePlanner struct {
 	payments []plan.AddPaymentInput
 	deleted  []string
 	cats     []string
+	settled  []string
+	actuals  []*plan.Money
+	skipped  []string
+}
+
+func (f *fakePlanner) Settle(_ context.Context, key string, actual *plan.Money) error {
+	f.settled = append(f.settled, key)
+	f.actuals = append(f.actuals, actual)
+	return f.cmdErr
+}
+
+func (f *fakePlanner) Skip(_ context.Context, key string) error {
+	f.skipped = append(f.skipped, key)
+	return f.cmdErr
 }
 
 func (f *fakePlanner) AddIncome(_ context.Context, in plan.AddIncomeInput) (string, error) {
