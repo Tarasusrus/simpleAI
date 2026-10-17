@@ -231,3 +231,41 @@ func TestSkipAndDoneErrors(t *testing.T) {
 		t.Errorf("неверный ключ: %d", c)
 	}
 }
+
+func TestParseMicro(t *testing.T) {
+	ok := map[string]int64{"2.5": 2_500_000, "2": 2_000_000, "0.000001": 1, "2.650001": 2_650_001, "100.": 100_000_000}
+	for in, want := range ok {
+		if got, err := parseMicro(json.Number(in)); err != nil || got != want {
+			t.Errorf("%q → %d, %v; ждали %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "0.000000", "-1", "1.1234567", "1e3", "abc", ".5", "99999999999999999999"} {
+		if _, err := parseMicro(json.Number(in)); err == nil {
+			t.Errorf("%q принято", in)
+		}
+	}
+}
+
+func TestRate(t *testing.T) {
+	p := &fakePlanner{}
+	s, logs := newServer(t, p)
+	if rec := post(s, "/api/plan/rate", "application/json", `{"rate":"2.65"}`, goodToken); rec.Code != http.StatusOK || len(p.rates) != 1 || p.rates[0] != 2_650_000 {
+		t.Fatalf("код %d, курсы %v", rec.Code, p.rates)
+	}
+	if rec := post(s, "/api/plan/rate", "application/json", `{"rate":0}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("ноль: %d", rec.Code)
+	}
+	if rec := post(s, "/api/plan/rate", "application/json", `{"rate":"abc"}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("не число: %d", rec.Code)
+	}
+	if len(p.rates) != 1 {
+		t.Errorf("плохой курс дошёл до сервиса: %v", p.rates)
+	}
+	p.cmdErr = plan.ErrBadRate
+	if rec := post(s, "/api/plan/rate", "application/json", `{"rate":9999}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("отказ домена: %d", rec.Code)
+	}
+	if !strings.Contains(logs.String(), "command=rate") {
+		t.Errorf("лог: %s", logs.String())
+	}
+}

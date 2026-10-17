@@ -29,6 +29,12 @@ type fakePlanner struct {
 	settled  []string
 	actuals  []*plan.Money
 	skipped  []string
+	rates    []int64
+}
+
+func (f *fakePlanner) SetRate(_ context.Context, micro int64) error {
+	f.rates = append(f.rates, micro)
+	return f.cmdErr
 }
 
 func (f *fakePlanner) Settle(_ context.Context, key string, actual *plan.Money) error {

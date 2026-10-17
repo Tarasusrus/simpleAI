@@ -211,6 +211,55 @@ func (s *Server) handleSkip(w http.ResponseWriter, r *http.Request) {
 	s.respondView(w, r, http.StatusOK)
 }
 
+type rateBody struct {
+	Rate json.Number `json:"rate"`
+}
+
+// parseMicro переводит курс из JSON (не больше шести знаков после запятой) в
+// микроединицы без float64: 2.5 → 2_500_000.
+func parseMicro(n json.Number) (int64, error) {
+	s := strings.TrimSpace(n.String())
+	whole, frac, _ := strings.Cut(s, ".")
+	if len(frac) > 6 || whole == "" {
+		return 0, plan.ErrBadRate
+	}
+	for len(frac) < 6 {
+		frac += "0"
+	}
+	var micro int64
+	for _, ch := range whole + frac {
+		if ch < '0' || ch > '9' {
+			return 0, plan.ErrBadRate
+		}
+		if micro > 1_000_000_000_000 { // заведомо больше потолка, до переполнения далеко
+			return 0, plan.ErrBadRate
+		}
+		micro = micro*10 + int64(ch-'0')
+	}
+	if micro == 0 {
+		return 0, plan.ErrBadRate
+	}
+	return micro, nil
+}
+
+// handleRate: POST /api/plan/rate — ручной курс бата.
+func (s *Server) handleRate(w http.ResponseWriter, r *http.Request) {
+	var b rateBody
+	if !decode(w, r, &b) {
+		return
+	}
+	micro, err := parseMicro(b.Rate)
+	if err == nil {
+		err = s.planner.SetRate(r.Context(), micro)
+	}
+	if err != nil {
+		s.writeCommandError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "rate", "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
 // handleCategories: GET /api/plan/categories — категории расходов для формы.
 func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
 	names, err := s.planner.ExpenseCategories(r.Context())
@@ -236,6 +285,7 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrIncomeNoDate:        "У поступления должна быть дата.",
 		plan.ErrBadDate:             "Некорректная дата. Нужен формат ГГГГ-ММ-ДД.",
 		plan.ErrUnsupportedCurrency: "Валюта: RUB или THB.",
+		plan.ErrBadRate:             "Курс: число больше нуля и не больше 1000 ₽ за бат.",
 		plan.ErrNoWindow:            "Открытого окна нет: сначала добавь ожидаемое поступление с датой.",
 		plan.ErrInvalidEvent:        "Укажи либо дату, либо окно, а не оба сразу.",
 	}
