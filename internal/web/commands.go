@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"simpleAI/internal/plan"
@@ -89,12 +90,18 @@ func (s *Server) curFrom(r *http.Request) plan.Currency {
 	return plan.CurRUB
 }
 
-// viewFor считает окно; ?past=1 показывает закончившееся последнее окно.
+// viewFor считает окно; ?past=1 показывает закончившееся последнее окно, ?avg=N —
+// за сколько дней считать «обычные» траты (7..730, по умолчанию 90).
 func (s *Server) viewFor(r *http.Request, cur plan.Currency) (plan.Result, error) {
-	if r.URL.Query().Get("past") == "1" {
-		return s.planner.ViewPast(r.Context(), cur)
+	opt := plan.ViewOptions{ShowPast: r.URL.Query().Get("past") == "1"}
+	if a := r.URL.Query().Get("avg"); a != "" {
+		n, err := strconv.Atoi(a)
+		if err != nil {
+			return plan.Result{}, plan.ErrBadAvgDays
+		}
+		opt.AvgDays = n
 	}
-	return s.planner.View(r.Context(), cur)
+	return s.planner.ViewWith(r.Context(), cur, opt)
 }
 
 // respondView отдаёт обновлённый WindowView после команды.

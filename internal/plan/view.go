@@ -6,6 +6,11 @@ package plan
 type View struct {
 	State  StateKind
 	Window *WindowInfo // nil при State=none
+	// LastWindow — окно, по которому считается колонка «Прошлое окно» (с датами, чтобы
+	// экран подписал, о каком периоде речь); nil, если такого окна нет.
+	LastWindow *WindowInfo
+	// AvgDays — период усреднения колонки «Обычно».
+	AvgDays int
 
 	Income IncomeSum
 	// CanSpend знаковое: отрицательное значение — недостача.
@@ -74,7 +79,9 @@ type MonthBucket struct {
 
 // CategoryRow — траты категории: в прошлом окне и в текущем.
 type CategoryRow struct {
-	Name      string
+	Name string
+	// Avg — обычные траты за окно (14 дней): сумма за AvgDays дней, приведённая к 14.
+	Avg       int64
 	Last, Now int64
 	Recent    []Row
 }

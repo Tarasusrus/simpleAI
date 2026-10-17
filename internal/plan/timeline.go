@@ -140,7 +140,7 @@ func (c calc) blocks(v *View) error {
 			case !ok:
 				row.WindowMissing = true
 				undated = append(undated, newItem(row, 2, 2))
-			case idx < c.st.Index:
+			case idx < c.st.Index || c.hiddenLast >= 0 && idx <= c.hiddenLast:
 				row.WindowPassed = true
 				undated = append(undated, newItem(row, 2, 2))
 			case idx == nextIdx:

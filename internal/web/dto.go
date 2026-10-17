@@ -14,10 +14,14 @@ const WindowViewVersion = 1
 // Суммы — целые единицы валюты показа (рубли или баты), даты — «YYYY-MM-DD».
 
 type WindowView struct {
-	V          int           `json:"v"`
-	Meta       MetaDTO       `json:"meta"`
-	State      string        `json:"state"`
-	Window     *WindowDTO    `json:"window"`
+	V      int        `json:"v"`
+	Meta   MetaDTO    `json:"meta"`
+	State  string     `json:"state"`
+	Window *WindowDTO `json:"window"`
+	// LastWindow — окно колонки «Прошлое окно» (даты для подписи); null, если его нет.
+	LastWindow *WindowDTO `json:"lastWindow"`
+	// AvgDays — за сколько дней считана колонка «Обычно».
+	AvgDays    int           `json:"avgDays"`
 	KPI        KPIDTO        `json:"kpi"`
 	Timeline   []RowDTO      `json:"timeline"`
 	Next       *BlockDTO     `json:"next"`
@@ -88,6 +92,7 @@ type MonthDTO struct {
 
 type CategoryDTO struct {
 	Name   string   `json:"name"`
+	Avg    int64    `json:"avg"`
 	Last   int64    `json:"last"`
 	Now    int64    `json:"now"`
 	Recent []RowDTO `json:"recent"`
@@ -141,6 +146,10 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 			DaysLeft: v.Window.DaysLeft, AnchorPlanned: v.Window.AnchorPlanned,
 		}
 	}
+	out.AvgDays = v.AvgDays
+	if v.LastWindow != nil {
+		out.LastWindow = &WindowDTO{Start: dateStr(v.LastWindow.Start), End: dateStr(v.LastWindow.End)}
+	}
 	if v.Next != nil {
 		out.Next = &BlockDTO{Count: v.Next.Count, Sum: v.Next.Sum, Items: rows(v.Next.Items)}
 	}
@@ -148,7 +157,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		out.Later = append(out.Later, MonthDTO{Year: m.Year, Month: m.Month, Count: m.Count, Sum: m.Sum, Items: rows(m.Items)})
 	}
 	for _, c := range v.Categories {
-		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
+		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Avg: c.Avg, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
 	}
 	return out
 }
