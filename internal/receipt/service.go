@@ -14,6 +14,10 @@ import (
 // который бот умеет проверить (или каталог моделей недоступен).
 var ErrNotConfigured = errors.New("receipt: обработка фото не настроена")
 
+// ErrCatalogUnavailable — прокси моделей сейчас не отвечает; временно, в
+// отличие от ErrNotConfigured.
+var ErrCatalogUnavailable = errors.New("receipt: прокси моделей недоступен")
+
 // Draft — разобранный чек, ждущий подтверждения.
 type Draft struct {
 	ID      string
@@ -60,6 +64,7 @@ func NewService(d Deps) *Service {
 }
 
 // Process ведёт файл до черновика. Ошибки шагов — ErrNotConfigured,
+// ErrCatalogUnavailable,
 // filecheck.Err*, ErrNotReceipt, ErrUnreadable, ErrNoCurrency, ErrNoTotal;
 // остальные — сбой инфраструктуры.
 func (s *Service) Process(ctx context.Context, chatID int64, file io.Reader) (Draft, error) {
@@ -117,7 +122,7 @@ func (s *Service) Cancel(chatID int64, draftID string) error {
 func (s *Service) checker(ctx context.Context) (*filecheck.Checker, error) {
 	models, err := s.catalog.Models(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrNotConfigured, err)
+		return nil, fmt.Errorf("%w: %w", ErrCatalogUnavailable, err)
 	}
 	for _, m := range models {
 		if m.Name != s.model {

@@ -158,6 +158,44 @@ func TestCatalog_CachesSuccessForTTL(t *testing.T) {
 	}
 }
 
+// Медленный прокси не должен выстраивать одновременные запросы в очередь:
+// сервер отвечает, только когда оба запроса пришли, — при блокировке на
+// время запроса второй не придёт никогда.
+func TestCatalog_ConcurrentFetchesAreNotSerialized(t *testing.T) {
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		arrived <- struct{}{}
+		<-release
+		if _, err := w.Write(fixture(t)); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := NewCatalog(srv.URL, "secret", nil, 0)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := c.Models(context.Background())
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case <-arrived:
+		case <-time.After(3 * time.Second):
+			close(release)
+			t.Fatal("second fetch waited for the first: catalog is serialized")
+		}
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Прокси поднят после старта бота: первая ошибка не должна запомниться.
 func TestCatalog_DoesNotCacheError(t *testing.T) {
 	var up atomic.Bool

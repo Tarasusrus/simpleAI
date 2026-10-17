@@ -68,7 +68,12 @@ func BuildReceipt(ctx context.Context, cfg config.ReceiptConfig, registry *plugi
 		Drafts:     memdraft.New(receiptDraftTTL),
 		Writer:     budgetadapter.NewSkillWriter(budgetSkill),
 	})
-	logVisionModels(ctx, catalog, cfg.Model, logger)
+	// Прокси часто поднимается позже бота: лог не должен задерживать старт.
+	go func() {
+		lctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		logVisionModels(lctx, catalog, cfg.Model, logger)
+	}()
 	return out
 }
 

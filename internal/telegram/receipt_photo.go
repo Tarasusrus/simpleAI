@@ -10,6 +10,7 @@ import (
 	"simpleAI/internal/core"
 	"simpleAI/internal/receipt"
 	"simpleAI/internal/receipt/filecheck"
+	"simpleAI/internal/tools"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	msgReceiptNoCurrency    = "Не понял валюту чека — расход не создан. Можно ввести трату текстом."
 	msgReceiptNoTotal       = "Не нашёл итоговую сумму на чеке — расход не создан. Можно ввести трату текстом."
 	msgReceiptFailed        = "Не удалось обработать фото, попробуй позже."
+	msgReceiptProxyDown     = "Сервис распознавания сейчас недоступен — пришли фото чуть позже."
 )
 
 // WithReceiptPhotos отправляет фото и документы-картинки/PDF в сценарий
@@ -73,7 +75,11 @@ func handleReceiptAttachment(ctx context.Context, tctx *Context, svc ReceiptServ
 		}
 	}()
 
+	// Два вызова модели подряд — до пары минут; без индикатора пользователь
+	// решит, что бот завис, и пришлёт фото ещё раз.
+	stopTyping := tctx.StartTyping(ctx)
 	draft, err := svc.Process(ctx, tctx.Update.ChatID, body)
+	stopTyping()
 	if err != nil {
 		msg, known := receiptErrorMessage(err)
 		if !known || errors.Is(err, receipt.ErrNotConfigured) {
@@ -100,8 +106,10 @@ var base64Run = regexp.MustCompile(`[A-Za-z0-9+/=]{64,}`)
 // errTextLimit — сколько текста ошибки оставлять в логе.
 const errTextLimit = 500
 
+// scrubError: ошибка скачивания вложения содержит URL с токеном бота —
+// его маскирует tools.Redact.
 func scrubError(err error) string {
-	s := base64Run.ReplaceAllString(err.Error(), "[base64]")
+	s := base64Run.ReplaceAllString(tools.Redact(err.Error()), "[base64]")
 	if len(s) > errTextLimit {
 		s = strings.ToValidUTF8(s[:errTextLimit], "") + "…"
 	}
@@ -114,6 +122,8 @@ func receiptErrorMessage(err error) (msg string, known bool) {
 	switch {
 	case errors.Is(err, receipt.ErrNotConfigured):
 		return msgReceiptNotConfigured, true
+	case errors.Is(err, receipt.ErrCatalogUnavailable):
+		return msgReceiptProxyDown, false
 	case errors.Is(err, filecheck.ErrTooLarge):
 		return msgReceiptTooLarge, true
 	case errors.Is(err, filecheck.ErrUnknown):

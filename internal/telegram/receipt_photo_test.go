@@ -178,6 +178,7 @@ func TestWithReceiptPhotos_ErrorMessages(t *testing.T) {
 		{receipt.ErrUnreadable, msgReceiptUnreadable, false},
 		{receipt.ErrNoCurrency, msgReceiptNoCurrency, false},
 		{receipt.ErrNoTotal, msgReceiptNoTotal, false},
+		{fmt.Errorf("%w: 503", receipt.ErrCatalogUnavailable), msgReceiptProxyDown, true},
 		{errors.New("pq: connection refused"), msgReceiptFailed, true},
 	}
 	for _, tt := range tests {
@@ -212,6 +213,28 @@ func TestWithReceiptPhotos_LogsNoImageData(t *testing.T) {
 	}
 	if r.bot.lastSent() != msgReceiptFailed {
 		t.Fatalf("reply = %q", r.bot.lastSent())
+	}
+}
+
+// Ошибка скачивания содержит URL с токеном бота.
+func TestWithReceiptPhotos_FetchErrorLogHasNoBotToken(t *testing.T) {
+	r := newPhotoRig(t, photoUpdate(""))
+	const token = "123456789:AAEhBP0av28dfHdqYfXHkTrW1PbwXz0abcd"
+	r.fetcher.err = fmt.Errorf(`Get "https://api.telegram.org/file/bot%s/photos/file_3.jpg": dial tcp: i/o timeout`, token)
+	r.run(t, r.svc)
+	if strings.Contains(r.logs.String(), "AAEhBP0av28dfHdqYfXHkTrW1PbwXz0abcd") {
+		t.Fatalf("bot token leaked: %s", r.logs)
+	}
+	if r.logs.Len() == 0 {
+		t.Fatal("fetch error not logged")
+	}
+}
+
+func TestWithReceiptPhotos_ShowsTypingWhileProcessing(t *testing.T) {
+	r := newPhotoRig(t, photoUpdate(""))
+	r.run(t, r.svc)
+	if r.bot.typing.Load() == 0 {
+		t.Fatal("no typing indicator during receipt processing")
 	}
 }
 

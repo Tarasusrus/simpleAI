@@ -50,17 +50,23 @@ func NewCatalog(baseURL, apiKey string, client *http.Client, ttl time.Duration) 
 	}
 }
 
+// Models не держит блокировку на время запроса: медленный или висящий
+// прокси иначе выстроил бы в очередь все одновременные фото. Два запроса
+// при истёкшем кэше могут сходить в прокси оба — это дешевле очереди.
 func (c *Catalog) Models(ctx context.Context) ([]core.ModelInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.cached != nil && c.now().Sub(c.fetchedAt) < c.ttl {
-		return c.cached, nil
+	cached, fresh := c.cached, c.cached != nil && c.now().Sub(c.fetchedAt) < c.ttl
+	c.mu.Unlock()
+	if fresh {
+		return cached, nil
 	}
 	models, err := c.fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	c.mu.Lock()
 	c.cached, c.fetchedAt = models, c.now()
+	c.mu.Unlock()
 	return models, nil
 }
 

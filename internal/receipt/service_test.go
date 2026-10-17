@@ -148,7 +148,7 @@ func TestProcess_StopsAtFirstFailedStep(t *testing.T) {
 		wantErr   error
 		wantSteps []string
 	}{
-		{"catalog down", jpegBytes, func(f *fixture) { f.catalog.err = boom }, ErrNotConfigured, []string{"catalog"}},
+		{"catalog down", jpegBytes, func(f *fixture) { f.catalog.err = boom }, ErrCatalogUnavailable, []string{"catalog"}},
 		{"model not in catalog", jpegBytes, func(f *fixture) {
 			f.catalog.models = []core.ModelInfo{{Name: "other", Capabilities: core.ModelCapabilities{Vision: true}}}
 		}, ErrNotConfigured, []string{"catalog"}},

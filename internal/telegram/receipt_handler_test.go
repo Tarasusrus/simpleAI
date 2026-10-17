@@ -20,8 +20,9 @@ import (
 type buttonBot struct {
 	captureBot
 	mu    sync.Mutex
-	edits []string
-	rows  [][][]core.Button
+	edits  []string
+	rows   [][][]core.Button
+	typing atomic.Int32
 }
 
 func (b *buttonBot) SendWithButtons(_ context.Context, _ int64, text string, rows [][]core.Button) error {
@@ -41,6 +42,11 @@ func (b *buttonBot) EditWithButtons(_ context.Context, _ int64, _ int, text stri
 }
 
 func (b *buttonBot) AnswerCallback(context.Context, string) error { return nil }
+
+func (b *buttonBot) SendTyping(context.Context, int64) error {
+	b.typing.Add(1)
+	return nil
+}
 
 func (b *buttonBot) lastEdit() string {
 	b.mu.Lock()

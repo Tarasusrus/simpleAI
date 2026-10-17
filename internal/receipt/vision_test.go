@@ -3,26 +3,33 @@ package receipt
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
+	"time"
 
 	"simpleAI/internal/core"
 	"simpleAI/internal/receipt/filecheck"
 )
 
 type fakeVision struct {
-	reply string
-	err   error
-	reqs  []core.VisionRequest
+	reply    string
+	err      error
+	reqs     []core.VisionRequest
+	deadline time.Duration // сколько оставалось до дедлайна контекста
 }
 
-func (f *fakeVision) AskVision(_ context.Context, req core.VisionRequest) (string, error) {
+func (f *fakeVision) AskVision(ctx context.Context, req core.VisionRequest) (string, error) {
 	f.reqs = append(f.reqs, req)
+	if d, ok := ctx.Deadline(); ok {
+		f.deadline = time.Until(d)
+	}
 	return f.reply, f.err
 }
 
@@ -204,5 +211,49 @@ func TestVisionParser_WhenModelFails_ShouldReturnItsError(t *testing.T) {
 	_, err := NewVisionParser(&fakeVision{err: boom}, "vision").Parse(context.Background(), pngFile(t, 4, 4), categories)
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want upstream error", err)
+	}
+}
+
+// Классификатор и разбор идут подряд и вместе обязаны уложиться в дедлайн
+// апдейта (150 с): у дешёвого шага свой короткий потолок.
+func TestVisionClassifier_HasItsOwnShortTimeout(t *testing.T) {
+	llm := &fakeVision{reply: `{"is_receipt":true}`}
+	if _, err := NewVisionClassifier(llm, "vision").IsReceipt(context.Background(), pngFile(t, 4, 4)); err != nil {
+		t.Fatal(err)
+	}
+	if llm.deadline <= 0 || llm.deadline > classifyTimeout {
+		t.Fatalf("classifier deadline in %v, want ≤ %v", llm.deadline, classifyTimeout)
+	}
+}
+
+func TestVisionParser_WhenNoCategories_PromptHasEmptyList(t *testing.T) {
+	llm := &fakeVision{reply: `{"is_receipt":true,"total":1,"currency":"THB"}`}
+	if _, err := NewVisionParser(llm, "vision").Parse(context.Background(), pngFile(t, 4, 4), nil); err != nil {
+		t.Fatal(err)
+	}
+	if p := llm.reqs[0].Prompt; strings.Contains(p, "null") || !strings.Contains(p, "[]") {
+		t.Fatalf("prompt category list:\n%s", p)
+	}
+}
+
+// pngClaiming — настоящий PNG 1×1, у которого в IHDR записаны другие размеры
+// (с пересчитанной CRC): так выглядит «бомба» на гигабайты при декодировании.
+func pngClaiming(t *testing.T, w, h uint32) filecheck.File {
+	t.Helper()
+	data := append([]byte{}, pngFile(t, 1, 1).Data...)
+	// сигнатура (8) + длина (4) + "IHDR" (4) → ширина, высота
+	binary.BigEndian.PutUint32(data[16:], w)
+	binary.BigEndian.PutUint32(data[20:], h)
+	binary.BigEndian.PutUint32(data[29:], crc32.ChecksumIEEE(data[12:29]))
+	return filecheck.File{Format: filecheck.PNG, Data: data}
+}
+
+func TestShrink_DoesNotDecodeHugeDeclaredImage(t *testing.T) {
+	in := pngClaiming(t, 30000, 30000)
+	if cfg, err := png.DecodeConfig(bytes.NewReader(in.Data)); err != nil || cfg.Width != 30000 {
+		t.Fatalf("fixture broken: %v %+v", err, cfg)
+	}
+	if got := shrink(in); got.Format != filecheck.PNG || !bytes.Equal(got.Data, in.Data) {
+		t.Fatal("huge declared image was decoded")
 	}
 }

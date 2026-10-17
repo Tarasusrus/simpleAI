@@ -14,8 +14,15 @@ import (
 const classifyPrompt = `Is this image a shop receipt, bill or payment slip?
 Answer with exactly one JSON object and nothing else: {"is_receipt":true} or {"is_receipt":false}.`
 
-// classifyMaxTokens: ответ — одна короткая JSON-строка.
-const classifyMaxTokens = 16
+// classifyMaxTokens: ответ — одна короткая JSON-строка, но у моделей с
+// рассуждением скрытые токены тоже идут в max_tokens; при 16 такая модель
+// возвращала бы пустой ответ.
+const classifyMaxTokens = 256
+
+// classifyTimeout — потолок дешёвого шага. Вместе с таймаутом разбора
+// (VISION_TIMEOUT_SECONDS, 90 с по умолчанию) он должен укладываться в
+// дедлайн обработки апдейта (150 с в cmd/app).
+const classifyTimeout = 30 * time.Second
 
 // VisionClassifier — Classifier поверх vision-модели на уменьшенной картинке.
 type VisionClassifier struct {
@@ -31,6 +38,8 @@ func NewVisionClassifier(llm core.VisionLLM, model string) *VisionClassifier {
 // сомнение не должно пропускать фото к платному разбору.
 func (c *VisionClassifier) IsReceipt(ctx context.Context, f filecheck.File) (bool, error) {
 	small := shrink(f)
+	ctx, cancel := context.WithTimeout(ctx, classifyTimeout)
+	defer cancel()
 	reply, err := c.llm.AskVision(ctx, core.VisionRequest{
 		Model:     c.model,
 		Prompt:    classifyPrompt,
@@ -78,6 +87,9 @@ func NewVisionParser(llm core.VisionLLM, model string) *VisionParser {
 }
 
 func (p *VisionParser) Parse(ctx context.Context, f filecheck.File, categories []string) (Receipt, error) {
+	if categories == nil {
+		categories = []string{} // иначе в промпт уйдёт «null»
+	}
 	list, err := json.Marshal(categories)
 	if err != nil {
 		return Receipt{}, fmt.Errorf("receipt: список категорий: %w", err)
