@@ -65,7 +65,7 @@ func (c calc) categories() ([]CategoryRow, error) {
 	plannedSums := map[string]int64{}
 	avgFrom := c.in.Today.AddDays(-(c.in.AvgDays - 1))
 	for _, e := range c.in.Events {
-		if e.Kind == KindPayment && e.State == StatePlanned && e.Date != nil && e.Amount != nil && c.contains(nowIdx, *e.Date) {
+		if e.Kind == KindPayment && e.State == StatePlanned && e.Amount != nil && nowIdx >= 0 && c.plannedInThisWindow(e) {
 			n, err := c.money(e.Amount)
 			if err != nil {
 				return nil, err

@@ -16,22 +16,22 @@ export function render(view, cur, ctx) {
     onclick: () => { if (ctx && ctx.onAvg) ctx.onAvg(d); },
   }, d + ' дн.')));
   const card = h('div', { class: 'card' }, h('div', { class: 'ch' },
-    h('span', null, 'Категория'), h('span', { title: 'Среднее за 14 дней по последним ' + avgDays + ' дням' }, 'Обычно'),
+    h('span', null, 'Категория'), h('span', { title: 'Траты за последние ' + avgDays + ' дн., пересчитанные на 14 дней: сумма ÷ ' + avgDays + ' × 14' }, 'Обычно за 14 дн.'),
     h('span', null, last), h('span', null, 'Сейчас')));
   const max = Math.max(1, ...cats.map((c) => Math.max(c.avg, c.last, c.now)));
   cats.forEach((c) => {
     const pct = Math.round((c.now / max) * 100);
     card.append(h('div', { class: 'cr' },
       h('span', null, c.name),
-      h('span', { title: c.planned ? 'Обычно ' + money(c.avg, cur) + ', в плане окна ' + money(c.planned, cur) : '' },
-        money(c.planned ? c.free : c.avg, cur),
-        c.planned ? h('small', { class: 'muted' }, ' (в плане −' + money(c.planned, cur) + ')') : null),
+      h('span', null, money(c.avg, cur),
+        c.planned ? h('small', { class: 'muted', style: 'display:block' },
+          'в плане ' + money(c.planned, cur) + ' · свободно ' + money(c.free, cur)) : null),
       h('span', null, money(c.last, cur)),
       h('b', null, money(c.now, cur)),
       h('div', { class: 'bar2' }, h('i', { 'data-w': String(pct) }))));
   });
   return h('section', null,
     h('h2', null, 'Как обычно тратишь'),
-    h('div', { class: 'hint' }, 'Обычно — среднее за 14 дней по последним ' + avgDays + ' дням; если в окне уже есть плановые платежи этой категории, они вычтены. ', picker),
+    h('div', { class: 'hint' }, 'Обычно за 14 дн. — траты за последние ' + avgDays + ' дн., разделённые на ' + avgDays + ' и умноженные на 14. Редкие крупные платежи (аренда) размазаны по всему периоду, поэтому в одном окне фактическая сумма может быть больше. «Свободно» = обычно минус плановые платежи этой категории в текущем окне. ', picker),
     card);
 }
