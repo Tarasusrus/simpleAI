@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"simpleAI/internal/categories"
 )
 
 // Store предоставляет CRUD-операции для бюджетных данных.
@@ -61,6 +63,16 @@ func (s *Store) FindCategoryByName(ctx context.Context, name, typ string) (*Cate
 		return nil, fmt.Errorf("find category %q: %w", name, err)
 	}
 	return &c, nil
+}
+
+// GetOrCreateCategory — единая точка получения/создания категории (ADR-010): учитывает
+// регистр, пробелы и алиасы слитых категорий, безопасна при параллельных вызовах.
+func (s *Store) GetOrCreateCategory(ctx context.Context, name, typ string) (*Category, error) {
+	c, _, err := categories.NewStore(s.pool).GetOrCreate(ctx, name, typ)
+	if err != nil {
+		return nil, fmt.Errorf("get or create category %q: %w", name, err)
+	}
+	return &Category{ID: c.ID, Name: c.Name, Type: c.Type, Icon: c.Icon, SortOrder: c.SortOrder}, nil
 }
 
 // AddCategory создаёт пользовательскую категорию.

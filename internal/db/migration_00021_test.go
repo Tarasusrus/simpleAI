@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -47,7 +48,8 @@ func scratchDB(t *testing.T, version int64) *sql.DB {
 	if q := strings.Index(rest, "?"); q >= 0 {
 		query = rest[q:]
 	}
-	conn, err := sql.Open("pgx", adminURL[:idx+1]+name+query)
+	dsn := adminURL[:idx+1] + name + query
+	conn, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open scratch: %v", err)
 	}
@@ -60,8 +62,12 @@ func scratchDB(t *testing.T, version int64) *sql.DB {
 	if err := goose.UpToContext(context.Background(), conn, "migrations", version); err != nil {
 		t.Fatalf("migrate up to %d: %v", version, err)
 	}
+	scratchDSNs.Store(conn, dsn)
 	return conn
 }
+
+// scratchDSNs помнит строку подключения временной базы: тестам модуля категорий нужен pgxpool.
+var scratchDSNs sync.Map
 
 func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()

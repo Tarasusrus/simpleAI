@@ -37,12 +37,9 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 	}
 
 	if req.Category != "" {
-		cat, err := s.store.FindCategoryByName(ctx, req.Category, typ)
+		cat, err := s.store.GetOrCreateCategory(ctx, req.Category, typ)
 		if err != nil {
-			cat, err = s.store.AddCategory(ctx, req.Category, typ)
-			if err != nil {
-				return "", fmt.Errorf("create category: %w", err)
-			}
+			return "", fmt.Errorf("create category: %w", err)
 		}
 		t.CategoryID = &cat.ID
 		t.CategoryName = cat.Name
@@ -80,12 +77,9 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 		patch.Currency = strings.ToUpper(req.Currency)
 	}
 	if req.Category != "" {
-		cat, err := s.store.FindCategoryByName(ctx, req.Category, tx.Type)
+		cat, err := s.store.GetOrCreateCategory(ctx, req.Category, tx.Type)
 		if err != nil {
-			cat, err = s.store.AddCategory(ctx, req.Category, tx.Type)
-			if err != nil {
-				return "", fmt.Errorf("resolve category: %w", err)
-			}
+			return "", fmt.Errorf("resolve category: %w", err)
 		}
 		patch.CategoryID = &cat.ID
 	}
