@@ -36,13 +36,11 @@ func (s *BudgetSkill) addRecurring(ctx context.Context, req budgetInput) (string
 
 	var catID *uuid.UUID
 	if req.Category != "" {
-		cat, err := s.store.FindCategoryByName(ctx, req.Category, txType)
+		cat, err := s.store.GetOrCreateCategory(ctx, req.Category, txType)
 		if err != nil {
-			cat, err = s.store.AddCategory(ctx, req.Category, txType)
+			return "", fmt.Errorf("resolve category: %w", err)
 		}
-		if err == nil {
-			catID = &cat.ID
-		}
+		catID = &cat.ID
 	}
 
 	now := time.Now().UTC()

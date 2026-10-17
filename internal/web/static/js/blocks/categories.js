@@ -23,13 +23,15 @@ export function render(view, cur, ctx) {
     const pct = Math.round((c.now / max) * 100);
     card.append(h('div', { class: 'cr' },
       h('span', null, c.name),
-      h('span', null, money(c.avg, cur)),
+      h('span', { title: c.planned ? 'Обычно ' + money(c.avg, cur) + ', в плане окна ' + money(c.planned, cur) : '' },
+        money(c.planned ? c.free : c.avg, cur),
+        c.planned ? h('small', { class: 'muted' }, ' (в плане −' + money(c.planned, cur) + ')') : null),
       h('span', null, money(c.last, cur)),
       h('b', null, money(c.now, cur)),
       h('div', { class: 'bar2' }, h('i', { 'data-w': String(pct) }))));
   });
   return h('section', null,
     h('h2', null, 'Как обычно тратишь'),
-    h('div', { class: 'hint' }, 'Обычно — среднее за 14 дней по последним ' + avgDays + ' дням. ', picker),
+    h('div', { class: 'hint' }, 'Обычно — среднее за 14 дней по последним ' + avgDays + ' дням; если в окне уже есть плановые платежи этой категории, они вычтены. ', picker),
     card);
 }

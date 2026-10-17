@@ -228,3 +228,30 @@ func TestCategories_WindowBoundariesPairs(t *testing.T) {
 		t.Fatalf("границы: %+v; ждали Now=3000 (1000+2000) Last=24000 (8000+16000)", got)
 	}
 }
+
+func planCat(key, cat string, minor int64, d Date) Event {
+	e := payPlanned(key, "план "+key, minor, CurRUB, d, "")
+	e.Category = cat
+	return e
+}
+
+func TestCategories_PlannedSubtractedFromUsual(t *testing.T) {
+	ev := append(catEvents(),
+		planCat("p1", "Еда", 100_000, Date{2026, 10, 15}),         // в окне B: 1 000
+		planCat("p2", "Еда", 50_000, Date{2026, 10, 16}),          // в окне B: 500
+		planCat("p3", "Еда", 900_000, Date{2026, 12, 1}),          // вне окна — не считается
+		planCat("p4", "Транспорт", 9_900_000, Date{2026, 10, 15}), // больше обычного → Free = 0
+	)
+	got := cats(t, catWindows(), ev, Date{2026, 10, 14})
+	byName := map[string]CategoryRow{}
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+	f, tr := byName["Еда"], byName["Транспорт"]
+	if f.Planned != 1_500 || f.Free != f.Avg-1_500 {
+		t.Errorf("Еда: planned %d free %d avg %d", f.Planned, f.Free, f.Avg)
+	}
+	if tr.Planned != 99_000 || tr.Free != 0 {
+		t.Errorf("Транспорт: planned %d free %d", tr.Planned, tr.Free)
+	}
+}
