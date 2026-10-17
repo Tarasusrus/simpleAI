@@ -89,10 +89,18 @@ func (s *Server) curFrom(r *http.Request) plan.Currency {
 	return plan.CurRUB
 }
 
+// viewFor считает окно; ?past=1 показывает закончившееся последнее окно.
+func (s *Server) viewFor(r *http.Request, cur plan.Currency) (plan.Result, error) {
+	if r.URL.Query().Get("past") == "1" {
+		return s.planner.ViewPast(r.Context(), cur)
+	}
+	return s.planner.View(r.Context(), cur)
+}
+
 // respondView отдаёт обновлённый WindowView после команды.
 func (s *Server) respondView(w http.ResponseWriter, r *http.Request, status int) {
 	cur := s.curFrom(r)
-	res, err := s.planner.View(r.Context(), cur)
+	res, err := s.viewFor(r, cur)
 	if err != nil {
 		s.writeViewError(w, err)
 		return

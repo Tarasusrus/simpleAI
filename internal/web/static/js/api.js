@@ -36,7 +36,10 @@ async function call(method, path, payload) {
   return body;
 }
 
-const q = (cur) => '?cur=' + encodeURIComponent(cur);
+// past — показать закончившееся последнее окно вместо «нового окна ещё нет».
+let past = false;
+export const setPast = (v) => { past = v; };
+const q = (cur) => '?cur=' + encodeURIComponent(cur) + (past ? '&past=1' : '');
 
 export const getWindow = (cur) => call('GET', '/api/plan/window' + q(cur));
 export const getCategories = () => call('GET', '/api/plan/categories').then((b) => b.categories || []);

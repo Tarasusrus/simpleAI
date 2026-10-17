@@ -32,7 +32,9 @@ type MetaDTO struct {
 	RatesManual bool   `json:"ratesManual"`
 	HasRate     bool   `json:"hasRate"`
 	// Rate — рублей за бат, для поля на экране; 0, если курса нет.
-	Rate    float64 `json:"rate"`
+	Rate float64 `json:"rate"`
+	// LastEnd — конец закончившегося последнего окна, когда нового нет; иначе null.
+	LastEnd *string `json:"lastEnd"`
 	Skipped int     `json:"skipped"`
 }
 
@@ -120,7 +122,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		V: WindowViewVersion,
 		Meta: MetaDTO{
 			Today: dateStr(res.Meta.Today), Cur: string(cur),
-			RatesManual: res.Meta.RatesManual, HasRate: res.Meta.HasRate, Rate: float64(res.Meta.RubPerThbMicro) / 1_000_000, Skipped: res.Meta.Skipped,
+			RatesManual: res.Meta.RatesManual, HasRate: res.Meta.HasRate, Rate: float64(res.Meta.RubPerThbMicro) / 1_000_000, LastEnd: datePtr(res.Meta.LastEnd), Skipped: res.Meta.Skipped,
 		},
 		State: string(v.State),
 		KPI: KPIDTO{

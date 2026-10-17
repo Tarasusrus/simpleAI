@@ -29,6 +29,9 @@ type Meta struct {
 	HasRate     bool
 	// RubPerThbMicro — действующий курс бата, 0 если курса нет.
 	RubPerThbMicro int64
+	// LastEnd — конец последнего окна, когда оно закончилось, а нового нет (State=ended
+	// без окна в View). Иначе nil.
+	LastEnd *Date
 	// Skipped — записи, не вошедшие в план (чужая валюта, поступление без даты).
 	Skipped int
 }
@@ -110,8 +113,19 @@ func (st state) focus() (idx int, asOf Date, upcoming bool) {
 	}
 }
 
-// View считает окно, которое видит владелец, в валюте показа cur.
+// View считает окно, которое видит владелец, в валюте показа cur. Если последнее
+// окно закончилось, а нового нет, показывается не оно, а «нового окна ещё нет»:
+// владелец планирует будущее, и прошлые траты ему по умолчанию не нужны.
 func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
+	return s.view(ctx, cur, false)
+}
+
+// ViewPast — то же, но закончившееся последнее окно показывается как есть.
+func (s *Service) ViewPast(ctx context.Context, cur Currency) (Result, error) {
+	return s.view(ctx, cur, true)
+}
+
+func (s *Service) view(ctx context.Context, cur Currency, showPast bool) (Result, error) {
 	ld, err := s.load(ctx)
 	if err != nil {
 		return Result{}, err
@@ -120,8 +134,15 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 	if ld.st.Kind == StateBetween {
 		_, asOf, upcoming = ld.focus()
 	}
+	windows := ld.windows
+	var lastEnd *Date
+	if ld.st.Kind == StateEnded && !showPast {
+		end := ld.windows[ld.st.Index].End()
+		lastEnd = &end
+		windows = nil
+	}
 	v, err := Compute(ComputeInput{
-		Windows:    ld.windows,
+		Windows:    windows,
 		Events:     ld.events,
 		Rate:       ld.snap.Rate,
 		Cur:        cur,
@@ -134,12 +155,15 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 	if upcoming {
 		v.State = StateUpcoming
 	}
+	if lastEnd != nil {
+		v.State = StateEnded
+	}
 	if err := checkInvariant(v); err != nil {
 		return Result{}, err
 	}
 	return Result{
 		View: v,
-		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, RubPerThbMicro: rateMicro(ld.snap.Rate), Skipped: ld.snap.Skipped},
+		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, RubPerThbMicro: rateMicro(ld.snap.Rate), LastEnd: lastEnd, Skipped: ld.snap.Skipped},
 	}, nil
 }
 
