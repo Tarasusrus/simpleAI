@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -45,8 +45,27 @@ async function once(run, fallback) {
   try { draw(await run()); } catch (e) { alert(e.message || fallback); } finally { busy = false; }
 }
 
+// Поле «Курс ฿→₽»: показывает действующий курс, по уходу из поля сохраняет новый.
+// Пустое поле или то же число — ничего не отправляем.
+function drawRate(view) {
+  const rateBox = document.getElementById('rate');
+  const input = h('input', {
+    type: 'number', step: '0.01', min: '0', inputmode: 'decimal', class: 'sm',
+    placeholder: view.meta.hasRate ? '' : 'нет курса',
+    title: view.meta.ratesManual ? 'Курс задан вручную' : 'Курс обновляется автоматически, пока не задан вручную',
+  });
+  input.value = view.meta.rate > 0 ? String(view.meta.rate) : '';
+  input.addEventListener('change', () => {
+    const v = input.value.trim().replace(',', '.');
+    if (v === '' || Number(v) === view.meta.rate) return;
+    once(() => setRate(cur, v), 'Не удалось сохранить курс.');
+  });
+  rateBox.replaceChildren('Курс ฿→₽ ', input);
+}
+
 function draw(view) {
   lastView = view;
+  drawRate(view);
   const nodes = blocks.map((b) => b.render(view, view.meta.cur, ctx));
   if (view.meta.skipped > 0) {
     nodes.push(h('div', { class: 'hint' }, 'Не учтено записей: ' + view.meta.skipped + ' (валюта не бат и не рубль или поступление без даты).'));

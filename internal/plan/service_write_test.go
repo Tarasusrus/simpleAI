@@ -12,6 +12,7 @@ type fakeWriter struct {
 	deleted []string
 	settled []settleCall
 	skipped []string
+	rates   []int64
 	err     error
 }
 
@@ -39,6 +40,11 @@ func (f *fakeWriter) SettlePlanned(_ context.Context, _ Scope, id string, actual
 
 func (f *fakeWriter) SkipTerm(_ context.Context, _ Scope, ruleID string, term Date) error {
 	f.skipped = append(f.skipped, ruleID+"@"+term.String())
+	return f.err
+}
+
+func (f *fakeWriter) SetRate(_ context.Context, micro int64) error {
+	f.rates = append(f.rates, micro)
 	return f.err
 }
 
@@ -306,5 +312,34 @@ func TestParseDate(t *testing.T) {
 		if _, err := ParseDate(in); !errors.Is(err, ErrBadDate) {
 			t.Errorf("%q: %v", in, err)
 		}
+	}
+}
+
+func TestService_SetRate(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10))
+	ctx := context.Background()
+	if err := s.SetRate(ctx, 2_500_000); err != nil || w.rates[0] != 2_500_000 {
+		t.Fatalf("%v %v", err, w.rates)
+	}
+	for _, bad := range []int64{0, -1, maxRateMicro + 1} {
+		if err := s.SetRate(ctx, bad); !errors.Is(err, ErrBadRate) {
+			t.Errorf("%d: %v", bad, err)
+		}
+	}
+	if len(w.rates) != 1 {
+		t.Errorf("плохой курс дошёл до писателя: %v", w.rates)
+	}
+	if err := svc(&fakeReader{snap: baseSnap()}, d(2026, 3, 10)).SetRate(ctx, 2_500_000); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("без писателя: %v", err)
+	}
+}
+
+func TestService_ViewReportsRate(t *testing.T) {
+	snap := baseSnap()
+	snap.Rate = &Rate{RubPerThbMicro: 2_650_000}
+	res, err := svc(&fakeReader{snap: snap}, d(2026, 3, 10)).View(context.Background(), CurRUB)
+	if err != nil || res.Meta.RubPerThbMicro != 2_650_000 {
+		t.Errorf("%v %d", err, res.Meta.RubPerThbMicro)
 	}
 }

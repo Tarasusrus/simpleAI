@@ -100,6 +100,8 @@ type Writer interface {
 	SettlePlanned(ctx context.Context, sc Scope, id string, actual *Money, date Date) error
 	// SkipTerm добавляет срок правила повтора в пропущенные; чужое правило — ErrNotFound.
 	SkipTerm(ctx context.Context, sc Scope, ruleID string, term Date) error
+	// SetRate задаёт ручной курс «рублей за бат» в микроединицах.
+	SetRate(ctx context.Context, rubPerThbMicro int64) error
 	// ExpenseCategories — названия категорий расходов для выбора в форме.
 	ExpenseCategories(ctx context.Context) ([]string, error)
 }

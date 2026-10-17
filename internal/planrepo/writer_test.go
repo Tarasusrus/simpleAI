@@ -24,6 +24,9 @@ type fakeSink struct {
 	settleErr   error
 	skipCalls   []skipCall
 	skipOK      bool
+
+	rateCur string
+	rateVal float64
 }
 
 type settleCall struct {
@@ -58,6 +61,11 @@ func (f *fakeSink) SettlePlanItem(_ context.Context, ids []int64, id uuid.UUID, 
 func (f *fakeSink) SkipRecurringTerm(_ context.Context, ids []int64, id uuid.UUID, term time.Time) (bool, error) {
 	f.skipCalls = append(f.skipCalls, skipCall{ids, id, term})
 	return f.skipOK, nil
+}
+
+func (f *fakeSink) SetManualRate(_ context.Context, cur string, v float64) error {
+	f.rateCur, f.rateVal = cur, v
+	return nil
 }
 
 func (f *fakeSink) ExpenseCategoryNames(context.Context) ([]string, error) {
@@ -214,5 +222,19 @@ func TestSkipTerm_BadIDAndEmptyScope(t *testing.T) {
 	}
 	if len(f.skipCalls) != 0 {
 		t.Errorf("до хранилища дошло %d вызовов", len(f.skipCalls))
+	}
+}
+
+func TestSetRate_ConvertsMicroToRublesPerBaht(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	if err := w.SetRate(context.Background(), 2_650_000); err != nil {
+		t.Fatal(err)
+	}
+	if f.rateCur != "THB" || f.rateVal != 2.65 {
+		t.Errorf("в хранилище ушло %s %v", f.rateCur, f.rateVal)
+	}
+	if err := w.SetRate(context.Background(), 0); !errors.Is(err, plan.ErrBadRate) {
+		t.Errorf("нулевой курс: %v", err)
 	}
 }

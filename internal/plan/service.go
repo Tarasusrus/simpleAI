@@ -27,6 +27,8 @@ type Meta struct {
 	Today       Date
 	RatesManual bool
 	HasRate     bool
+	// RubPerThbMicro — действующий курс бата, 0 если курса нет.
+	RubPerThbMicro int64
 	// Skipped — записи, не вошедшие в план (чужая валюта, поступление без даты).
 	Skipped int
 }
@@ -137,8 +139,30 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 	}
 	return Result{
 		View: v,
-		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, Skipped: ld.snap.Skipped},
+		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, RubPerThbMicro: rateMicro(ld.snap.Rate), Skipped: ld.snap.Skipped},
 	}, nil
+}
+
+func rateMicro(r *Rate) int64 {
+	if r == nil {
+		return 0
+	}
+	return r.RubPerThbMicro
+}
+
+// maxRateMicro — потолок ручного курса: 1000 ₽ за бат. Опечатка вроде 25 вместо 2,5
+// ещё проходит, а 25000 — нет.
+const maxRateMicro = 1_000 * 1_000_000
+
+// SetRate задаёт ручной курс «рублей за бат» (микроединицы: 2,5 ₽ = 2_500_000).
+func (s *Service) SetRate(ctx context.Context, rubPerThbMicro int64) error {
+	if err := s.canWrite(); err != nil {
+		return err
+	}
+	if rubPerThbMicro <= 0 || rubPerThbMicro > maxRateMicro {
+		return ErrBadRate
+	}
+	return s.writer.SetRate(ctx, rubPerThbMicro)
 }
 
 // dropCoveredTerms убирает плановые сроки правил, для которых уже есть факт:

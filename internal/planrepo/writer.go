@@ -17,6 +17,7 @@ type Sink interface {
 	DeletePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID) (bool, error)
 	SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, actual *budget.PlanAmount, date time.Time) (bool, error)
 	SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID uuid.UUID, term time.Time) (bool, error)
+	SetManualRate(ctx context.Context, currency string, rateToRUB float64) error
 	ExpenseCategoryNames(ctx context.Context) ([]string, error)
 }
 
@@ -127,6 +128,15 @@ func (w *Writer) SkipTerm(ctx context.Context, sc plan.Scope, ruleID string, ter
 		return plan.ErrNotFound
 	}
 	return nil
+}
+
+// SetRate пишет ручной курс бата тем же способом, что команда бота «курс»: один
+// источник курса для бота и экрана.
+func (w *Writer) SetRate(ctx context.Context, rubPerThbMicro int64) error {
+	if rubPerThbMicro <= 0 {
+		return plan.ErrBadRate
+	}
+	return w.sink.SetManualRate(ctx, string(plan.CurTHB), float64(rubPerThbMicro)/1_000_000)
 }
 
 func (w *Writer) ExpenseCategories(ctx context.Context) ([]string, error) {
