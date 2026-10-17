@@ -56,8 +56,9 @@ func (r capturedRequest) userParts(t *testing.T) []contentPart {
 
 type visionServer struct {
 	*httptest.Server
-	calls atomic.Int32
-	last  atomic.Pointer[capturedRequest]
+	calls     atomic.Int32
+	last      atomic.Pointer[capturedRequest]
+	redaction atomic.Value // заголовок x-litellm-enable-message-redaction
 }
 
 func newVisionServer(t *testing.T, status int, reply string) *visionServer {
@@ -65,6 +66,7 @@ func newVisionServer(t *testing.T, status int, reply string) *visionServer {
 	s := &visionServer{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.calls.Add(1)
+		s.redaction.Store(r.Header.Get("x-litellm-enable-message-redaction"))
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
@@ -132,6 +134,9 @@ func TestAskVision_SendsImageAsDataURLToRequestedModel(t *testing.T) {
 		t.Fatalf("reply = %q", got)
 	}
 
+	if got, ok := s.redaction.Load().(string); !ok || got != "true" {
+		t.Errorf("x-litellm-enable-message-redaction = %q, want true: photo must not reach proxy logs", got)
+	}
 	req := s.lastRequest(t)
 	if req.Model != "vision" {
 		t.Errorf("model = %q, want vision", req.Model)

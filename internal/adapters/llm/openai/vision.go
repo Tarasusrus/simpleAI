@@ -32,6 +32,10 @@ func NewVisionClient(baseURL, apiKey string, timeout time.Duration) (*VisionClie
 		option.WithBaseURL(baseURL),
 		option.WithAPIKey(apiKey),
 		option.WithMaxRetries(0),
+		// Фото чека — личные данные: прокси не пишет сообщения в Langfuse и
+		// spend logs. Второй слой поверх флага на деплойментах маршрута vision
+		// (litellm-free-models ADR-0001 §6).
+		option.WithHeader("x-litellm-enable-message-redaction", "true"),
 	)
 	return &VisionClient{api: api, timeout: timeout}, nil
 }
