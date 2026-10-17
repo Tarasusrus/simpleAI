@@ -1,0 +1,82 @@
+{
+  "data": [
+    {
+      "model_name": "standard",
+      "litellm_params": {
+        "model": "gemini/gemini-3.5-flash-lite"
+      },
+      "model_info": {
+        "id": "deployment-0",
+        "mode": "chat",
+        "litellm_provider": "gemini",
+        "supports_vision": true,
+        "supports_pdf_input": true
+      }
+    },
+    {
+      "model_name": "standard",
+      "litellm_params": {
+        "model": "groq/openai/gpt-oss-120b"
+      },
+      "model_info": {
+        "id": "deployment-1",
+        "mode": "chat",
+        "litellm_provider": "groq",
+        "supports_vision": null,
+        "supports_pdf_input": null
+      }
+    },
+    {
+      "model_name": "standard",
+      "litellm_params": {
+        "model": "gemini/lyria-3-clip-preview"
+      },
+      "model_info": {
+        "id": "deployment-2",
+        "mode": "chat",
+        "litellm_provider": "gemini",
+        "supports_vision": false,
+        "supports_pdf_input": null
+      }
+    },
+    {
+      "model_name": "vision",
+      "litellm_params": {
+        "model": "gemini/gemini-3.5-flash-lite"
+      },
+      "model_info": {
+        "id": "deployment-3",
+        "mode": "chat",
+        "litellm_provider": "gemini",
+        "supports_vision": true,
+        "supports_pdf_input": true
+      }
+    },
+    {
+      "model_name": "vision",
+      "litellm_params": {
+        "model": "gemini/gemini-3.1-flash-lite"
+      },
+      "model_info": {
+        "id": "deployment-4",
+        "mode": "chat",
+        "litellm_provider": "gemini",
+        "supports_vision": true,
+        "supports_pdf_input": true
+      }
+    },
+    {
+      "model_name": "gemini-3.5-flash-lite",
+      "litellm_params": {
+        "model": "gemini/gemini-3.5-flash-lite"
+      },
+      "model_info": {
+        "id": "deployment-5",
+        "mode": "chat",
+        "litellm_provider": "gemini",
+        "supports_vision": true,
+        "supports_pdf_input": true
+      }
+    }
+  ]
+}
