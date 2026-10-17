@@ -20,7 +20,10 @@ export class ApiError extends Error {
 }
 
 async function call(method, path, payload) {
-  const headers = { Authorization: 'Bearer ' + token() };
+  // Без токена заголовок не шлём: за nginx с логином браузер сам подставит Basic-доступ,
+  // а токен nginx добавит на своей стороне.
+  const headers = {};
+  if (token()) headers.Authorization = 'Bearer ' + token();
   const init = { method, headers };
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
