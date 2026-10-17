@@ -13,7 +13,6 @@ import (
 	"simpleAI/internal/plugin"
 )
 
-
 // advisorStore — узкий интерфейс store-зависимостей AdvisorSkill (для тестируемости).
 type advisorStore interface {
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)

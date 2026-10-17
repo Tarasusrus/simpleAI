@@ -14,10 +14,10 @@ import (
 )
 
 type stubLLM struct {
-	ask     func(ctx context.Context, prompt string) (string, error)
-	askSys  func(ctx context.Context, sys, user string) (string, error)
-	embed   func(ctx context.Context, in []string) ([][]float32, error)
-	calls   int
+	ask    func(ctx context.Context, prompt string) (string, error)
+	askSys func(ctx context.Context, sys, user string) (string, error)
+	embed  func(ctx context.Context, in []string) ([][]float32, error)
+	calls  int
 }
 
 func (s *stubLLM) Ask(ctx context.Context, p string) (string, error) {

@@ -50,16 +50,18 @@ type WindowDTO struct {
 }
 
 type KPIDTO struct {
-	CanSpend       int64  `json:"canSpend"`
-	PerDay         *int64 `json:"perDay"`
-	Payments       int64  `json:"payments"`
-	Spent          int64  `json:"spent"`
-	Reserve        int64  `json:"reserve"`
-	Received       int64  `json:"received"`
-	ExpectedIncome int64  `json:"expectedIncome"`
-	Unpriced       int    `json:"unpriced"`
-	UndatedCount   int    `json:"undatedCount"`
-	UndatedSum     int64  `json:"undatedSum"`
+	CanSpend        int64   `json:"canSpend"`
+	PerDay          *int64  `json:"perDay"`
+	Payments        int64   `json:"payments"`
+	Spent           int64   `json:"spent"`
+	SpentBefore     int64   `json:"spentBefore"`
+	SpentBeforeFrom *string `json:"spentBeforeFrom"`
+	Reserve         int64   `json:"reserve"`
+	Received        int64   `json:"received"`
+	ExpectedIncome  int64   `json:"expectedIncome"`
+	Unpriced        int     `json:"unpriced"`
+	UndatedCount    int     `json:"undatedCount"`
+	UndatedSum      int64   `json:"undatedSum"`
 }
 
 type RowDTO struct {
@@ -133,7 +135,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		},
 		State: string(v.State),
 		KPI: KPIDTO{
-			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, Reserve: v.Reserve,
+			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, Reserve: v.Reserve,
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
 		},

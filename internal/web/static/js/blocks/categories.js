@@ -23,14 +23,13 @@ export function render(view, cur, ctx) {
     const pct = Math.round((c.now / max) * 100);
     card.append(h('div', { class: 'cr' },
       h('span', null, c.name),
-      h('span', null, money(c.avg, cur)),
+      h('span', { title: c.planned ? 'Обычно ' + money(c.avg, cur) + ' минус плановые платежи категории в окне ' + money(c.planned, cur) : '' }, money(c.free, cur)),
       h('span', null, money(c.last, cur)),
       h('b', null, money(c.now, cur)),
-      c.planned ? h('div', { class: 'note' }, 'в плане ' + money(c.planned, cur) + ' · свободно ' + money(c.free, cur)) : null,
       h('div', { class: 'bar2' }, h('i', { 'data-w': String(pct) }))));
   });
   return h('section', null,
     h('h2', null, 'Как обычно тратишь'),
-    h('div', { class: 'hint' }, 'Обычно — траты за последние ' + avgDays + ' дн., пересчитанные на 14 дней, без обязательных платежей (аренда, кредит, подписки). «Свободно» = обычно минус плановые платежи категории в этом окне. ', picker),
+    h('div', { class: 'hint' }, 'Обычно — траты за последние ' + avgDays + ' дн., пересчитанные на 14 дней, без обязательных платежей (аренда, кредит, подписки). Из обычного вычтены плановые платежи этой категории в текущем окне. ', picker),
     card);
 }

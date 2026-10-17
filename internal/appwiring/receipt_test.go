@@ -3,11 +3,11 @@ package appwiring
 import (
 	"bytes"
 	"context"
-	"sync"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +18,7 @@ import (
 
 type budgetStub struct{}
 
-func (budgetStub) Manifest() plugin.Manifest                    { return plugin.Manifest{ID: "budget"} }
+func (budgetStub) Manifest() plugin.Manifest                   { return plugin.Manifest{ID: "budget"} }
 func (budgetStub) Run(context.Context, string) (string, error) { return "", nil }
 
 type noCategories struct{}

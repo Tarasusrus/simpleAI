@@ -257,6 +257,9 @@ func (c calc) core() (View, error) {
 			}
 		}
 	}
+	if v.SpentBefore, v.SpentBeforeFrom, err = c.spentBeforeWindow(); err != nil {
+		return View{}, err
+	}
 	income, err := addI64(v.Income.Received, v.Income.Expected)
 	if err != nil {
 		return View{}, err
@@ -297,4 +300,47 @@ func addI64(a, b int64) (int64, error) {
 		return 0, ErrOverflow
 	}
 	return a + b, nil
+}
+
+// spentBeforeWindow — траты в зазоре между предыдущим окном и ещё не начавшимся описываемым:
+// они не входят ни в одно окно и без этой суммы пропадали бы с экрана. from — первый день зазора.
+func (c calc) spentBeforeWindow() (int64, *Date, error) {
+	if c.st.Kind == StateNone {
+		return 0, nil, nil
+	}
+	var prevEnd *Date
+	switch {
+	case c.st.Kind == StateBetween:
+		// Описано закончившееся окно: зазор идёт после него до сегодня.
+		e := c.w.End()
+		prevEnd = &e
+	case c.in.Today.Compare(c.w.Start) < 0:
+		for i, w := range c.in.Windows {
+			if w.Start == c.w.Start && i > 0 {
+				e := c.in.Windows[i-1].End()
+				prevEnd = &e
+			}
+		}
+	}
+	if prevEnd == nil {
+		return 0, nil, nil
+	}
+	from := prevEnd.AddDays(1)
+	var sum int64
+	for _, e := range c.in.Events {
+		if e.Kind != KindPayment || e.State != StateDone || e.Date == nil || e.Amount == nil {
+			continue
+		}
+		if e.Date.Compare(*prevEnd) <= 0 || e.Date.Compare(c.in.Today) > 0 || (c.st.Kind != StateBetween && e.Date.Compare(c.w.Start) >= 0) {
+			continue
+		}
+		n, err := c.money(e.Amount)
+		if err != nil {
+			return 0, nil, err
+		}
+		if sum, err = addI64(sum, n); err != nil {
+			return 0, nil, err
+		}
+	}
+	return sum, &from, nil
 }

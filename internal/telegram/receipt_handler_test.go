@@ -19,7 +19,7 @@ import (
 // buttonBot — core.Bot с кнопками: запоминает правки сообщения черновика.
 type buttonBot struct {
 	captureBot
-	mu    sync.Mutex
+	mu     sync.Mutex
 	edits  []string
 	rows   [][][]core.Button
 	typing atomic.Int32

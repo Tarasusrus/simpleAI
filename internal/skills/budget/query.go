@@ -70,7 +70,7 @@ func NormalizeBudgetInput(req budgetInput, chatID int64) (TransactionQuery, erro
 		p := parsePeriod(req.Period)
 		dateRange = &budget.DateRange{From: p.From, To: p.To}
 
-	// req.Period == "" && нет дат → DateRange = nil = all time
+		// req.Period == "" && нет дат → DateRange = nil = all time
 	}
 
 	f := budget.TransactionFilter{
