@@ -288,3 +288,59 @@ func TestSkipRecurringTerm(t *testing.T) {
 		t.Errorf("чужое правило: %v %v", ok, err)
 	}
 }
+
+// Перенос планового расхода: в окно, на дату, обратно «без даты»; чужой чат,
+// закрытая запись и поступление не переносятся; дата и окно вместе отвергаются.
+//
+// Мутация: убрать NOT settled, direction = 'expense' или фильтр chat_id — тест краснеет.
+func TestMovePlanItem(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	own, foreign, settled, income := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	for _, r := range []struct {
+		id      uuid.UUID
+		chat    int64
+		dir     string
+		settled bool
+	}{{own, planStoreChat, "expense", false}, {foreign, planStoreChat - 1, "expense", false},
+		{settled, planStoreChat, "expense", true}, {income, planStoreChat, "income", false}} {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO budget_planned_expense (id, chat_id, direction, description, amount, currency, settled)
+			VALUES ($1, $2, $3, 'plan-store-test', 100, 'THB', $4)`, r.id, r.chat, r.dir, r.settled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := []int64{planStoreChat}
+	day := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	read := func(id uuid.UUID) (due, win *time.Time) {
+		if err := s.pool.QueryRow(ctx, `SELECT due_date, window_start FROM budget_planned_expense WHERE id = $1`, id).Scan(&due, &win); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if ok, err := s.MovePlanItem(ctx, scope, own, nil, &day); err != nil || !ok {
+		t.Fatalf("в окно: %v %v", ok, err)
+	}
+	if due, win := read(own); due != nil || win == nil || !win.Equal(day) {
+		t.Errorf("в окно: due=%v window=%v", due, win)
+	}
+	if ok, err := s.MovePlanItem(ctx, scope, own, &day, nil); err != nil || !ok {
+		t.Fatalf("на дату: %v %v", ok, err)
+	}
+	if due, win := read(own); win != nil || due == nil || !due.Equal(day) {
+		t.Errorf("на дату должно очистить окно: due=%v window=%v", due, win)
+	}
+	if ok, err := s.MovePlanItem(ctx, scope, own, nil, nil); err != nil || !ok {
+		t.Fatalf("без даты: %v %v", ok, err)
+	}
+	if due, win := read(own); due != nil || win != nil {
+		t.Errorf("без даты: due=%v window=%v", due, win)
+	}
+	for name, id := range map[string]uuid.UUID{"чужой чат": foreign, "закрытая": settled, "поступление": income} {
+		if ok, err := s.MovePlanItem(ctx, scope, id, &day, nil); ok || err != nil {
+			t.Errorf("%s перенесена: %v %v", name, ok, err)
+		}
+	}
+	if _, err := s.MovePlanItem(ctx, scope, own, &day, &day); err == nil {
+		t.Error("дата и окно вместе приняты")
+	}
+}

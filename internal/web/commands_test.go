@@ -269,3 +269,40 @@ func TestRate(t *testing.T) {
 		t.Errorf("лог: %s", logs.String())
 	}
 }
+
+func TestMove(t *testing.T) {
+	p := &fakePlanner{}
+	s, logs := newServer(t, p)
+	if rec := post(s, "/api/plan/item/planned:abc/move", "application/json", `{"window":"next"}`, goodToken); rec.Code != http.StatusOK ||
+		p.moved[0] != "planned:abc" || p.moves[0].Window != plan.WindowNext || p.moves[0].Date != nil {
+		t.Fatalf("в окно: %d %+v", rec.Code, p.moves)
+	}
+	if rec := post(s, "/api/plan/item/planned:abc/move", "application/json", `{"date":"2026-11-05"}`, goodToken); rec.Code != http.StatusOK ||
+		p.moves[1].Date == nil || *p.moves[1].Date != (plan.Date{Year: 2026, Month: 11, Day: 5}) {
+		t.Fatalf("на дату: %d %+v", rec.Code, p.moves)
+	}
+	if rec := post(s, "/api/plan/item/planned:abc/move", "application/json", `{}`, goodToken); rec.Code != http.StatusOK ||
+		p.moves[2].Date != nil || p.moves[2].Window != plan.WindowNone {
+		t.Fatalf("без даты: %d %+v", rec.Code, p.moves)
+	}
+	if rec := post(s, "/api/plan/item/planned:abc/move", "application/json", `{"date":"05.11.2026"}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("кривая дата: %d", rec.Code)
+	}
+	if len(p.moved) != 3 {
+		t.Errorf("кривая дата дошла до сервиса: %v", p.moved)
+	}
+	if c := post(s, "/api/plan/item/planned:abc/move", "", `{}`, goodToken).Code; c != http.StatusUnsupportedMediaType {
+		t.Errorf("без Content-Type: %d", c)
+	}
+	p.cmdErr = plan.ErrNoWindow
+	if c := post(s, "/api/plan/item/planned:abc/move", "application/json", `{"window":"current"}`, goodToken).Code; c != http.StatusBadRequest {
+		t.Errorf("нет окна: %d", c)
+	}
+	p.cmdErr = plan.ErrNotFound
+	if c := post(s, "/api/plan/item/planned:abc/move", "application/json", `{}`, goodToken).Code; c != http.StatusNotFound {
+		t.Errorf("нет записи: %d", c)
+	}
+	if !strings.Contains(logs.String(), "command=move") {
+		t.Errorf("лог: %s", logs.String())
+	}
+}

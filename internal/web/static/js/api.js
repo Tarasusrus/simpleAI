@@ -44,5 +44,6 @@ export const addIncome = (cur, body) => call('POST', '/api/plan/income' + q(cur)
 export const addPayment = (cur, body) => call('POST', '/api/plan/payment' + q(cur), body);
 export const deleteItem = (cur, key) => call('DELETE', '/api/plan/item/' + encodeURIComponent(key) + q(cur));
 export const setRate = (cur, rate) => call('POST', '/api/plan/rate' + q(cur), { rate });
+export const moveItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/move' + q(cur), body);
 export const settleItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/done' + q(cur), body);
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));

@@ -200,6 +200,36 @@ func (s *Server) handleDone(w http.ResponseWriter, r *http.Request) {
 	s.respondView(w, r, http.StatusOK)
 }
 
+type moveBody struct {
+	Date   string `json:"date"`
+	Window string `json:"window"`
+}
+
+// handleMove: POST /api/plan/item/{key}/move — перенести плановый платёж: на дату,
+// в текущее/следующее окно или в «без даты» (пустое тело).
+func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
+	var b moveBody
+	if !decode(w, r, &b) {
+		return
+	}
+	in := plan.MoveInput{Window: plan.WindowChoice(b.Window)}
+	if strings.TrimSpace(b.Date) != "" {
+		d, err := plan.ParseDate(b.Date)
+		if err != nil {
+			s.writeCommandError(w, err)
+			return
+		}
+		in.Date = &d
+	}
+	key := r.PathValue("key")
+	if err := s.planner.Move(r.Context(), key, in); err != nil {
+		s.writeCommandError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "move", "id", key, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
 // handleSkip: POST /api/plan/item/{key}/skip — пропустить этот срок повтора.
 func (s *Server) handleSkip(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")

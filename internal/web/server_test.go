@@ -30,6 +30,8 @@ type fakePlanner struct {
 	actuals  []*plan.Money
 	skipped  []string
 	rates    []int64
+	moved    []string
+	moves    []plan.MoveInput
 }
 
 func (f *fakePlanner) SetRate(_ context.Context, micro int64) error {
@@ -40,6 +42,12 @@ func (f *fakePlanner) SetRate(_ context.Context, micro int64) error {
 func (f *fakePlanner) Settle(_ context.Context, key string, actual *plan.Money) error {
 	f.settled = append(f.settled, key)
 	f.actuals = append(f.actuals, actual)
+	return f.cmdErr
+}
+
+func (f *fakePlanner) Move(_ context.Context, key string, in plan.MoveInput) error {
+	f.moved = append(f.moved, key)
+	f.moves = append(f.moves, in)
 	return f.cmdErr
 }
 

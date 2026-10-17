@@ -248,36 +248,73 @@ func (s *Service) AddIncome(ctx context.Context, in AddIncomeInput) (string, err
 	return s.writer.AddPlanned(ctx, s.scope, n)
 }
 
+// placement превращает выбор «дата / в окно / без даты» в то, что хранится: дату или
+// дату начала окна. «В окно» без подходящего окна — ErrNoWindow.
+func (s *Service) placement(ctx context.Context, date *Date, w WindowChoice) (*Date, *Date, error) {
+	switch w {
+	case WindowNone:
+		return date, nil, nil
+	case WindowCurrent, WindowNext:
+		if date != nil {
+			return nil, nil, fmt.Errorf("%w: дата и окно вместе", ErrInvalidEvent)
+		}
+		ld, err := s.load(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		ws, err := ld.chosenWindowStart(w)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, &ws, nil
+	default:
+		return nil, nil, fmt.Errorf("%w: неизвестный выбор окна %q", ErrInvalidEvent, w)
+	}
+}
+
 // AddPayment сохраняет плановый платёж. «В окно» превращается в дату начала
 // выбранного окна; если такого окна нет — ErrNoWindow.
 func (s *Service) AddPayment(ctx context.Context, in AddPaymentInput) (string, error) {
 	if err := s.canWrite(); err != nil {
 		return "", err
 	}
-	n := NewItem{Kind: KindPayment, Name: in.Name, Amount: in.Amount, Date: in.Date, Category: strings.TrimSpace(in.Category)}
-	switch in.Window {
-	case WindowNone:
-	case WindowCurrent, WindowNext:
-		if in.Date != nil {
-			return "", fmt.Errorf("%w: дата и окно вместе", ErrInvalidEvent)
-		}
-		ld, err := s.load(ctx)
-		if err != nil {
-			return "", err
-		}
-		ws, err := ld.chosenWindowStart(in.Window)
-		if err != nil {
-			return "", err
-		}
-		n.WindowStart = &ws
-	default:
-		return "", fmt.Errorf("%w: неизвестный выбор окна %q", ErrInvalidEvent, in.Window)
+	date, ws, err := s.placement(ctx, in.Date, in.Window)
+	if err != nil {
+		return "", err
 	}
+	n := NewItem{Kind: KindPayment, Name: in.Name, Amount: in.Amount, Date: date, WindowStart: ws, Category: strings.TrimSpace(in.Category)}
 	if err := n.Validate(); err != nil {
 		return "", err
 	}
 	n.Name = strings.TrimSpace(n.Name)
 	return s.writer.AddPlanned(ctx, s.scope, n)
+}
+
+// MoveInput — куда перенести плановый платёж: на дату, в окно, либо «без даты»
+// (ничего не задано).
+type MoveInput struct {
+	Date   *Date
+	Window WindowChoice
+}
+
+// Move переносит плановый платёж (ключ "planned:<id>") в текущее или следующее окно,
+// на дату или обратно в «без даты».
+func (s *Service) Move(ctx context.Context, key string, in MoveInput) error {
+	if err := s.canWrite(); err != nil {
+		return err
+	}
+	id, ok := strings.CutPrefix(key, "planned:")
+	if !ok {
+		return fmt.Errorf("%w: переносить можно только плановый платёж", ErrInvalidEvent)
+	}
+	if in.Date != nil && !in.Date.Valid() {
+		return fmt.Errorf("%w: %v", ErrBadDate, *in.Date)
+	}
+	date, ws, err := s.placement(ctx, in.Date, in.Window)
+	if err != nil {
+		return err
+	}
+	return s.writer.MovePlanned(ctx, s.scope, id, date, ws)
 }
 
 // chosenWindowStart — дата, по которой платёж привяжется к окну. Для «следующего»,

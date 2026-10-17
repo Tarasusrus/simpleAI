@@ -94,6 +94,9 @@ type Writer interface {
 	AddPlanned(ctx context.Context, sc Scope, n NewItem) (string, error)
 	// DeletePlanned удаляет плановую запись; чужой чат или нет записи — ErrNotFound.
 	DeletePlanned(ctx context.Context, sc Scope, id string) error
+	// MovePlanned переносит плановый платёж: Date или WindowStart, либо оба nil —
+	// «без даты». Нет записи, она закрыта или это поступление — ErrNotFound.
+	MovePlanned(ctx context.Context, sc Scope, id string, date, windowStart *Date) error
 	// SettlePlanned закрывает плановую запись фактом на дату date. actual задаёт
 	// сумму, если у записи её не было, и заменяет плановую, если задана. Нет записи
 	// или она уже закрыта — ErrNotFound.

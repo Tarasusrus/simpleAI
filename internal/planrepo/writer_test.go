@@ -25,6 +25,9 @@ type fakeSink struct {
 	skipCalls   []skipCall
 	skipOK      bool
 
+	moveCalls []moveCall
+	moveOK    bool
+
 	rateCur string
 	rateVal float64
 }
@@ -34,6 +37,12 @@ type settleCall struct {
 	id     uuid.UUID
 	actual *budget.PlanAmount
 	date   time.Time
+}
+
+type moveCall struct {
+	ids        []int64
+	id         uuid.UUID
+	due, start *time.Time
 }
 
 type skipCall struct {
@@ -56,6 +65,11 @@ func (f *fakeSink) DeletePlanItem(_ context.Context, ids []int64, id uuid.UUID) 
 func (f *fakeSink) SettlePlanItem(_ context.Context, ids []int64, id uuid.UUID, actual *budget.PlanAmount, date time.Time) (bool, error) {
 	f.settleCalls = append(f.settleCalls, settleCall{ids, id, actual, date})
 	return f.settleOK, f.settleErr
+}
+
+func (f *fakeSink) MovePlanItem(_ context.Context, ids []int64, id uuid.UUID, due, start *time.Time) (bool, error) {
+	f.moveCalls = append(f.moveCalls, moveCall{ids, id, due, start})
+	return f.moveOK, nil
 }
 
 func (f *fakeSink) SkipRecurringTerm(_ context.Context, ids []int64, id uuid.UUID, term time.Time) (bool, error) {
@@ -236,5 +250,35 @@ func TestSetRate_ConvertsMicroToRublesPerBaht(t *testing.T) {
 	}
 	if err := w.SetRate(context.Background(), 0); !errors.Is(err, plan.ErrBadRate) {
 		t.Errorf("нулевой курс: %v", err)
+	}
+}
+
+func TestMovePlanned(t *testing.T) {
+	f := &fakeSink{moveOK: true}
+	w := NewWriter(f)
+	ctx := context.Background()
+	sc := plan.Scope{ChatIDs: []int64{7}}
+	id := uuid.New()
+	if err := w.MovePlanned(ctx, sc, id.String(), nil, dptr(2026, 3, 19)); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.moveCalls[0]; c.id != id || c.due != nil || c.start == nil || !c.start.Equal(time.Date(2026, 3, 19, 0, 0, 0, 0, time.UTC)) || c.ids[0] != 7 {
+		t.Errorf("окно: %+v", c)
+	}
+	if err := w.MovePlanned(ctx, sc, id.String(), nil, nil); err != nil || f.moveCalls[1].due != nil || f.moveCalls[1].start != nil {
+		t.Errorf("без даты: %v %+v", err, f.moveCalls[1])
+	}
+	f.moveOK = false
+	if err := w.MovePlanned(ctx, sc, id.String(), nil, nil); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("нет записи: %v", err)
+	}
+	if err := w.MovePlanned(ctx, sc, "не-uuid", nil, nil); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("кривой id: %v", err)
+	}
+	if err := w.MovePlanned(ctx, plan.Scope{}, id.String(), nil, nil); err == nil {
+		t.Error("пустая область принята")
+	}
+	if len(f.moveCalls) != 3 {
+		t.Errorf("до хранилища дошло %d вызовов, ждали 3", len(f.moveCalls))
 	}
 }

@@ -23,7 +23,7 @@ export function row(r, cur, ctx) {
     h('span', { class: 'd' }, shortDate(r.date)),
     h('span', null, r.name, tags),
     amount,
-    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, settleable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)));
+    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, settleable(r, cur, ctx), movable(r, ctx), skippable(r, ctx), removable(r, ctx)));
 }
 
 // Плановую запись (её ключ planned:...) можно убрать; факты и повторы — нет.
@@ -63,4 +63,44 @@ function skippable(r, ctx) {
     class: 'x', href: '#', title: 'Пропустить только этот срок',
     onclick: (e) => { e.preventDefault(); if (confirm('Пропустить «' + r.name + '» в этот раз?')) ctx.onSkip(r.key); },
   }, 'пропустить');
+}
+
+// «Перенести»: плановый платёж можно поставить в текущее или следующее окно, на дату
+// или вернуть в «без даты». Редактор раскрывается под строкой.
+function movable(r, ctx) {
+  if (!ctx || !ctx.onMove || r.kind !== 'payment' || !String(r.key).startsWith('planned:')) return null;
+  return h('a', {
+    class: 'x', href: '#', title: 'Перенести в другое окно или на другую дату',
+    onclick: (e) => {
+      e.preventDefault();
+      const line = e.target.closest('.it');
+      const next = line.nextElementSibling;
+      if (next && next.classList.contains('ed')) { next.remove(); return; }
+      line.after(moveEditor(r, ctx));
+    },
+  }, 'перенести');
+}
+
+function moveEditor(r, ctx) {
+  const windows = ctx.canWindow && ctx.canWindow();
+  const when = h('select', { name: 'when' },
+    windows ? h('option', { value: 'current' }, 'в это окно') : null,
+    windows ? h('option', { value: 'next' }, 'в следующее окно') : null,
+    h('option', { value: 'date' }, 'на дату'),
+    h('option', { value: 'none' }, 'пока без даты'));
+  const date = h('input', { type: 'date', class: 'md hide' });
+  when.addEventListener('change', () => date.classList.toggle('hide', when.value !== 'date'));
+  const save = h('button', { type: 'button' }, 'Перенести');
+  save.addEventListener('click', () => {
+    const body = {};
+    if (when.value === 'date') {
+      if (!date.value) return;
+      body.date = date.value;
+    } else if (when.value !== 'none') {
+      body.window = when.value;
+    }
+    ctx.onMove(r.key, body);
+  });
+  return h('div', { class: 'it ed' },
+    h('div', { class: 'row' }, h('span', null, 'Куда перенести «' + r.name + '»:'), when, date, save));
 }

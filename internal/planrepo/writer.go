@@ -15,6 +15,7 @@ import (
 type Sink interface {
 	AddPlanItem(ctx context.Context, in budget.PlanItemInput) (uuid.UUID, error)
 	DeletePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID) (bool, error)
+	MovePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, due, windowStart *time.Time) (bool, error)
 	SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, actual *budget.PlanAmount, date time.Time) (bool, error)
 	SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID uuid.UUID, term time.Time) (bool, error)
 	SetManualRate(ctx context.Context, currency string, rateToRUB float64) error
@@ -78,6 +79,25 @@ func (w *Writer) DeletePlanned(ctx context.Context, sc plan.Scope, id string) er
 		return plan.ErrNotFound
 	}
 	ok, err := w.sink.DeletePlanItem(ctx, sc.ChatIDs, u)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return plan.ErrNotFound
+	}
+	return nil
+}
+
+// MovePlanned переносит плановый платёж; чужой, закрытый или несуществующий — ErrNotFound.
+func (w *Writer) MovePlanned(ctx context.Context, sc plan.Scope, id string, date, windowStart *plan.Date) error {
+	if len(sc.ChatIDs) == 0 {
+		return fmt.Errorf("planrepo: пустая область чатов")
+	}
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return plan.ErrNotFound
+	}
+	ok, err := w.sink.MovePlanItem(ctx, sc.ChatIDs, u, dbDate(date), dbDate(windowStart))
 	if err != nil {
 		return err
 	}
