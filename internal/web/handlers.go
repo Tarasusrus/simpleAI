@@ -19,7 +19,7 @@ func (s *Server) handleWindow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Валюта показа: RUB или THB.")
 		return
 	}
-	res, err := s.planner.View(r.Context(), cur)
+	res, err := s.viewFor(r, cur)
 	if err != nil {
 		s.writeViewError(w, err)
 		return

@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -33,6 +33,8 @@ const ctx = {
   onDelete: async (key) => {
     try { draw(await deleteItem(cur, key)); } catch (e) { alert(e.message || 'Не удалось убрать.'); }
   },
+  onShowPast: () => { setPast(true); load(); },
+  onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
 };

@@ -30,6 +30,8 @@ type fakePlanner struct {
 	actuals  []*plan.Money
 	skipped  []string
 	rates    []int64
+
+	pastCalls int
 }
 
 func (f *fakePlanner) SetRate(_ context.Context, micro int64) error {
@@ -64,6 +66,11 @@ func (f *fakePlanner) Delete(_ context.Context, key string) error {
 }
 
 func (f *fakePlanner) ExpenseCategories(context.Context) ([]string, error) { return f.cats, f.cmdErr }
+
+func (f *fakePlanner) ViewPast(ctx context.Context, cur plan.Currency) (plan.Result, error) {
+	f.pastCalls++
+	return f.View(ctx, cur)
+}
 
 func (f *fakePlanner) View(_ context.Context, cur plan.Currency) (plan.Result, error) {
 	f.curs = append(f.curs, cur)

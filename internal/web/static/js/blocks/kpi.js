@@ -8,7 +8,7 @@ function card(cls, k, v, s) {
 // Главное число и три вспомогательных. Все суммы уже посчитаны сервером.
 export function render(view, cur) {
   const k = view.kpi;
-  if (view.state === 'none') return h('div', { class: 'kpis' });
+  if (view.state === 'none' || !view.window) return h('div', { class: 'kpis' });
   const short = k.canSpend < 0;
   // Окно, которое уже закончилось, «до конца» не тратят: это итог окна.
   const closed = view.state === 'ended' || view.state === 'between';
