@@ -32,6 +32,7 @@ type Service struct {
 	parser     Parser
 	categories CategoryLister
 	drafts     DraftStore
+	writer     ExpenseWriter
 }
 
 type Deps struct {
@@ -42,6 +43,7 @@ type Deps struct {
 	Parser     Parser
 	Categories CategoryLister
 	Drafts     DraftStore
+	Writer     ExpenseWriter
 }
 
 func NewService(d Deps) *Service {
@@ -53,6 +55,7 @@ func NewService(d Deps) *Service {
 		parser:     d.Parser,
 		categories: d.Categories,
 		drafts:     d.Drafts,
+		writer:     d.Writer,
 	}
 }
 
@@ -91,6 +94,23 @@ func (s *Service) Process(ctx context.Context, chatID int64, file io.Reader) (Dr
 		return Draft{}, err
 	}
 	return Draft{ID: id, Receipt: r}, nil
+}
+
+// Confirm — шаг 5: забирает черновик и записывает расход. Черновик забран
+// до записи: при сбое записи пользователь присылает фото ещё раз, зато
+// повторное нажатие никогда не даёт второй расход.
+func (s *Service) Confirm(ctx context.Context, chatID int64, draftID string) (string, error) {
+	r, err := s.drafts.Take(chatID, draftID)
+	if err != nil {
+		return "", err
+	}
+	return s.writer.WriteExpense(ctx, chatID, r)
+}
+
+// Cancel удаляет черновик без записи.
+func (s *Service) Cancel(chatID int64, draftID string) error {
+	_, err := s.drafts.Take(chatID, draftID)
+	return err
 }
 
 // checker строит проверку файла под возможности модели из каталога.

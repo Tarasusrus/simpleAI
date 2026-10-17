@@ -68,3 +68,10 @@ type DraftStore interface {
 type CategoryLister interface {
 	ExpenseCategories(ctx context.Context) ([]string, error)
 }
+
+// ExpenseWriter записывает подтверждённый чек как расход в бюджет чата и
+// возвращает ответ для пользователя (вместе с предупреждением о пробитом
+// конверте, ADR-008).
+type ExpenseWriter interface {
+	WriteExpense(ctx context.Context, chatID int64, r Receipt) (string, error)
+}
