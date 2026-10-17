@@ -199,8 +199,11 @@ func TestService_View_EndedHidesPastWindowByDefault(t *testing.T) {
 	if res.View.State != StateEnded || res.View.Window != nil {
 		t.Fatalf("по умолчанию: state=%s window=%+v", res.View.State, res.View.Window)
 	}
-	if res.View.Spent != 0 || len(res.View.Categories) != 0 {
-		t.Errorf("прошлые траты просочились: spent=%d categories=%d", res.View.Spent, len(res.View.Categories))
+	if res.View.Spent != 0 {
+		t.Errorf("траты прошлого окна просочились в итог: spent=%d", res.View.Spent)
+	}
+	if lw := res.View.LastWindow; lw == nil || lw.Start != d(2026, 3, 5) || lw.End != d(2026, 3, 18) {
+		t.Errorf("подпись «Прошлого окна»: %+v", lw)
 	}
 	if res.Meta.LastEnd == nil || *res.Meta.LastEnd != d(2026, 3, 18) {
 		t.Errorf("конец прошлого окна: %v", res.Meta.LastEnd)

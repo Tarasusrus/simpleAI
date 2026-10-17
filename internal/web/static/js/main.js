@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -22,6 +22,8 @@ function drawCurrency() {
     }, c === 'RUB' ? '₽' : '฿')));
 }
 
+try { setAvg(Number(sessionStorage.getItem('plan_avg')) || 0); } catch (e) { /* без хранилища — 90 дней */ }
+
 let lastView = null;
 
 // ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
@@ -33,6 +35,7 @@ const ctx = {
   onDelete: async (key) => {
     try { draw(await deleteItem(cur, key)); } catch (e) { alert(e.message || 'Не удалось убрать.'); }
   },
+  onAvg: (days) => { setAvg(days); try { sessionStorage.setItem('plan_avg', String(days)); } catch (e) { /* не страшно */ } load(); },
   onShowPast: () => { setPast(true); load(); },
   onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),

@@ -31,7 +31,7 @@ type fakePlanner struct {
 	skipped  []string
 	rates    []int64
 
-	pastCalls int
+	opts []plan.ViewOptions
 }
 
 func (f *fakePlanner) SetRate(_ context.Context, micro int64) error {
@@ -67,13 +67,9 @@ func (f *fakePlanner) Delete(_ context.Context, key string) error {
 
 func (f *fakePlanner) ExpenseCategories(context.Context) ([]string, error) { return f.cats, f.cmdErr }
 
-func (f *fakePlanner) ViewPast(ctx context.Context, cur plan.Currency) (plan.Result, error) {
-	f.pastCalls++
-	return f.View(ctx, cur)
-}
-
-func (f *fakePlanner) View(_ context.Context, cur plan.Currency) (plan.Result, error) {
+func (f *fakePlanner) ViewWith(_ context.Context, cur plan.Currency, opt plan.ViewOptions) (plan.Result, error) {
 	f.curs = append(f.curs, cur)
+	f.opts = append(f.opts, opt)
 	return f.res, f.err
 }
 
@@ -303,7 +299,9 @@ func TestWindow_Errors(t *testing.T) {
 
 type panicPlanner struct{ fakePlanner }
 
-func (*panicPlanner) View(context.Context, plan.Currency) (plan.Result, error) { panic("boom") }
+func (*panicPlanner) ViewWith(context.Context, plan.Currency, plan.ViewOptions) (plan.Result, error) {
+	panic("boom")
+}
 
 func TestPanicBecomes500(t *testing.T) {
 	s, logs := newServer(t, &panicPlanner{})
@@ -331,5 +329,33 @@ func TestLog_NoURLNoToken(t *testing.T) {
 	}
 	if !strings.Contains(out, "route=") {
 		t.Errorf("нет строки запроса в логе: %s", out)
+	}
+}
+
+// ?avg и ?past доходят до сервиса; кривой период — 400 без обращения к сервису.
+//
+// Мутация: не передавать AvgDays или ShowPast в ViewWith — тест краснеет.
+func TestWindow_AvgAndPastParams(t *testing.T) {
+	p := &fakePlanner{}
+	s, _ := newServer(t, p)
+	if c := do(s, "GET", "/api/plan/window?avg=180&past=1", goodToken).Code; c != http.StatusOK {
+		t.Fatalf("код %d", c)
+	}
+	if o := p.opts[0]; o.AvgDays != 180 || !o.ShowPast {
+		t.Errorf("опции: %+v", o)
+	}
+	if c := do(s, "GET", "/api/plan/window", goodToken).Code; c != http.StatusOK || p.opts[1].AvgDays != 0 || p.opts[1].ShowPast {
+		t.Errorf("по умолчанию: %d %+v", c, p.opts)
+	}
+	n := len(p.opts)
+	if c := do(s, "GET", "/api/plan/window?avg=abc", goodToken).Code; c != http.StatusBadRequest {
+		t.Errorf("avg=abc: %d", c)
+	}
+	if len(p.opts) != n {
+		t.Errorf("кривой avg дошёл до сервиса")
+	}
+	p.err = plan.ErrBadAvgDays
+	if c := do(s, "GET", "/api/plan/window?avg=3", goodToken).Code; c != http.StatusBadRequest {
+		t.Errorf("отказ домена: %d", c)
 	}
 }

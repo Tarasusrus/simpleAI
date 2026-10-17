@@ -44,7 +44,7 @@ func goldenEvents() []Event {
 }
 
 func in(ws []Window, ev []Event, cur Currency, r *Rate, today Date, pct int) ComputeInput {
-	return ComputeInput{Windows: ws, Events: ev, Rate: r, Cur: cur, Today: today, ReservePct: pct}
+	return ComputeInput{Windows: ws, Events: ev, Rate: r, Cur: cur, Today: today, ReservePct: pct, AvgDays: minAvgDays}
 }
 
 func mustCompute(t *testing.T, i ComputeInput) View {

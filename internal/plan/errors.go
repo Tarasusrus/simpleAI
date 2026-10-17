@@ -21,5 +21,6 @@ var (
 	ErrNameTooLong         = errors.New("plan: название слишком длинное")
 	ErrNoWindow            = errors.New("plan: нет окна, в которое можно поставить платёж")
 	ErrNotFound            = errors.New("plan: запись не найдена")
+	ErrBadAvgDays          = errors.New("plan: период усреднения вне 7..730 дней")
 	ErrReadOnly            = errors.New("plan: запись отключена")
 )

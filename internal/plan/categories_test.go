@@ -147,10 +147,68 @@ func TestCategories_ConversionError(t *testing.T) {
 	}
 }
 
-func TestCategories_NoWindowsNoCategories(t *testing.T) {
+// Окон нет совсем: «Прошлого» и «Сейчас» нет, но «Обычно» считается по датам трат.
+func TestCategories_NoWindows_OnlyAverage(t *testing.T) {
 	v := mustCompute(t, in([]Window{}, catEvents(), CurRUB, r25, Date{2026, 10, 14}, 0))
-	if len(v.Categories) != 0 {
-		t.Fatalf("без окон категорий нет: %+v", v.Categories)
+	if v.LastWindow != nil {
+		t.Errorf("окон нет, а LastWindow=%+v", v.LastWindow)
+	}
+	for _, c := range v.Categories {
+		if c.Last != 0 || c.Now != 0 {
+			t.Errorf("без окон Last/Now должны быть 0: %+v", c)
+		}
+	}
+	if len(v.Categories) == 0 || v.Categories[0].Name != "Еда" || v.Categories[0].Avg == 0 {
+		t.Fatalf("обычные траты по Еде должны быть: %+v", v.Categories)
+	}
+}
+
+// «Обычно» = траты за AvgDays, приведённые к 14 дням, округление half-away.
+//
+// Мутация: заменить windowDays на другое число или убрать roundDivHalfAway — тест краснеет.
+func TestCategories_Average(t *testing.T) {
+	today := Date{2026, 10, 14}
+	ev := []Event{
+		doneCat("a1", "Еда", 90_000, CurRUB, Date{2026, 10, 14}), // последний день периода: входит
+		doneCat("a2", "Еда", 90_000, CurRUB, Date{2026, 8, 3}),   // 30 дней: 14.10 − 29 = 15.09, не входит
+		doneCat("a3", "Еда", 30_000, CurRUB, Date{2026, 9, 15}),  // первый день 30-дневного периода: входит
+	}
+	i := in(catWindows(), ev, CurRUB, r25, today, 0)
+	i.AvgDays = 30
+	got := mustCompute(t, i).Categories
+	// за 30 дней: 900 + 300 = 1 200 ₽; на 14 дней: 1 200 * 14 / 30 = 560
+	if len(got) == 0 || got[0].Name != "Еда" || got[0].Avg != 560 {
+		t.Fatalf("Avg: %+v, ждали Еда=560", got)
+	}
+	i.AvgDays = 90 // входят все три: 900+900+300 = 2 100 ₽ → 2 100 * 14 / 90 = 326,67 → 327
+	got = mustCompute(t, i).Categories
+	if got[0].Avg != 327 {
+		t.Errorf("90 дней: %d, ждали 327", got[0].Avg)
+	}
+	for _, bad := range []int{6, 731, -1} {
+		i.AvgDays = bad
+		if _, err := Compute(i); !errors.Is(err, ErrBadAvgDays) {
+			t.Errorf("AvgDays=%d: %v", bad, err)
+		}
+	}
+}
+
+// Скрытое закончившееся окно: окна в View нет, «Прошлое» остаётся и подписано датами.
+func TestCompute_HideEnded_KeepsLastWindowColumn(t *testing.T) {
+	i := in(catWindows(), catEvents(), CurRUB, r25, Date{2026, 12, 1}, 0)
+	i.HideEnded = true
+	v := mustCompute(t, i)
+	if v.Window != nil || v.LastWindow == nil || v.LastWindow.Start != (Date{2026, 10, 5}) {
+		t.Fatalf("window=%v last=%+v", v.Window, v.LastWindow)
+	}
+	var food CategoryRow
+	for _, c := range v.Categories {
+		if c.Name == "Еда" {
+			food = c
+		}
+	}
+	if food.Last != 2_258 || food.Now != 0 {
+		t.Errorf("Еда: %+v, ждали Last=2258 Now=0", food)
 	}
 }
 
