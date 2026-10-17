@@ -255,3 +255,29 @@ func TestCategories_PlannedSubtractedFromUsual(t *testing.T) {
 		t.Errorf("Транспорт: planned %d free %d", tr.Planned, tr.Free)
 	}
 }
+
+// Плановый платёж без даты, привязанный к окну, тоже вычитается (стоматолог, электричество).
+func TestCategories_PlannedWithoutDateUsesChosenWindow(t *testing.T) {
+	ws := catWindows()
+	pick := Date{2026, 10, 6} // внутри окна B
+	undated := planCat("p1", "Еда", 100_000, Date{2026, 10, 15})
+	undated.Date = nil
+	undated.WindowStart = &pick
+	other := planCat("p2", "Транспорт", 100_000, Date{2026, 10, 15})
+	other.Date = nil
+	elsewhere := Date{2026, 9, 6} // окно A — не текущее
+	other.WindowStart = &elsewhere
+	got := cats(t, ws, append(catEvents(), undated, other), Date{2026, 10, 14})
+	for _, c := range got {
+		switch c.Name {
+		case "Еда":
+			if c.Planned != 1_000 {
+				t.Errorf("Еда: planned %d, ждали 1 000 (платёж без даты в текущем окне)", c.Planned)
+			}
+		case "Транспорт":
+			if c.Planned != 0 {
+				t.Errorf("Транспорт: planned %d, платёж привязан к другому окну", c.Planned)
+			}
+		}
+	}
+}
