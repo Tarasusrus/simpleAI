@@ -63,6 +63,15 @@ func (c calc) categories() ([]CategoryRow, error) {
 	amounts := map[string]int64{} // ключ события → сумма в валюте показа
 	avgSums := map[string]int64{}
 	plannedSums := map[string]int64{}
+	// Обязательные платежи (аренда, кредит, подписки) в «Обычно» не входят: среднее по ним —
+	// выдуманная сумма, которой владелец никогда не платил. Обязательный платёж — созданный
+	// повторяющимся правилом или совпадающий с ним по категории, валюте и сумме.
+	mandatory := map[mandatoryKey]bool{}
+	for _, e := range c.in.Events {
+		if e.RuleID != "" && e.Amount != nil {
+			mandatory[keyOf(e)] = true
+		}
+	}
 	avgFrom := c.in.Today.AddDays(-(c.in.AvgDays - 1))
 	for _, e := range c.in.Events {
 		if e.Kind == KindPayment && e.State == StatePlanned && e.Amount != nil && nowIdx >= 0 && c.plannedInThisWindow(e) {
@@ -83,7 +92,8 @@ func (c calc) categories() ([]CategoryRow, error) {
 			continue
 		}
 		inNow, inLast := c.contains(nowIdx, *e.Date), c.contains(lastIdx, *e.Date)
-		inAvg := e.Date.Compare(avgFrom) >= 0 && e.Date.Compare(c.in.Today) <= 0
+		inAvg := e.Date.Compare(avgFrom) >= 0 && e.Date.Compare(c.in.Today) <= 0 &&
+			!mandatory[keyOf(e)]
 		if !inNow && !inLast && !inAvg {
 			continue
 		}
@@ -163,3 +173,12 @@ func (c calc) categories() ([]CategoryRow, error) {
 	}
 	return out, nil
 }
+
+// mandatoryKey — отпечаток платежа для сопоставления с суммой повторяющегося правила.
+type mandatoryKey struct {
+	category string
+	cur      Currency
+	minor    int64
+}
+
+func keyOf(e Event) mandatoryKey { return mandatoryKey{e.Category, e.Amount.Cur, e.Amount.Minor} }
