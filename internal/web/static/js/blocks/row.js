@@ -1,5 +1,6 @@
 import { h } from '../dom.js';
 import { money, shortDate, plural } from '../fmt.js';
+import { editable } from './edit.js';
 
 // Подпись к строке по флагам, которые выставил сервер.
 function note(r) {
@@ -23,7 +24,7 @@ export function row(r, cur, ctx) {
     h('span', { class: 'd' }, shortDate(r.date)),
     h('span', null, r.name, tags),
     amount,
-    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, settleable(r, cur, ctx), movable(r, ctx), skippable(r, ctx), removable(r, ctx)));
+    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, settleable(r, cur, ctx), movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)));
 }
 
 // Плановую запись (её ключ planned:...) можно убрать; факты и повторы — нет.
