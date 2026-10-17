@@ -30,6 +30,7 @@ type Planner interface {
 	Delete(ctx context.Context, key string) error
 	Settle(ctx context.Context, key string, actual *plan.Money) error
 	Skip(ctx context.Context, key string) error
+	Move(ctx context.Context, key string, in plan.MoveInput) error
 	SetRate(ctx context.Context, rubPerThbMicro int64) error
 	ExpenseCategories(ctx context.Context) ([]string, error)
 }
@@ -83,6 +84,7 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("POST /api/plan/income", s.auth(http.HandlerFunc(s.handleAddIncome)))
 	mux.Handle("POST /api/plan/payment", s.auth(http.HandlerFunc(s.handleAddPayment)))
 	mux.Handle("POST /api/plan/item/{key}/done", s.auth(http.HandlerFunc(s.handleDone)))
+	mux.Handle("POST /api/plan/item/{key}/move", s.auth(http.HandlerFunc(s.handleMove)))
 	mux.Handle("POST /api/plan/item/{key}/skip", s.auth(http.HandlerFunc(s.handleSkip)))
 	mux.Handle("POST /api/plan/rate", s.auth(http.HandlerFunc(s.handleRate)))
 	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))

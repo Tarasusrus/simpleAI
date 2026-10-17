@@ -12,8 +12,14 @@ type fakeWriter struct {
 	deleted []string
 	settled []settleCall
 	skipped []string
+	moved   []moveCall
 	rates   []int64
 	err     error
+}
+
+type moveCall struct {
+	id          string
+	date, start *Date
 }
 
 type settleCall struct {
@@ -35,6 +41,11 @@ func (f *fakeWriter) DeletePlanned(_ context.Context, _ Scope, id string) error 
 
 func (f *fakeWriter) SettlePlanned(_ context.Context, _ Scope, id string, actual *Money, date Date) error {
 	f.settled = append(f.settled, settleCall{id, actual, date})
+	return f.err
+}
+
+func (f *fakeWriter) MovePlanned(_ context.Context, _ Scope, id string, date, start *Date) error {
+	f.moved = append(f.moved, moveCall{id, date, start})
 	return f.err
 }
 
@@ -341,5 +352,69 @@ func TestService_ViewReportsRate(t *testing.T) {
 	res, err := svc(&fakeReader{snap: snap}, d(2026, 3, 10)).View(context.Background(), CurRUB)
 	if err != nil || res.Meta.RubPerThbMicro != 2_650_000 {
 		t.Errorf("%v %d", err, res.Meta.RubPerThbMicro)
+	}
+}
+
+func TestService_Move(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10)) // окно 5–18 марта
+	ctx := context.Background()
+	day := d(2026, 4, 2)
+
+	if err := s.Move(ctx, "planned:a", MoveInput{Window: WindowCurrent}); err != nil {
+		t.Fatal(err)
+	}
+	if m := w.moved[0]; m.id != "a" || m.date != nil || m.start == nil || *m.start != d(2026, 3, 5) {
+		t.Errorf("в текущее окно: %+v", m)
+	}
+	if err := s.Move(ctx, "planned:b", MoveInput{Window: WindowNext}); err != nil {
+		t.Fatal(err)
+	}
+	if m := w.moved[1]; m.start == nil || *m.start != d(2026, 3, 19) {
+		t.Errorf("в следующее окно: %+v", m)
+	}
+	if err := s.Move(ctx, "planned:c", MoveInput{Date: &day}); err != nil {
+		t.Fatal(err)
+	}
+	if m := w.moved[2]; m.date == nil || *m.date != day || m.start != nil {
+		t.Errorf("на дату: %+v", m)
+	}
+	if err := s.Move(ctx, "planned:d", MoveInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if m := w.moved[3]; m.date != nil || m.start != nil {
+		t.Errorf("в «без даты» должно очистить оба: %+v", m)
+	}
+
+	n := len(w.moved)
+	bad := d(2026, 2, 30)
+	for name, tc := range map[string]struct {
+		key  string
+		in   MoveInput
+		want error
+	}{
+		"повтор нельзя":  {"recurring:r@2026-03-15", MoveInput{Window: WindowCurrent}, ErrInvalidEvent},
+		"факт нельзя":    {"transaction:1", MoveInput{}, ErrInvalidEvent},
+		"дата и окно":    {"planned:a", MoveInput{Date: &day, Window: WindowNext}, ErrInvalidEvent},
+		"странное окно":  {"planned:a", MoveInput{Window: "later"}, ErrInvalidEvent},
+		"несуществующая": {"planned:a", MoveInput{Date: &bad}, ErrBadDate},
+	} {
+		if err := s.Move(ctx, tc.key, tc.in); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, ждали %v", name, err, tc.want)
+		}
+	}
+	if len(w.moved) != n {
+		t.Errorf("невалидные переносы дошли до писателя")
+	}
+	// окон нет совсем: «в окно» невозможно, а «на дату» и «без даты» можно
+	empty := wsvc(&fakeReader{snap: Snapshot{Rate: &Rate{RubPerThbMicro: 2_500_000}}}, w, d(2026, 3, 10))
+	if err := empty.Move(ctx, "planned:a", MoveInput{Window: WindowCurrent}); !errors.Is(err, ErrNoWindow) {
+		t.Errorf("без окон: %v", err)
+	}
+	if err := empty.Move(ctx, "planned:a", MoveInput{}); err != nil {
+		t.Errorf("«без даты» без окон: %v", err)
+	}
+	if err := svc(&fakeReader{snap: baseSnap()}, d(2026, 3, 10)).Move(ctx, "planned:a", MoveInput{}); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("без писателя: %v", err)
 	}
 }

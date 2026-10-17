@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -35,6 +35,9 @@ const ctx = {
   onDelete: async (key) => {
     try { draw(await deleteItem(cur, key)); } catch (e) { alert(e.message || 'Не удалось убрать.'); }
   },
+  // Можно ли ставить платёж «в окно»: окно должно быть (текущее, будущее или между).
+  canWindow: () => !!lastView && ['current', 'upcoming', 'between'].includes(lastView.state),
+  onMove: (key, body) => once(() => moveItem(cur, key, body), 'Не удалось перенести.'),
   onAvg: (days) => { setAvg(days); try { sessionStorage.setItem('plan_avg', String(days)); } catch (e) { /* не страшно */ } load(); },
   onShowPast: () => { setPast(true); load(); },
   onHidePast: () => { setPast(false); load(); },

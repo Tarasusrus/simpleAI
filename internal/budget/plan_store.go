@@ -275,3 +275,20 @@ func (s *Store) SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID u
 	}
 	return tag.RowsAffected() > 0, nil
 }
+
+// MovePlanItem переносит плановый расход: на дату, в окно (по дате его начала) или
+// обратно «без даты» (оба nil). Дата и окно не задаются вместе. false — записи нет в
+// этих чатах, она закрыта или это не расход.
+func (s *Store) MovePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, due, windowStart *time.Time) (bool, error) {
+	if due != nil && windowStart != nil {
+		return false, fmt.Errorf("move plan item: дата и окно вместе")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE budget_planned_expense SET due_date = $3, window_start = $4
+		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled AND direction = 'expense'`,
+		id, chatIDs, due, windowStart)
+	if err != nil {
+		return false, fmt.Errorf("move plan item: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
