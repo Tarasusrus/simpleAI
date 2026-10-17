@@ -20,6 +20,8 @@ type Sink interface {
 	SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID uuid.UUID, term time.Time) (bool, error)
 	SetManualRate(ctx context.Context, currency string, rateToRUB float64) error
 	ExpenseCategoryNames(ctx context.Context) ([]string, error)
+	UpdatePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, e budget.PlanItemEdit) (bool, error)
+	UpdateRecurringRule(ctx context.Context, chatIDs []int64, id uuid.UUID, e budget.RecurringEdit) (bool, error)
 }
 
 // Writer реализует plan.Writer поверх Sink.
