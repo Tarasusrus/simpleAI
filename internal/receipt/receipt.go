@@ -49,3 +49,22 @@ type Classifier interface {
 type Parser interface {
 	Parse(ctx context.Context, f filecheck.File, categories []string) (Receipt, error)
 }
+
+// ErrDraftNotFound — черновика нет: истёк, уже записан или отменён, бот
+// перезапускался, или черновик чужого чата.
+var ErrDraftNotFound = errors.New("receipt: черновик не найден или устарел")
+
+// DraftStore держит разобранный чек до подтверждения. Take атомарен:
+// второе нажатие той же кнопки получает ErrDraftNotFound, а не второй расход.
+type DraftStore interface {
+	Put(chatID int64, r Receipt) (id string, err error)
+	// Take отдаёт и удаляет черновик. Черновик чужого чата не отдаётся и
+	// не удаляется.
+	Take(chatID int64, id string) (Receipt, error)
+}
+
+// CategoryLister — существующие категории расхода, из которых Parser
+// выбирает категорию чека.
+type CategoryLister interface {
+	ExpenseCategories(ctx context.Context) ([]string, error)
+}
