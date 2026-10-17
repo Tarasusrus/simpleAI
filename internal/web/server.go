@@ -24,7 +24,7 @@ var staticFS embed.FS
 
 // Planner — то, что вебу нужно от plan.Service (ISP).
 type Planner interface {
-	View(ctx context.Context, cur plan.Currency) (plan.Result, error)
+	ViewWith(ctx context.Context, cur plan.Currency, opt plan.ViewOptions) (plan.Result, error)
 	AddIncome(ctx context.Context, in plan.AddIncomeInput) (string, error)
 	AddPayment(ctx context.Context, in plan.AddPaymentInput) (string, error)
 	Delete(ctx context.Context, key string) error

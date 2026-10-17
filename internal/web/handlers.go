@@ -19,7 +19,7 @@ func (s *Server) handleWindow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Валюта показа: RUB или THB.")
 		return
 	}
-	res, err := s.planner.View(r.Context(), cur)
+	res, err := s.viewFor(r, cur)
 	if err != nil {
 		s.writeViewError(w, err)
 		return
@@ -30,6 +30,8 @@ func (s *Server) handleWindow(w http.ResponseWriter, r *http.Request) {
 // writeViewError: понятные причины — 400 по-русски, остальное — 500 без деталей.
 func (s *Server) writeViewError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, plan.ErrBadAvgDays):
+		writeError(w, http.StatusBadRequest, "Период «обычных» трат: от 7 до 730 дней.")
 	case errors.Is(err, plan.ErrNoRate):
 		writeError(w, http.StatusBadRequest, "Нет курса бата. Скажи боту «курс 2,7» — и план посчитается.")
 	case errors.Is(err, plan.ErrDuplicateTerm):

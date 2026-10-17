@@ -14,7 +14,22 @@ type ComputeInput struct {
 	Cur        Currency // валюта показа
 	Today      Date
 	ReservePct int // 0..100
+	// HideEnded — не описывать закончившееся последнее окно: вид как при «окна нет»,
+	// но «Прошлое окно» в категориях остаётся (владелец планирует будущее).
+	HideEnded bool
+	// AvgDays — за сколько дней считать «обычные» траты по категориям: 7..730,
+	// 0 = defaultAvgDays.
+	AvgDays int
 }
+
+// defaultAvgDays — окно усреднения «обычных» трат по умолчанию.
+const defaultAvgDays = 90
+
+// Границы окна усреднения: меньше недели бессмысленно, больше двух лет — не «обычно».
+const (
+	minAvgDays = 7
+	maxAvgDays = 730
+)
 
 // termKey — срок правила: по нему план и факт одного срока не могут сосуществовать.
 type termKey struct{ rule, date string }
@@ -33,18 +48,33 @@ func Compute(in ComputeInput) (View, error) {
 	if err := checkInput(in); err != nil {
 		return View{}, err
 	}
+	if in.AvgDays == 0 {
+		in.AvgDays = defaultAvgDays
+	}
+	if in.AvgDays < minAvgDays || in.AvgDays > maxAvgDays {
+		return View{}, ErrBadAvgDays
+	}
 	st := Locate(in.Windows, in.Today)
-	if st.Kind == StateNone {
-		// Поступлений ещё нет, но платежи, которые владелец уже внёс («Права»,
-		// «Без даты», дальние), пропадать не должны: показываем блоки без расчёта.
-		c := calc{in: in, st: st}
-		v := View{State: StateNone}
+	if st.Kind == StateNone || (st.Kind == StateEnded && in.HideEnded) {
+		// Поступлений ещё нет (или окно закончилось и скрыто), но платежи, которые
+		// владелец уже внёс («Права», «Без даты», дальние), пропадать не должны:
+		// показываем блоки без расчёта.
+		c := calc{in: in, st: WindowState{StateNone, -1, 0}, hiddenLast: -1}
+		if st.Kind == StateEnded {
+			c.hiddenLast = st.Index
+		}
+		v := View{State: StateNone, AvgDays: in.AvgDays}
 		if err := c.blocks(&v); err != nil {
 			return View{}, err
 		}
+		var err error
+		if v.Categories, err = c.categories(); err != nil {
+			return View{}, err
+		}
+		v.LastWindow = c.lastWindow()
 		return v, nil
 	}
-	c := calc{in: in, st: st, w: in.Windows[st.Index]}
+	c := calc{in: in, st: st, w: in.Windows[st.Index], hiddenLast: -1}
 	v, err := c.core()
 	if err != nil {
 		return View{}, err
@@ -135,6 +165,8 @@ type calc struct {
 	in ComputeInput
 	st WindowState
 	w  Window
+	// hiddenLast — индекс скрытого закончившегося окна (для «Прошлого окна»), −1 нет.
+	hiddenLast int
 }
 
 func (c calc) money(m *Money) (int64, error) { return Convert(c.in.Rate, *m, c.in.Cur) }
@@ -242,6 +274,8 @@ func (c calc) core() (View, error) {
 	if v.Categories, err = c.categories(); err != nil {
 		return View{}, err
 	}
+	v.AvgDays = c.in.AvgDays
+	v.LastWindow = c.lastWindow()
 	if err := c.blocks(&v); err != nil {
 		return View{}, err
 	}

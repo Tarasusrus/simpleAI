@@ -1,6 +1,9 @@
 package plan
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // UncategorizedName — строка трат без категории. Показывается всегда последней и
 // только если по ней есть траты.
@@ -24,12 +27,22 @@ func (c calc) windowIndexes() (now, last int) {
 	case StateBetween, StateEnded:
 		now, last = -1, c.st.Index
 	default:
-		now, last = -1, -1
+		now, last = -1, c.hiddenLast
 	}
 	if last < 0 {
 		last = -1
 	}
 	return now, last
+}
+
+// lastWindow — описание окна «Прошлое окно» (nil, если его нет).
+func (c calc) lastWindow() *WindowInfo {
+	_, last := c.windowIndexes()
+	if last < 0 || last >= len(c.in.Windows) {
+		return nil
+	}
+	w := c.in.Windows[last]
+	return &WindowInfo{Start: w.Start, End: w.End()}
 }
 
 func (c calc) contains(idx int, d Date) bool {
@@ -48,12 +61,15 @@ func (c calc) categories() ([]CategoryRow, error) {
 	byName := map[string]*CategoryRow{}
 	recent := map[string][]Event{}
 	amounts := map[string]int64{} // ключ события → сумма в валюте показа
+	avgSums := map[string]int64{}
+	avgFrom := c.in.Today.AddDays(-(c.in.AvgDays - 1))
 	for _, e := range c.in.Events {
 		if e.State != StateDone || e.Date == nil || e.Amount == nil {
 			continue
 		}
 		inNow, inLast := c.contains(nowIdx, *e.Date), c.contains(lastIdx, *e.Date)
-		if !inNow && !inLast {
+		inAvg := e.Date.Compare(avgFrom) >= 0 && e.Date.Compare(c.in.Today) <= 0
+		if !inNow && !inLast && !inAvg {
 			continue
 		}
 		n, err := c.money(e.Amount)
@@ -71,8 +87,15 @@ func (c calc) categories() ([]CategoryRow, error) {
 		}
 		if inNow {
 			row.Now += n
-		} else {
+		}
+		if inLast {
 			row.Last += n
+		}
+		if inAvg {
+			var aerr error
+			if avgSums[name], aerr = addI64(avgSums[name], n); aerr != nil {
+				return nil, aerr
+			}
 		}
 		recent[name] = append(recent[name], e)
 		amounts[e.Key] = n
@@ -80,6 +103,12 @@ func (c calc) categories() ([]CategoryRow, error) {
 	var out []CategoryRow
 	var uncategorized *CategoryRow
 	for name, row := range byName {
+		if sum := avgSums[name]; sum != 0 {
+			if sum > math.MaxInt64/windowDays {
+				return nil, ErrOverflow
+			}
+			row.Avg = roundDivHalfAway(sum*windowDays, int64(c.in.AvgDays))
+		}
 		evs := recent[name]
 		sort.SliceStable(evs, func(i, j int) bool {
 			if cmp := evs[i].Date.Compare(*evs[j].Date); cmp != 0 {
@@ -103,10 +132,12 @@ func (c calc) categories() ([]CategoryRow, error) {
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		switch {
-		case a.Now != b.Now:
-			return a.Now > b.Now
+		case a.Avg != b.Avg:
+			return a.Avg > b.Avg
 		case a.Last != b.Last:
 			return a.Last > b.Last
+		case a.Now != b.Now:
+			return a.Now > b.Now
 		}
 		return a.Name < b.Name
 	})

@@ -29,6 +29,9 @@ type Meta struct {
 	HasRate     bool
 	// RubPerThbMicro — действующий курс бата, 0 если курса нет.
 	RubPerThbMicro int64
+	// LastEnd — конец последнего окна, когда оно закончилось, а нового нет (State=ended
+	// без окна в View). Иначе nil.
+	LastEnd *Date
 	// Skipped — записи, не вошедшие в план (чужая валюта, поступление без даты).
 	Skipped int
 }
@@ -110,8 +113,29 @@ func (st state) focus() (idx int, asOf Date, upcoming bool) {
 	}
 }
 
-// View считает окно, которое видит владелец, в валюте показа cur.
+// View считает окно, которое видит владелец, в валюте показа cur. Если последнее
+// окно закончилось, а нового нет, показывается не оно, а «нового окна ещё нет»:
+// владелец планирует будущее, и прошлые траты ему по умолчанию не нужны.
 func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
+	return s.ViewWith(ctx, cur, ViewOptions{})
+}
+
+// ViewPast — то же, но закончившееся последнее окно показывается как есть.
+func (s *Service) ViewPast(ctx context.Context, cur Currency) (Result, error) {
+	return s.ViewWith(ctx, cur, ViewOptions{ShowPast: true})
+}
+
+// ViewOptions — настройки показа окна.
+type ViewOptions struct {
+	// ShowPast — показать закончившееся последнее окно как есть.
+	ShowPast bool
+	// AvgDays — за сколько дней считать «обычные» траты (7..730, 0 = 90).
+	AvgDays int
+}
+
+// ViewWith — View с настройками показа.
+func (s *Service) ViewWith(ctx context.Context, cur Currency, opt ViewOptions) (Result, error) {
+	showPast := opt.ShowPast
 	ld, err := s.load(ctx)
 	if err != nil {
 		return Result{}, err
@@ -120,8 +144,16 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 	if ld.st.Kind == StateBetween {
 		_, asOf, upcoming = ld.focus()
 	}
+	var lastEnd *Date
+	hide := ld.st.Kind == StateEnded && !showPast
+	if hide {
+		end := ld.windows[ld.st.Index].End()
+		lastEnd = &end
+	}
 	v, err := Compute(ComputeInput{
 		Windows:    ld.windows,
+		HideEnded:  hide,
+		AvgDays:    opt.AvgDays,
 		Events:     ld.events,
 		Rate:       ld.snap.Rate,
 		Cur:        cur,
@@ -134,12 +166,15 @@ func (s *Service) View(ctx context.Context, cur Currency) (Result, error) {
 	if upcoming {
 		v.State = StateUpcoming
 	}
+	if lastEnd != nil {
+		v.State = StateEnded
+	}
 	if err := checkInvariant(v); err != nil {
 		return Result{}, err
 	}
 	return Result{
 		View: v,
-		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, RubPerThbMicro: rateMicro(ld.snap.Rate), Skipped: ld.snap.Skipped},
+		Meta: Meta{Today: ld.today, RatesManual: ld.snap.RateManual, HasRate: ld.snap.Rate != nil, RubPerThbMicro: rateMicro(ld.snap.Rate), LastEnd: lastEnd, Skipped: ld.snap.Skipped},
 	}, nil
 }
 

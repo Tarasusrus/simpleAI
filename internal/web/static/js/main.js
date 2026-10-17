@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, moveItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -22,6 +22,8 @@ function drawCurrency() {
     }, c === 'RUB' ? '₽' : '฿')));
 }
 
+try { setAvg(Number(sessionStorage.getItem('plan_avg')) || 0); } catch (e) { /* без хранилища — 90 дней */ }
+
 let lastView = null;
 
 // ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
@@ -36,6 +38,9 @@ const ctx = {
   // Можно ли ставить платёж «в окно»: окно должно быть (текущее, будущее или между).
   canWindow: () => !!lastView && ['current', 'upcoming', 'between'].includes(lastView.state),
   onMove: (key, body) => once(() => moveItem(cur, key, body), 'Не удалось перенести.'),
+  onAvg: (days) => { setAvg(days); try { sessionStorage.setItem('plan_avg', String(days)); } catch (e) { /* не страшно */ } load(); },
+  onShowPast: () => { setPast(true); load(); },
+  onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
 };
