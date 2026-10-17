@@ -87,6 +87,10 @@ func NewHandleReceiptCallback(svc ReceiptService) Handler {
 		if !ok || draftID == "" {
 			return nil
 		}
+		// Кнопка могла пережить рестарт, после которого VISION_* убрали.
+		if svc == nil {
+			return tctx.EditWithButtons(ctx, msgReceiptNotConfigured, nil)
+		}
 		chatID := tctx.Update.ChatID
 
 		switch action {

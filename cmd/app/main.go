@@ -81,11 +81,13 @@ func main() {
 	)
 	defer obsTracer.Close()
 
+	receiptApp := appwiring.BuildReceipt(ctx, cfg.Receipt, registry, budget.NewStore(pool), logger)
+
 	// --- Telegram бот ---
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill, budget.NewStore(pool)); err != nil {
+		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill, budget.NewStore(pool), receiptApp); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -162,7 +164,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill, envelopeReminders notify.EnvelopeReminderStore) error {
+func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill, envelopeReminders notify.EnvelopeReminderStore, receiptApp appwiring.Receipt) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -184,6 +186,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 		{Command: "recurring", Description: "🔄 Регулярные платежи"},
 		{Command: "forecast", Description: "🔮 Прогноз трат на следующий месяц"},
 		{Command: "reminders", Description: "🔔 Напоминания о внесении трат"},
+		{Command: "models", Description: "🧾 Модели для фото чеков"},
 	}
 	if err := adapter.SetCommands(ctx, botCommands); err != nil {
 		logger.Warn("failed to set telegram commands", "err", err)
@@ -203,8 +206,10 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 	router.HandleCommand("recurring", telegram.HandleRecurring)
 	router.HandleCommand("forecast", telegram.HandleForecast)
 	router.HandleCommand("reminders", telegram.HandleReminders)
-	router.HandleDefault(telegram.HandleDefault)
+	router.HandleCommand("models", telegram.NewHandleModels(receiptApp.Catalog, receiptApp.Model))
+	router.HandleDefault(telegram.WithReceiptPhotos(receiptApp.Flow(), telegram.HandleDefault))
 	router.HandleCallback(budgetskill.CallbackPrefix, telegram.NewHandleBudgetCallback(budgetSkill))
+	router.HandleCallback(telegram.ReceiptCallbackPrefix, telegram.NewHandleReceiptCallback(receiptApp.Flow()))
 
 	updates, err := adapter.Updates(ctx)
 	if err != nil {
