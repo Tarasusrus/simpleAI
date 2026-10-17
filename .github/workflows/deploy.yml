@@ -26,12 +26,13 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           PLAN_WEB_ENABLED: ${{ secrets.PLAN_WEB_ENABLED }}
           PLAN_WEB_TOKEN: ${{ secrets.PLAN_WEB_TOKEN }}
+          VISION_LLM_API_KEY: ${{ secrets.VISION_LLM_API_KEY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: 22
-          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID,LANGFUSE_HOST,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY,PLAN_WEB_ENABLED,PLAN_WEB_TOKEN
+          envs: DEEPSEEK_API_KEY,GEMINI_API_KEY,TELEGRAM_BOT_TOKEN,POSTGRES_PASSWORD,SYS_PROMPT,TELEGRAM_ALLOWED_CHATS,TELEGRAM_CHAT_ID,LANGFUSE_HOST,LANGFUSE_PUBLIC_KEY,LANGFUSE_SECRET_KEY,PLAN_WEB_ENABLED,PLAN_WEB_TOKEN,VISION_LLM_API_KEY
           script: |
             set -e
 
@@ -79,6 +80,12 @@ jobs:
               echo ""
               echo "PLAN_WEB_ENABLED=$PLAN_WEB_ENABLED"
               echo "PLAN_WEB_TOKEN=$PLAN_WEB_TOKEN"
+              echo ""
+              # Фото чеков (ADR-010): прокси LiteLLM на этом же сервере,
+              # контейнер litellm на 127.0.0.1:4000, маршрут vision.
+              echo "VISION_LLM_BASE_URL=http://127.0.0.1:4000/v1"
+              echo "VISION_LLM_API_KEY=$VISION_LLM_API_KEY"
+              echo "VISION_MODEL=vision"
             } > ~/simpleAI/.env
 
             cd ~/simpleAI
