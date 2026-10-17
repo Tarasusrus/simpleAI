@@ -33,6 +33,8 @@ type Planner interface {
 	Move(ctx context.Context, key string, in plan.MoveInput) error
 	SetRate(ctx context.Context, rubPerThbMicro int64) error
 	ExpenseCategories(ctx context.Context) ([]string, error)
+	Item(ctx context.Context, key string) (plan.EditableItem, error)
+	Edit(ctx context.Context, key string, in plan.EditInput) error
 }
 
 const (
@@ -88,6 +90,8 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("POST /api/plan/item/{key}/skip", s.auth(http.HandlerFunc(s.handleSkip)))
 	mux.Handle("POST /api/plan/rate", s.auth(http.HandlerFunc(s.handleRate)))
 	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))
+	mux.Handle("GET /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleItem)))
+	mux.Handle("PATCH /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleEdit)))
 	files := http.FileServerFS(sub)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.

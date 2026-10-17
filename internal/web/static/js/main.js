@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem, editItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -43,14 +43,24 @@ const ctx = {
   onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
+  // onEdit — «изменить»: та же очередь, что у прочих команд; рисует ответ и отдаёт
+  // true, false — занято другой командой. Ошибку показывает сам редактор.
+  onEdit: async (key, body) => {
+    const view = await exclusive(() => editItem(cur, key, body));
+    if (view) draw(view);
+    return !!view;
+  },
 };
 
 // Одна команда за раз: второй тап, пока первая в пути, не должен дать «не найдено».
 let busy = false;
-async function once(run, fallback) {
-  if (busy) return;
+async function exclusive(run) {
+  if (busy) return null;
   busy = true;
-  try { draw(await run()); } catch (e) { alert(e.message || fallback); } finally { busy = false; }
+  try { return await run(); } finally { busy = false; }
+}
+async function once(run, fallback) {
+  try { const view = await exclusive(run); if (view) draw(view); } catch (e) { alert(e.message || fallback); }
 }
 
 // Поле «Курс ฿→₽»: показывает действующий курс, по уходу из поля сохраняет новый.

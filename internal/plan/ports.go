@@ -107,4 +107,10 @@ type Writer interface {
 	SetRate(ctx context.Context, rubPerThbMicro int64) error
 	// ExpenseCategories — названия категорий расходов для выбора в форме.
 	ExpenseCategories(ctx context.Context) ([]string, error)
+	// UpdatePlanned меняет незакрытую плановую запись; дату и окно — только при
+	// e.SetPlace. Нет записи, чужой чат, закрыта или другой вид — ErrNotFound.
+	UpdatePlanned(ctx context.Context, sc Scope, id string, e PlannedEdit) error
+	// UpdateRule меняет название, сумму и категорию включённого правила, расписание
+	// не трогает. Нет правила, чужой чат, выключено или другой вид — ErrNotFound.
+	UpdateRule(ctx context.Context, sc Scope, ruleID string, e RuleEdit) error
 }
