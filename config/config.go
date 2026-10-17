@@ -18,6 +18,7 @@ type Config struct {
 	Mail      MailConfig
 	Telegram  TelegramBotConfig
 	LLM       LLMConfig
+	Receipt   ReceiptConfig
 }
 
 type DBConfig struct {
@@ -115,6 +116,7 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.Mail = mailCfg
 	cfg.Telegram = loadTelegramBotConfig()
+	cfg.Receipt = loadReceiptConfig()
 	return cfg, nil
 }
 
