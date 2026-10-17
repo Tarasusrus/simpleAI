@@ -108,4 +108,3 @@ func nextOccurrence(r budget.RecurringPayment, from time.Time) time.Time {
 		return next
 	}
 }
-

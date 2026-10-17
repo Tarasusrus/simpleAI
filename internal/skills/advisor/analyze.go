@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"simpleAI/internal/agent"
-	"simpleAI/internal/budget"
 	botformat "simpleAI/internal/bot/format"
+	"simpleAI/internal/budget"
 	"simpleAI/internal/prompts"
 )
 
@@ -18,7 +18,6 @@ type analyzeLLMResponse struct {
 	Trends    []string `json:"trends"`
 	Advice    []string `json:"advice"`
 }
-
 
 func parseAnalyzePeriod(period string, now time.Time) (time.Time, string, error) {
 	p := strings.TrimSpace(strings.ToLower(period))
@@ -148,4 +147,3 @@ func parseAnalyzeLLMResponse(raw string) (*analyzeLLMResponse, error) {
 	r.Advice = trimList(r.Advice, 200)
 	return &r, nil
 }
-

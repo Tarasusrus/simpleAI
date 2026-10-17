@@ -1,5 +1,5 @@
 import { h } from '../dom.js';
-import { money, plural } from '../fmt.js';
+import { money, plural, shortDate } from '../fmt.js';
 
 function card(cls, k, v, s) {
   return h('div', { class: 'kpi ' + cls }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), s ? h('div', { class: 's' }, s) : null);
@@ -29,6 +29,7 @@ export function render(view, cur) {
     k.expectedIncome > 0 ? 'из них ожидается ' + money(k.expectedIncome, cur) : 'получено');
   const out = card('', 'Платежи и траты', money(k.payments + k.spent, cur),
     'платежи ' + money(k.payments, cur) + ' · потрачено ' + money(k.spent, cur)
-      + (k.reserve ? ' · резерв ' + money(k.reserve, cur) : ''));
+      + (k.reserve ? ' · резерв ' + money(k.reserve, cur) : '')
+      + (k.spentBefore > 0 ? ' · до начала окна (с ' + shortDate(k.spentBeforeFrom) + ') потрачено ' + money(k.spentBefore, cur) + ', в окно не входит' : ''));
   return h('div', { class: 'kpis' }, main, income, out);
 }

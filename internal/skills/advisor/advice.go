@@ -17,7 +17,7 @@ import (
 type advisorLLMResponse struct {
 	Verdict string `json:"verdict"` // "Да" | "Нет" | "Условно"
 	Flow    struct {
-		YesFundNow          float64 `json:"yes_fund_now"`
+		YesFundNow           float64 `json:"yes_fund_now"`
 		YesFundAfterPurchase float64 `json:"yes_fund_after_purchase"`
 		BalanceNow           float64 `json:"balance_now"`
 		ObligationsRemaining float64 `json:"obligations_remaining"`

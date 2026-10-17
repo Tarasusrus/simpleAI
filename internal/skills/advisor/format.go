@@ -10,8 +10,6 @@ import (
 	"simpleAI/internal/budget"
 )
 
-
-
 func unmarshalJSON(s string, v any) error {
 	return json.Unmarshal([]byte(s), v)
 }

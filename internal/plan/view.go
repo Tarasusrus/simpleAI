@@ -15,6 +15,9 @@ type View struct {
 	Income IncomeSum
 	// CanSpend знаковое: отрицательное значение — недостача.
 	CanSpend, Payments, Spent, Reserve int64
+	// SpentBefore — траты в зазоре между окнами, пока описываемое окно ещё не началось; в окно не входят.
+	SpentBefore     int64
+	SpentBeforeFrom *Date
 	// PerDay nil при daysLeft=0 или недостаче: «0» и «∞» тут были бы ложью.
 	PerDay *int64
 	// Unpriced — платежи окна без суммы (число); в расчёт не входят.

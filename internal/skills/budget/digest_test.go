@@ -305,7 +305,7 @@ func TestYesterdayDigest_FullThreeLines(t *testing.T) {
 	yesterdaySum := expenseSummary(budget.CurrencyGroup{
 		Currency: "RUB", TotalExpense: 2500, // 1000 ฿
 		ByCategory: []budget.CategoryTotal{
-			{CategoryName: "еда", Total: 1500},      // 60%
+			{CategoryName: "еда", Total: 1500},       // 60%
 			{CategoryName: "транспорт", Total: 1000}, // 40%
 		},
 	})

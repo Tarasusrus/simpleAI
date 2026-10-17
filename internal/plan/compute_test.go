@@ -381,3 +381,20 @@ func TestCompute_OverflowGuards(t *testing.T) {
 		t.Fatalf("сумма поступлений: err=%v, ждали ErrOverflow", err)
 	}
 }
+
+// Траты в зазоре между окнами (до начала описываемого) показываются отдельно и в окно не входят.
+func TestCompute_SpentBeforeWindowStarts(t *testing.T) {
+	ws := BuildWindows([]Event{inc("a", Date{2026, 9, 4}, StateDone, 13_600_000), inc("b", Date{2026, 10, 19}, StatePlanned, 12_000_000)})
+	ev := []Event{
+		payDone("in-gap", "макдональдс", 68_800, CurRUB, Date{2026, 10, 17}),
+		payDone("old", "старая", 100_000, CurRUB, Date{2026, 9, 10}),     // внутри предыдущего окна
+		payDone("future", "будущая", 50_000, CurRUB, Date{2026, 10, 20}), // внутри нового окна
+	}
+	v := mustCompute(t, in(ws, ev, CurRUB, r25, Date{2026, 10, 17}, 0))
+	if v.SpentBefore != 688 || v.SpentBeforeFrom == nil || *v.SpentBeforeFrom != (Date{2026, 9, 18}) {
+		t.Fatalf("SpentBefore=%d from=%v, ждали 688 с 18.09", v.SpentBefore, v.SpentBeforeFrom)
+	}
+	if v.Spent != 1_000 { // описано закончившееся окно 04.09–17.09: только «старая»
+		t.Errorf("Spent=%d, ждали 1 000: трата зазора не должна попадать в окно", v.Spent)
+	}
+}
