@@ -18,6 +18,10 @@ import (
 // правила ложится на все сроки без факта, в том числе просроченные: факты — отдельные
 // транзакции, прошлые не меняются (R3c).
 
+// UnnamedName — подпись записи без описания и категории. В форму правки она не
+// идёт: иначе сохранение записало бы заглушку в описание как настоящее название.
+const UnnamedName = "Без названия"
+
 var (
 	// ErrNotEditable — ключ не плановой записи и не правила (например, факт).
 	ErrNotEditable = fmt.Errorf("%w: изменить можно только плановую запись или повтор", ErrInvalidEvent)
@@ -156,8 +160,12 @@ func findItem(snap Snapshot, key string) (EditableItem, error) {
 		for _, list := range [][]Event{snap.Payments, snap.Incomes} {
 			for _, e := range list {
 				if e.Key == key && e.Source == SourcePlanned {
+					name := e.Name
+					if name == UnnamedName {
+						name = ""
+					}
 					return EditableItem{
-						Key: e.Key, Kind: e.Kind, Name: e.Name, Amount: e.Amount, Category: e.Category,
+						Key: e.Key, Kind: e.Kind, Name: name, Amount: e.Amount, Category: editCategory(e.Kind, e.Category),
 						Date: e.Date, WindowStart: e.WindowStart,
 					}, nil
 				}
@@ -175,11 +183,21 @@ func findItem(snap Snapshot, key string) (EditableItem, error) {
 				amount, rule := r.Rule.Amount, r.Rule
 				return EditableItem{
 					Key: "recurring:" + r.ID, Kind: r.Kind, Recurring: true, Name: r.Name,
-					Amount: &amount, Category: r.Category, Rule: &rule,
+					Amount: &amount, Category: editCategory(r.Kind, r.Category), Rule: &rule,
 				}, nil
 			}
 		}
 		return EditableItem{}, ErrNotFound
 	}
 	return EditableItem{}, ErrNotEditable
+}
+
+// editCategory — категория для формы. У поступления её нет: правка категорию
+// поступления не меняет (её сохраняет писатель), и форма, отправленная обратно как
+// есть, не должна получить отказ «у поступления нет категории».
+func editCategory(k Kind, category string) string {
+	if k == KindIncome {
+		return ""
+	}
+	return category
 }

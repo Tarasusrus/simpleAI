@@ -109,6 +109,29 @@ func TestService_Item(t *testing.T) {
 	}
 }
 
+// Форму можно отправить обратно как есть: заглушка имени не становится названием,
+// категории поступления в форме нет (писатель её сохраняет).
+//
+// Мутации: убрать замену UnnamedName на пусто или editCategory — тест краснеет.
+func TestService_Item_FormRoundTrip(t *testing.T) {
+	snap := editSnap()
+	snap.Payments = append(snap.Payments, Event{Key: "planned:p3", Kind: KindPayment, State: StatePlanned, Name: UnnamedName, Source: SourcePlanned})
+	snap.Incomes = append(snap.Incomes, Event{Key: "planned:i2", Kind: KindIncome, State: StatePlanned, Name: "бонус", Amount: rub(100), Date: dp(2026, 3, 21), Category: "Зарплата", Source: SourcePlanned})
+	s := NewService(&fakeReader{snap: snap}, &editWriter{}, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{42}})
+	if it, err := s.Item(context.Background(), "planned:p3"); err != nil || it.Name != "" {
+		t.Errorf("заглушка имени попала в форму: %+v %v", it, err)
+	}
+	for _, key := range []string{"planned:i2", "recurring:salary"} {
+		it, err := s.Item(context.Background(), key)
+		if err != nil || it.Category != "" {
+			t.Fatalf("%s: категория поступления в форме: %+v %v", key, it, err)
+		}
+		if err := s.Edit(context.Background(), key, EditInput{Name: it.Name, Amount: it.Amount, Category: it.Category}); err != nil {
+			t.Errorf("%s: форма как есть отклонена: %v", key, err)
+		}
+	}
+}
+
 // Правка разовой записи: вид и текущее размещение — из снимка; без Place дата и
 // окно не пишутся (SetPlace=false), с Place — считаются тем же placement, что у Move.
 //

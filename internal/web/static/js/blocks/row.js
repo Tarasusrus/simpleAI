@@ -1,4 +1,4 @@
-import { h } from '../dom.js';
+import { h, togglePanel } from '../dom.js';
 import { money, shortDate, plural } from '../fmt.js';
 import { editable } from './edit.js';
 
@@ -74,10 +74,7 @@ function movable(r, ctx) {
     class: 'x', href: '#', title: 'Перенести в другое окно или на другую дату',
     onclick: (e) => {
       e.preventDefault();
-      const line = e.target.closest('.it');
-      const next = line.nextElementSibling;
-      if (next && next.classList.contains('ed')) { next.remove(); return; }
-      line.after(moveEditor(r, ctx));
+      togglePanel(e.target.closest('.it'), 'move', () => moveEditor(r, ctx));
     },
   }, 'перенести');
 }

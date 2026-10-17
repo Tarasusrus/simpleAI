@@ -195,3 +195,56 @@ func TestUpdateRecurringRule(t *testing.T) {
 		}
 	}
 }
+
+// Правка не теряет категорию записи: у поступления категория не меняется (форма шлёт
+// пусто), категория другого типа и дубль по регистру остаются, если имя в форме то же.
+//
+// Мутации: убрать ветку direction = 'income' или ветку EXISTS у category_id — тест краснеет.
+func TestUpdatePlanItem_KeepsCategory(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	own := []int64{planStoreChat}
+	amt := int64(10000)
+	due := d(2026, 3, 15)
+	add := func(dir, catSQL string, args ...any) uuid.UUID {
+		t.Helper()
+		id, err := s.AddPlanItem(ctx, PlanItemInput{ChatID: planStoreChat, Direction: dir, Description: "до", AmountMinor: &amt, Currency: "RUB", DueDate: &due})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE budget_planned_expense SET category_id = (`+catSQL+`) WHERE id = $1`, append([]any{id}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	edit := func(id uuid.UUID, dir, cat string) string {
+		t.Helper()
+		if ok, err := s.UpdatePlanItem(ctx, own, id, PlanItemEdit{Direction: dir, Description: "после", AmountMinor: &amt, Currency: "RUB", Category: cat}); err != nil || !ok {
+			t.Fatalf("правка: %v %v", ok, err)
+		}
+		return readPlanned(t, s, ctx, id).cat
+	}
+
+	salary := add("income", `SELECT id FROM budget_category WHERE name = 'Зарплата' AND type = 'income'`)
+	if got := edit(salary, "income", ""); got != "Зарплата" {
+		t.Errorf("категория поступления: %q", got)
+	}
+	odd := add("expense", `SELECT id FROM budget_category WHERE name = 'Зарплата' AND type = 'income'`)
+	if got := edit(odd, "expense", "Зарплата"); got != "Зарплата" {
+		t.Errorf("категория другого типа с тем же именем: %q", got)
+	}
+
+	// Дубли по регистру запрещает уникальный индекс из ADR-010; пока его нет, они бывают.
+	lower, upper := uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_planned_expense WHERE category_id = ANY($1)`, []uuid.UUID{lower, upper})
+		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_category WHERE id = ANY($1)`, []uuid.UUID{lower, upper})
+	})
+	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_category (id, name, type) VALUES ($1, 'planeditdup', 'expense'), ($2, 'PlanEditDup', 'expense')`, lower, upper); err != nil {
+		t.Skipf("дубль по регистру не вставить (уникальный индекс): %v", err)
+	}
+	dup := add("expense", `SELECT $2::uuid`, lower)
+	if got := edit(dup, "expense", "PlanEditDup"); got != "planeditdup" {
+		t.Errorf("дубль по регистру сменил категорию: %q", got)
+	}
+}

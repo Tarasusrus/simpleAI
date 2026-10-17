@@ -1,4 +1,4 @@
-import { h } from '../dom.js';
+import { h, togglePanel } from '../dom.js';
 import { getItem, getCategories } from '../api.js';
 import { longDate, plural } from '../fmt.js';
 
@@ -40,10 +40,8 @@ export function editable(r, cur, ctx) {
 }
 
 async function toggle(line, key, cur, ctx) {
-  const next = line.nextElementSibling;
-  if (next && next.classList.contains('ed')) { next.remove(); return; }
-  const box = h('div', { class: 'it ed' }, h('div', { class: 'hint' }, 'Загружаю…'));
-  line.after(box);
+  const box = togglePanel(line, 'edit', () => h('div', { class: 'it ed' }, h('div', { class: 'hint' }, 'Загружаю…')));
+  if (!box) return;
   try {
     const item = await getItem(key);
     const cats = item.kind === 'payment' ? await getCategories().catch(() => []) : [];
@@ -55,7 +53,7 @@ async function toggle(line, key, cur, ctx) {
 
 function editor(item, cats, cur, ctx, box) {
   const payment = item.kind === 'payment';
-  const name = h('input', { name: 'name', required: true, value: item.name });
+  const name = h('input', { name: 'name', required: true, value: item.name, placeholder: 'название' });
   const amount = h('input', {
     name: 'amount', type: 'number', step: '0.01', min: '0', inputmode: 'decimal', class: 'md',
     value: item.amount, placeholder: payment && !item.recurring ? 'можно пусто' : '0',
@@ -117,7 +115,7 @@ function editor(item, cats, cur, ctx, box) {
     status.classList.remove('err');
     save.disabled = true;
     try {
-      ctx.show(await ctx.onEdit(item.key, body));
+      if (!(await ctx.onEdit(item.key, body))) status.textContent = 'Другая команда ещё выполняется — сохрани ещё раз.';
     } catch (err) {
       status.textContent = err.message || 'Не удалось сохранить.';
       status.classList.add('err');
