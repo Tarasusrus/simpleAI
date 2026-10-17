@@ -52,4 +52,6 @@ export const deleteItem = (cur, key) => call('DELETE', '/api/plan/item/' + encod
 export const setRate = (cur, rate) => call('POST', '/api/plan/rate' + q(cur), { rate });
 export const moveItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/move' + q(cur), body);
 export const settleItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/done' + q(cur), body);
+export const getItem = (key) => call('GET', '/api/plan/item/' + encodeURIComponent(key));
+export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + encodeURIComponent(key) + q(cur), body);
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));
