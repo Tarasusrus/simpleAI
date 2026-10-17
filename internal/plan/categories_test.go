@@ -281,3 +281,31 @@ func TestCategories_PlannedWithoutDateUsesChosenWindow(t *testing.T) {
 		}
 	}
 }
+
+// Обязательные платежи (повторяющееся правило и ручной ввод той же суммы) не входят в «Обычно».
+func TestCategories_AverageExcludesMandatoryPayments(t *testing.T) {
+	rent := func(key, ruleID string, d Date) Event {
+		e := doneCat(key, "Жильё", 1_800_000, CurRUB, d)
+		e.RuleID = ruleID
+		return e
+	}
+	ev := []Event{
+		rent("r1", "rule-1", Date{2026, 9, 10}),                   // создан правилом
+		rent("r2", "", Date{2026, 8, 10}),                         // введён вручную, та же сумма — совпадает с правилом
+		doneCat("w1", "Жильё", 30_000, CurRUB, Date{2026, 9, 20}), // вода: настоящая мелкая трата
+		doneCat("f1", "Еда", 100_000, CurRUB, Date{2026, 9, 21}),
+	}
+	i := in(catWindows(), ev, CurRUB, r25, Date{2026, 10, 14}, 0)
+	i.AvgDays = 90
+	byName := map[string]CategoryRow{}
+	for _, c := range mustCompute(t, i).Categories {
+		byName[c.Name] = c
+	}
+	// Только вода 300 ₽: 300 * 14 / 90 = 46,67 → 47. Аренда (по правилу и вручную) не входит.
+	if jil := byName["Жильё"]; jil.Avg != 47 {
+		t.Errorf("Жильё: Avg %d, ждали 47 (без аренды)", jil.Avg)
+	}
+	if byName["Еда"].Avg != 156 { // 1 000 * 14 / 90 = 155,56
+		t.Errorf("Еда: Avg %d, ждали 156", byName["Еда"].Avg)
+	}
+}
