@@ -20,11 +20,14 @@ export function row(r, cur, ctx) {
     ? h('span', { class: 'a' }, h('small', null, 'без суммы'))
     : h('span', { class: 'a' }, (r.kind === 'income' ? '+' : '') + money(r.amount, cur));
   const n = note(r);
+  // Подпись и действия — отдельной строкой под названием: в колонке они не помещаются
+  // (до четырёх действий), а на телефоне колонку приходилось прятать вместе с ними.
+  const extras = [n || null, settleable(r, cur, ctx), movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)].filter(Boolean);
   return h('div', { class: 'it' + (r.noAmount ? ' dim' : '') },
     h('span', { class: 'd' }, shortDate(r.date)),
     h('span', null, r.name, tags),
     amount,
-    h('span', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, n, settleable(r, cur, ctx), movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)));
+    extras.length ? h('div', { class: 'r' + (r.overdueDays > 0 ? ' bad' : '') }, extras) : null);
 }
 
 // Плановую запись (её ключ planned:...) можно убрать; факты и повторы — нет.
