@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, skipItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -25,14 +25,25 @@ function drawCurrency() {
 let lastView = null;
 
 // ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
-// тот же, onDelete — убрать плановую запись.
+// тот же, onDelete — убрать плановую запись, onSettle — «оплачено» / «пришло»,
+// onSkip — пропустить этот срок повтора. Ошибку команды показываем текстом сервера.
 const ctx = {
   show: (view) => draw(view),
   redraw: () => { if (lastView) draw(lastView); },
   onDelete: async (key) => {
     try { draw(await deleteItem(cur, key)); } catch (e) { alert(e.message || 'Не удалось убрать.'); }
   },
+  onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
+  onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
 };
+
+// Одна команда за раз: второй тап, пока первая в пути, не должен дать «не найдено».
+let busy = false;
+async function once(run, fallback) {
+  if (busy) return;
+  busy = true;
+  try { draw(await run()); } catch (e) { alert(e.message || fallback); } finally { busy = false; }
+}
 
 function draw(view) {
   lastView = view;

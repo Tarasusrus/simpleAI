@@ -18,6 +18,25 @@ type fakeSink struct {
 	delOK   bool
 	delErr  error
 	deleted []uuid.UUID
+
+	settleCalls []settleCall
+	settleOK    bool
+	settleErr   error
+	skipCalls   []skipCall
+	skipOK      bool
+}
+
+type settleCall struct {
+	ids    []int64
+	id     uuid.UUID
+	actual *budget.PlanAmount
+	date   time.Time
+}
+
+type skipCall struct {
+	ids  []int64
+	id   uuid.UUID
+	term time.Time
 }
 
 func (f *fakeSink) AddPlanItem(_ context.Context, in budget.PlanItemInput) (uuid.UUID, error) {
@@ -29,6 +48,16 @@ func (f *fakeSink) DeletePlanItem(_ context.Context, ids []int64, id uuid.UUID) 
 	f.delIDs = append(f.delIDs, ids)
 	f.deleted = append(f.deleted, id)
 	return f.delOK, f.delErr
+}
+
+func (f *fakeSink) SettlePlanItem(_ context.Context, ids []int64, id uuid.UUID, actual *budget.PlanAmount, date time.Time) (bool, error) {
+	f.settleCalls = append(f.settleCalls, settleCall{ids, id, actual, date})
+	return f.settleOK, f.settleErr
+}
+
+func (f *fakeSink) SkipRecurringTerm(_ context.Context, ids []int64, id uuid.UUID, term time.Time) (bool, error) {
+	f.skipCalls = append(f.skipCalls, skipCall{ids, id, term})
+	return f.skipOK, nil
 }
 
 func (f *fakeSink) ExpenseCategoryNames(context.Context) ([]string, error) {
@@ -115,5 +144,75 @@ func TestDeletePlanned_ScopeAndNotFound(t *testing.T) {
 	}
 	if err := w.DeletePlanned(context.Background(), plan.Scope{}, id); err == nil {
 		t.Error("пустая область принята")
+	}
+}
+
+func TestSettlePlanned_PassesScopeAmountAndDate(t *testing.T) {
+	f := &fakeSink{settleOK: true}
+	w := NewWriter(f)
+	sc := plan.Scope{ChatIDs: []int64{7, 9}}
+	id := uuid.New()
+	err := w.SettlePlanned(context.Background(), sc, id.String(), &plan.Money{Minor: 12345, Cur: plan.CurTHB}, plan.Date{Year: 2026, Month: 3, Day: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := f.settleCalls[0]
+	if len(c.ids) != 2 || c.id != id || c.actual == nil || c.actual.Minor != 12345 || c.actual.Currency != "THB" ||
+		!c.date.Equal(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("в хранилище ушло %+v", c)
+	}
+	if err := w.SettlePlanned(context.Background(), sc, id.String(), nil, plan.Date{Year: 2026, Month: 3, Day: 10}); err != nil || f.settleCalls[1].actual != nil {
+		t.Errorf("без суммы: %v %+v", err, f.settleCalls[1])
+	}
+}
+
+func TestSettlePlanned_NotFoundAndEmptyScope(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	ctx := context.Background()
+	day := plan.Date{Year: 2026, Month: 3, Day: 10}
+	if err := w.SettlePlanned(ctx, plan.Scope{ChatIDs: []int64{1}}, uuid.NewString(), nil, day); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("нет записи: %v", err)
+	}
+	if err := w.SettlePlanned(ctx, plan.Scope{ChatIDs: []int64{1}}, "не-uuid", nil, day); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("кривой id: %v", err)
+	}
+	if err := w.SettlePlanned(ctx, plan.Scope{}, uuid.NewString(), nil, day); err == nil {
+		t.Error("пустая область принята")
+	}
+	if len(f.settleCalls) != 1 {
+		t.Errorf("до хранилища дошло %d вызовов, ждали 1", len(f.settleCalls))
+	}
+}
+
+func TestSkipTerm(t *testing.T) {
+	f := &fakeSink{skipOK: true}
+	w := NewWriter(f)
+	id := uuid.New()
+	sc := plan.Scope{ChatIDs: []int64{7}}
+	if err := w.SkipTerm(context.Background(), sc, id.String(), plan.Date{Year: 2026, Month: 3, Day: 15}); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.skipCalls[0]; c.id != id || !c.term.Equal(time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)) || c.ids[0] != 7 {
+		t.Errorf("в хранилище ушло %+v", c)
+	}
+	f.skipOK = false
+	if err := w.SkipTerm(context.Background(), sc, id.String(), plan.Date{Year: 2026, Month: 3, Day: 15}); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("чужое правило: %v", err)
+	}
+}
+
+func TestSkipTerm_BadIDAndEmptyScope(t *testing.T) {
+	f := &fakeSink{skipOK: true}
+	w := NewWriter(f)
+	day := plan.Date{Year: 2026, Month: 3, Day: 15}
+	if err := w.SkipTerm(context.Background(), plan.Scope{ChatIDs: []int64{1}}, "не-uuid", day); !errors.Is(err, plan.ErrNotFound) {
+		t.Errorf("кривой id: %v", err)
+	}
+	if err := w.SkipTerm(context.Background(), plan.Scope{}, uuid.NewString(), day); err == nil {
+		t.Error("пустая область принята")
+	}
+	if len(f.skipCalls) != 0 {
+		t.Errorf("до хранилища дошло %d вызовов", len(f.skipCalls))
 	}
 }

@@ -7,6 +7,7 @@ package plan
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -173,4 +174,29 @@ func pad(n, width int) string {
 		digits = append([]byte{'0'}, digits...)
 	}
 	return string(digits)
+}
+
+// ParseDate разбирает строго "ГГГГ-ММ-ДД"; иное — ErrBadDate.
+func ParseDate(s string) (Date, error) {
+	s = strings.TrimSpace(s)
+	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+		return Date{}, ErrBadDate
+	}
+	num := func(part string) (int, bool) {
+		n := 0
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return 0, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n, true
+	}
+	y, ok1 := num(s[0:4])
+	m, ok2 := num(s[5:7])
+	d, ok3 := num(s[8:10])
+	if !ok1 || !ok2 || !ok3 {
+		return Date{}, ErrBadDate
+	}
+	return NewDate(y, m, d)
 }

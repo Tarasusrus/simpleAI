@@ -82,14 +82,6 @@ func parseMoney(amount json.Number, cur string) (plan.Money, error) {
 	return plan.Money{Minor: minor, Cur: plan.Currency(strings.ToUpper(strings.TrimSpace(cur)))}, nil
 }
 
-func parseDate(s string) (plan.Date, error) {
-	var y, m, d int
-	if n, err := fmt.Sscanf(strings.TrimSpace(s), "%4d-%2d-%2d", &y, &m, &d); err != nil || n != 3 || len(strings.TrimSpace(s)) != 10 {
-		return plan.Date{}, plan.ErrBadDate
-	}
-	return plan.NewDate(y, m, d)
-}
-
 func (s *Server) curFrom(r *http.Request) plan.Currency {
 	if strings.EqualFold(r.URL.Query().Get("cur"), "THB") {
 		return plan.CurTHB
@@ -121,7 +113,7 @@ func (s *Server) handleAddIncome(w http.ResponseWriter, r *http.Request) {
 		s.writeCommandError(w, err)
 		return
 	}
-	date, err := parseDate(b.Date)
+	date, err := plan.ParseDate(b.Date)
 	if err != nil {
 		s.writeCommandError(w, plan.ErrIncomeNoDate)
 		return
@@ -151,7 +143,7 @@ func (s *Server) handleAddPayment(w http.ResponseWriter, r *http.Request) {
 		in.Amount = &money
 	}
 	if strings.TrimSpace(b.Date) != "" {
-		d, err := parseDate(b.Date)
+		d, err := plan.ParseDate(b.Date)
 		if err != nil {
 			s.writeCommandError(w, err)
 			return
@@ -175,6 +167,47 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("plan web command", "command", "delete", "id", key, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
+type doneBody struct {
+	Amount   *json.Number `json:"amount"`
+	Currency string       `json:"currency"`
+}
+
+// handleDone: POST /api/plan/item/{key}/done — «оплачено» / «пришло». Тело можно
+// не слать: сумма берётся из записи. Нужна она только у записи без суммы.
+func (s *Server) handleDone(w http.ResponseWriter, r *http.Request) {
+	var b doneBody
+	if r.ContentLength != 0 && !decode(w, r, &b) {
+		return
+	}
+	var actual *plan.Money
+	if b.Amount != nil && strings.TrimSpace(b.Amount.String()) != "" {
+		money, err := parseMoney(*b.Amount, b.Currency)
+		if err != nil {
+			s.writeCommandError(w, err)
+			return
+		}
+		actual = &money
+	}
+	key := r.PathValue("key")
+	if err := s.planner.Settle(r.Context(), key, actual); err != nil {
+		s.writeCommandError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "done", "id", key, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
+// handleSkip: POST /api/plan/item/{key}/skip — пропустить этот срок повтора.
+func (s *Server) handleSkip(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if err := s.planner.Skip(r.Context(), key); err != nil {
+		s.writeCommandError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "skip", "id", key, "added_by", "web")
 	s.respondView(w, r, http.StatusOK)
 }
 

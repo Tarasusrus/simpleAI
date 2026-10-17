@@ -2,10 +2,12 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // Строки для плана окна. Деньги отдаются целыми минимальными единицами
@@ -204,4 +206,72 @@ func (s *Store) ExpenseCategoryNames(ctx context.Context) ([]string, error) {
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// PlanAmount — фактическая сумма при закрытии записи.
+type PlanAmount struct {
+	Minor    int64
+	Currency string
+}
+
+// SettlePlanItem закрывает плановую запись: пишет факт-транзакцию и помечает запись
+// закрытой одной транзакцией БД. Сумма берётся из записи; actual нужна, когда у
+// записи её не было («Права»), и заменяет плановую, если задана. false — записи нет
+// в этих чатах или она уже закрыта.
+func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUID, actual *PlanAmount, date time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("settle plan item: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // после Commit откат — no-op
+
+	var (
+		direction, currency, description string
+		amount                           *int64
+		categoryID                       *uuid.UUID
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT direction, currency, description, ROUND(amount * 100)::bigint, category_id
+		FROM budget_planned_expense
+		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled
+		FOR UPDATE`, id, chatIDs).Scan(&direction, &currency, &description, &amount, &categoryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("settle plan item: read: %w", err)
+	}
+	if actual != nil {
+		amount, currency = &actual.Minor, actual.Currency
+	}
+	if amount == nil || *amount <= 0 {
+		return false, fmt.Errorf("settle plan item: нет суммы")
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by)
+		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, 'web')`,
+		uuid.New(), direction, *amount, currency, categoryID, description, date); err != nil {
+		return false, fmt.Errorf("settle plan item: transaction: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE budget_planned_expense SET settled = true WHERE id = $1`, id); err != nil {
+		return false, fmt.Errorf("settle plan item: close: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("settle plan item: commit: %w", err)
+	}
+	return true, nil
+}
+
+// SkipRecurringTerm добавляет срок в skipped_dates правила («пропустить этот раз»).
+// Повторный вызов с тем же сроком ничего не меняет. false — правила нет в этих чатах.
+func (s *Store) SkipRecurringTerm(ctx context.Context, chatIDs []int64, ruleID uuid.UUID, term time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE budget_recurring
+		SET skipped_dates = CASE WHEN $3::date = ANY(skipped_dates) THEN skipped_dates
+		                         ELSE array_append(skipped_dates, $3::date) END
+		WHERE id = $1 AND chat_id = ANY($2)`, ruleID, chatIDs, term)
+	if err != nil {
+		return false, fmt.Errorf("skip recurring term: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
