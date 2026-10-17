@@ -237,8 +237,14 @@ func TestUpdatePlanItem_KeepsCategory(t *testing.T) {
 	// Дубли по регистру запрещает уникальный индекс из ADR-010; пока его нет, они бывают.
 	lower, upper := uuid.New(), uuid.New()
 	t.Cleanup(func() {
-		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_planned_expense WHERE category_id = ANY($1)`, []uuid.UUID{lower, upper})
-		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_category WHERE id = ANY($1)`, []uuid.UUID{lower, upper})
+		for _, q := range []string{
+			`DELETE FROM budget_planned_expense WHERE category_id = ANY($1)`,
+			`DELETE FROM budget_category WHERE id = ANY($1)`,
+		} {
+			if _, err := s.pool.Exec(ctx, q, []uuid.UUID{lower, upper}); err != nil {
+				t.Errorf("очистка дублей: %v", err)
+			}
+		}
 	})
 	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_category (id, name, type) VALUES ($1, 'planeditdup', 'expense'), ($2, 'PlanEditDup', 'expense')`, lower, upper); err != nil {
 		t.Skipf("дубль по регистру не вставить (уникальный индекс): %v", err)
