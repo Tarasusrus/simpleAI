@@ -62,8 +62,23 @@ func (c calc) categories() ([]CategoryRow, error) {
 	recent := map[string][]Event{}
 	amounts := map[string]int64{} // ключ события → сумма в валюте показа
 	avgSums := map[string]int64{}
+	plannedSums := map[string]int64{}
 	avgFrom := c.in.Today.AddDays(-(c.in.AvgDays - 1))
 	for _, e := range c.in.Events {
+		if e.Kind == KindPayment && e.State == StatePlanned && e.Date != nil && e.Amount != nil && c.contains(nowIdx, *e.Date) {
+			n, err := c.money(e.Amount)
+			if err != nil {
+				return nil, err
+			}
+			name := e.Category
+			if name == "" {
+				name = UncategorizedName
+			}
+			if plannedSums[name], err = addI64(plannedSums[name], n); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if e.State != StateDone || e.Date == nil || e.Amount == nil {
 			continue
 		}
@@ -109,6 +124,8 @@ func (c calc) categories() ([]CategoryRow, error) {
 			}
 			row.Avg = roundDivHalfAway(sum*windowDays, int64(c.in.AvgDays))
 		}
+		row.Planned = plannedSums[name]
+		row.Free = max(0, row.Avg-row.Planned)
 		evs := recent[name]
 		sort.SliceStable(evs, func(i, j int) bool {
 			if cmp := evs[i].Date.Compare(*evs[j].Date); cmp != 0 {

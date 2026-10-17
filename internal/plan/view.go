@@ -83,5 +83,8 @@ type CategoryRow struct {
 	// Avg — обычные траты за окно (14 дней): сумма за AvgDays дней, приведённая к 14.
 	Avg       int64
 	Last, Now int64
-	Recent    []Row
+	// Planned — неоплаченные плановые платежи категории в окне «Сейчас»; Free — что остаётся
+	// от обычных трат: max(0, Avg−Planned). Сопоставление только по категории.
+	Planned, Free int64
+	Recent        []Row
 }

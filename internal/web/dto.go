@@ -91,11 +91,13 @@ type MonthDTO struct {
 }
 
 type CategoryDTO struct {
-	Name   string   `json:"name"`
-	Avg    int64    `json:"avg"`
-	Last   int64    `json:"last"`
-	Now    int64    `json:"now"`
-	Recent []RowDTO `json:"recent"`
+	Name    string   `json:"name"`
+	Avg     int64    `json:"avg"`
+	Planned int64    `json:"planned"`
+	Free    int64    `json:"free"`
+	Last    int64    `json:"last"`
+	Now     int64    `json:"now"`
+	Recent  []RowDTO `json:"recent"`
 }
 
 func dateStr(d plan.Date) string { return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day) }
@@ -157,7 +159,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		out.Later = append(out.Later, MonthDTO{Year: m.Year, Month: m.Month, Count: m.Count, Sum: m.Sum, Items: rows(m.Items)})
 	}
 	for _, c := range v.Categories {
-		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Avg: c.Avg, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
+		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Avg: c.Avg, Planned: c.Planned, Free: c.Free, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
 	}
 	return out
 }
