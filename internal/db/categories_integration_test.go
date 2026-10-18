@@ -16,7 +16,11 @@ func catStore(t *testing.T) (*categories.Store, *sql.DB) {
 	t.Helper()
 	conn := scratchDB(t, 22)
 	dsn, _ := scratchDSNs.Load(conn)
-	pool, err := pgxpool.New(context.Background(), dsn.(string))
+	dsnStr, ok := dsn.(string)
+	if !ok {
+		t.Fatalf("нет DSN для временной базы")
+	}
+	pool, err := pgxpool.New(context.Background(), dsnStr)
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
@@ -209,7 +213,11 @@ func TestCategories_ReconcileShareNames(t *testing.T) {
 	if count(t, conn, `SELECT count(*) FROM budget_envelope_share_category WHERE category_name='тестцель'`) != 1 {
 		t.Error("имя доли не исправлено")
 	}
-	if n, _ := st.ReconcileShareNames(context.Background()); n != 0 {
+	n, err = st.ReconcileShareNames(context.Background())
+	if err != nil {
+		t.Fatalf("повторный запуск: %v", err)
+	}
+	if n != 0 {
 		t.Errorf("повторный запуск изменил %d строк", n)
 	}
 }
