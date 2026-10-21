@@ -28,7 +28,7 @@ const (
 
 // WithReceiptPhotos отправляет фото и документы-картинки/PDF в сценарий
 // чека, а всё остальное — в next. Подпись к фото игнорируется: фото — это
-// ввод данных, а не вопрос агенту (ADR-010 §1). Фото не сохраняется на
+// ввод данных, а не вопрос агенту (ADR-014 §1). Фото не сохраняется на
 // диск и не попадает в ingest-JSON: ветка стоит до next.
 //
 // svc == nil — сценарий не настроен: фото получает «не настроена», а не
@@ -92,7 +92,7 @@ func handleReceiptAttachment(ctx context.Context, tctx *Context, svc ReceiptServ
 }
 
 // logReceiptError пишет только тип вложения и ошибку: ни байтов, ни
-// распознанного текста чека в логах быть не должно (ADR-010 §6).
+// распознанного текста чека в логах быть не должно (ADR-014 §6).
 func logReceiptError(ctx context.Context, tctx *Context, msg string, att core.Attachment, err error) {
 	if tctx.Logger != nil {
 		tctx.Logger.ErrorContext(ctx, msg, "kind", att.Kind, "size", att.Size, "err", scrubError(err))

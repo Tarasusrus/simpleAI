@@ -81,7 +81,7 @@ jobs:
               echo "PLAN_WEB_ENABLED=$PLAN_WEB_ENABLED"
               echo "PLAN_WEB_TOKEN=$PLAN_WEB_TOKEN"
               echo ""
-              # Фото чеков (ADR-010): прокси LiteLLM на этом же сервере,
+              # Фото чеков (ADR-014): прокси LiteLLM на этом же сервере,
               # контейнер litellm на 127.0.0.1:4000, маршрут vision.
               echo "VISION_LLM_BASE_URL=http://127.0.0.1:4000/v1"
               echo "VISION_LLM_API_KEY=$VISION_LLM_API_KEY"
