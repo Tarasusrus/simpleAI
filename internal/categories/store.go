@@ -2,8 +2,10 @@ package categories
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -178,6 +180,50 @@ func (s *Store) ListAssignable(ctx context.Context, typ string) ([]Category, err
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// MostUsedCategory — самая частая категория среди прошлых трат с таким же описанием (без учёта
+// регистра и краёв). Не отдаёт split-источник («Еда» смешивает цели) и «Прочее» (результат
+// деградации не должен закрепляться за описанием навсегда).
+func (s *Store) MostUsedCategory(ctx context.Context, typ, description string) (Category, bool, error) {
+	key := strings.ToLower(Clean(description))
+	if key == "" {
+		return Category{}, false, nil
+	}
+	c, err := scanCat(s.pool.QueryRow(ctx, `
+		SELECT c.id, c.name, c.type, c.icon, c.sort_order
+		FROM budget_transaction t JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = $1 AND lower(btrim(t.description)) = $2
+		  AND lower(c.name) <> 'прочее'
+		  AND NOT EXISTS (SELECT 1 FROM category_split_target s WHERE s.source_id = c.id)
+		GROUP BY c.id ORDER BY count(*) DESC, c.name LIMIT 1`, typ, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Category{}, false, nil
+	}
+	if err != nil {
+		return Category{}, false, fmt.Errorf("most used category: %w", err)
+	}
+	return c, true, nil
+}
+
+// AddProposal кладёт в очередь разбора то, что бот не смог определить (kind='proposal').
+// transactionID — запись, из-за которой появилось предложение.
+func (s *Store) AddProposal(ctx context.Context, p Proposal, transactionID uuid.UUID) error {
+	name := Clean(p.Name)
+	if name == "" {
+		return errors.New("пустое имя предложения")
+	}
+	payload := map[string]any{"description": p.Description, "reason": p.Reason, "transaction_id": transactionID.String()}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("proposal payload: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO category_review_queue (type, name, name_lower, kind, payload)
+		VALUES ($1, $2, lower($2), 'proposal', $3)`, p.Type, name, raw); err != nil {
+		return fmt.Errorf("add proposal: %w", err)
+	}
+	return nil
 }
 
 // Usage считает ссылки на категорию.
