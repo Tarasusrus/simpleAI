@@ -64,6 +64,7 @@ func main() {
 
 	// Единый реестр skills для всех компонентов.
 	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	appwiring.AttachCategoryChooser(budgetSkill, pool, cfg.Classifier, logger)
 
 	// Контекст с graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+
 	"simpleAI/internal/budget"
+	"simpleAI/internal/categories"
 	"simpleAI/internal/plugin"
 )
 
@@ -18,6 +21,26 @@ type BudgetSkill struct {
 	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
 	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
 	shareStore shareWarningStore
+	// chooser выбирает категорию (ADR-012); nil — прежнее поведение: имя из запроса через
+	// GetOrCreateCategory, без классификатора.
+	chooser   CategoryChooser
+	proposals ProposalSink
+}
+
+// CategoryChooser — то, что навык берёт у модуля категорий (реализует *categories.Chooser).
+type CategoryChooser interface {
+	Choose(ctx context.Context, in categories.ChooseInput) (categories.Choice, error)
+}
+
+// ProposalSink принимает то, что бот не смог определить (реализует *categories.Store).
+type ProposalSink interface {
+	AddProposal(ctx context.Context, p categories.Proposal, transactionID uuid.UUID) error
+}
+
+// WithCategoryChooser подключает выбор категории с памятью описаний и классификатором.
+func (s *BudgetSkill) WithCategoryChooser(ch CategoryChooser, sink ProposalSink) *BudgetSkill {
+	s.chooser, s.proposals = ch, sink
+	return s
 }
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
