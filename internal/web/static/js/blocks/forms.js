@@ -1,14 +1,11 @@
-import { h } from '../dom.js';
+import { h, field } from '../dom.js';
 import { addIncome, addPayment, getCategories } from '../api.js';
+import { createForm } from './limit-form.js';
 
 // Кнопки «＋ Поступление» / «＋ Платёж» и форма под ними. Всё, что владелец
 // вводит, уходит на сервер как есть; проверку и расчёт делает сервер.
 
-let open = null; // 'income' | 'payment' | null — переживает перерисовку после сохранения
-
-function field(label, input, cls) {
-  return h('div', { class: 'fi ' + (cls || '') }, h('label', null, label), input);
-}
+let open = null; // 'income' | 'payment' | 'limit' | null — переживает перерисовку после сохранения
 
 function curSelect(cur) {
   return h('select', { name: 'currency' },
@@ -90,7 +87,8 @@ export function render(view, cur, ctx) {
   const box = h('div', { class: 'forms' });
   box.append(h('div', { class: 'bar' },
     h('button', { type: 'button', class: 'add' + (open === 'income' ? ' on' : ''), onclick: () => { open = open === 'income' ? null : 'income'; ctx.redraw(); } }, '＋ Поступление'),
-    h('button', { type: 'button', class: 'add' + (open === 'payment' ? ' on' : ''), onclick: () => { open = open === 'payment' ? null : 'payment'; ctx.redraw(); } }, '＋ Платёж')));
+    h('button', { type: 'button', class: 'add' + (open === 'payment' ? ' on' : ''), onclick: () => { open = open === 'payment' ? null : 'payment'; ctx.redraw(); } }, '＋ Платёж'),
+    h('button', { type: 'button', class: 'add' + (open === 'limit' ? ' on' : ''), onclick: () => { open = open === 'limit' ? null : 'limit'; ctx.redraw(); } }, '＋ Лимит')));
   const status = h('div', { class: 'hint' });
   if (open === 'income') {
     box.append(incomeForm(view, cur, ctx, status));
@@ -98,6 +96,10 @@ export function render(view, cur, ctx) {
     const slot = h('div');
     box.append(slot);
     getCategories().catch(() => []).then((cats) => slot.replaceChildren(paymentForm(view, cur, ctx, status, cats)));
+  } else if (open === 'limit') {
+    const slot = h('div');
+    box.append(slot);
+    getCategories().catch(() => []).then((cats) => slot.replaceChildren(createForm(view, cur, ctx, cats, () => { open = null; ctx.redraw(); })));
   }
   return box;
 }

@@ -46,8 +46,9 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
-	writer Writer     // nil — запись отключена
-	facts  FactWriter // nil — правка и возврат закрытых записей отключены
+	writer Writer      // nil — запись отключена
+	facts  FactWriter  // nil — правка и возврат закрытых записей отключены
+	limits LimitWriter // nil — запись лимитов отключена (WithLimitWriter)
 	today  Clock
 	scope  Scope
 }
@@ -69,6 +70,7 @@ type state struct {
 	today   Date
 	windows []Window
 	events  []Event // платежи: факты, разовые и развёрнутые повторы
+	limits  []Limit
 	st      WindowState
 }
 
@@ -100,7 +102,7 @@ func (s *Service) load(ctx context.Context) (state, error) {
 		}
 	}
 	ws := BuildWindows(incomes)
-	return state{snap: snap, today: today, windows: ws, events: payments, st: Locate(ws, today)}, nil
+	return state{snap: snap, today: today, windows: ws, events: payments, limits: snap.Limits, st: Locate(ws, today)}, nil
 }
 
 // focus — окно, которое описывает экран, и «сегодня» для его расчёта. В зазоре
@@ -140,11 +142,16 @@ type ViewOptions struct {
 
 // ViewWith — View с настройками показа.
 func (s *Service) ViewWith(ctx context.Context, cur Currency, opt ViewOptions) (Result, error) {
-	showPast := opt.ShowPast
 	ld, err := s.load(ctx)
 	if err != nil {
 		return Result{}, err
 	}
+	return viewOf(ld, cur, opt)
+}
+
+// viewOf считает окно по уже загруженному состоянию: по нему же считается предпросмотр лимита.
+func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
+	showPast := opt.ShowPast
 	asOf, upcoming := ld.today, false
 	if ld.st.Kind == StateBetween {
 		_, asOf, upcoming = ld.focus()
@@ -164,6 +171,7 @@ func (s *Service) ViewWith(ctx context.Context, cur Currency, opt ViewOptions) (
 		Cur:        cur,
 		Today:      asOf,
 		ReservePct: ld.snap.ReservePct,
+		Limits:     ld.limits,
 	})
 	if err != nil {
 		return Result{}, err
@@ -231,7 +239,7 @@ func checkInvariant(v View) error {
 	if v.State == StateNone || v.Window == nil {
 		return nil
 	}
-	want := v.Income.Received + v.Income.Expected - v.Payments - v.Spent - v.Reserve
+	want := v.Income.Received + v.Income.Expected - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	if v.CanSpend != want {
 		return fmt.Errorf("%w: canSpend=%d, по слагаемым %d", ErrInvariant, v.CanSpend, want)
 	}

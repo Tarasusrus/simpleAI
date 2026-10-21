@@ -28,6 +28,8 @@ type WindowView struct {
 	Later      []MonthDTO    `json:"later"`
 	Inbox      []RowDTO      `json:"inbox"`
 	Categories []CategoryDTO `json:"categories"`
+	// Limits — лимиты категорий окна (ADR-011); [] если их нет.
+	Limits []LimitDTO `json:"limits"`
 }
 
 type MetaDTO struct {
@@ -62,6 +64,9 @@ type KPIDTO struct {
 	Unpriced        int     `json:"unpriced"`
 	UndatedCount    int     `json:"undatedCount"`
 	UndatedSum      int64   `json:"undatedSum"`
+	// LimitHold — сумма остатков лимитов: отложена и уже вычтена из canSpend.
+	LimitHold        int64 `json:"limitHold"`
+	LimitsExceedFree bool  `json:"limitsExceedFree"`
 }
 
 type RowDTO struct {
@@ -142,11 +147,13 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, Reserve: v.Reserve,
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
+			LimitHold: v.LimitHold, LimitsExceedFree: v.LimitsExceedFree,
 		},
 		Timeline:   rows(v.Timeline),
 		Inbox:      rows(v.Undated.Items),
 		Later:      make([]MonthDTO, 0, len(v.Later)),
 		Categories: make([]CategoryDTO, 0, len(v.Categories)),
+		Limits:     limitDTOs(v.Limits),
 	}
 	if v.Window != nil {
 		out.Window = &WindowDTO{

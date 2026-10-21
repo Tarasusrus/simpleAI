@@ -92,7 +92,7 @@ type MergeRequest struct {
 
 // Counts — сколько строк ссылается на категорию в каждой таблице.
 type Counts struct {
-	Transactions, Planned, Recurring, Shares int
+	Transactions, Planned, Recurring, Shares, Limits int
 }
 
 // MergeResult — итог слияния.

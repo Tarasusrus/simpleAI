@@ -20,6 +20,8 @@ type ComputeInput struct {
 	// AvgDays — за сколько дней считать «обычные» траты по категориям: 7..730,
 	// 0 = defaultAvgDays.
 	AvgDays int
+	// Limits — лимиты категорий (ADR-011); выбор действующих на окно делает Compute.
+	Limits []Limit
 }
 
 // defaultAvgDays — окно усреднения «обычных» трат по умолчанию.
@@ -268,8 +270,12 @@ func (c calc) core() (View, error) {
 		return View{}, ErrOverflow
 	}
 	v.Reserve = roundDivHalfAway(income*int64(c.in.ReservePct), 100)
-	out := income - v.Payments - v.Spent - v.Reserve
+	if v.Limits, v.LimitHold, err = c.limits(); err != nil {
+		return View{}, err
+	}
+	out := income - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	v.CanSpend = out
+	v.LimitsExceedFree = v.LimitHold > max(out+v.LimitHold, 0)
 	if out >= 0 && c.st.DaysLeft > 0 {
 		per := out / int64(c.st.DaysLeft) // floor: не обещаем больше, чем есть
 		v.PerDay = &per
