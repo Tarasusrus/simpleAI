@@ -71,15 +71,35 @@ func find(ctx context.Context, q querier, name, typ string) (Category, bool, err
 	return Category{}, false, nil
 }
 
+// checkInput чистит имя и проверяет тип: общий вход Resolve и GetOrCreate.
+func checkInput(name, typ string) (string, error) {
+	name = Clean(name)
+	if name == "" {
+		return "", errors.New("пустое имя категории")
+	}
+	if typ != "income" && typ != "expense" {
+		return "", fmt.Errorf("неизвестный тип категории %q", typ)
+	}
+	return name, nil
+}
+
+// Resolve находит категорию по имени или алиасу и ничего не создаёт (ADR-012 §1).
+// found=false без ошибки означает «такой категории нет»: вызывающий сам решает, что делать
+// (веб-план отвечает ошибкой вместо тихого NULL).
+func (s *Store) Resolve(ctx context.Context, name, typ string) (Category, bool, error) {
+	name, err := checkInput(name, typ)
+	if err != nil {
+		return Category{}, false, err
+	}
+	return find(ctx, s.pool, name, typ)
+}
+
 // GetOrCreate — единая точка создания категории (ADR-010 §2). Имя-алиас ведёт на целевую
 // категорию, «Кофе» и «кофе» — одна категория; параллельные вызовы создают ровно одну.
 func (s *Store) GetOrCreate(ctx context.Context, name, typ string) (Category, bool, error) {
-	name = Clean(name)
-	if name == "" {
-		return Category{}, false, errors.New("пустое имя категории")
-	}
-	if typ != "income" && typ != "expense" {
-		return Category{}, false, fmt.Errorf("неизвестный тип категории %q", typ)
+	name, err := checkInput(name, typ)
+	if err != nil {
+		return Category{}, false, err
 	}
 	if c, ok, err := find(ctx, s.pool, name, typ); err != nil || ok {
 		return c, false, err
