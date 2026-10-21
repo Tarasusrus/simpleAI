@@ -126,6 +126,60 @@ func (s *Store) GetOrCreate(ctx context.Context, name, typ string) (Category, bo
 	return c, false, nil
 }
 
+// SplitTarget — одна из целей разделения легаси-категории (ADR-013 §2).
+type SplitTarget struct {
+	Category
+	IsDefault bool
+}
+
+// SplitTargets возвращает цели, на которые разделена категория; пусто — это не split-источник.
+// Цель по умолчанию идёт первой.
+func (s *Store) SplitTargets(ctx context.Context, source uuid.UUID) ([]SplitTarget, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.name, c.type, c.icon, c.sort_order, t.is_default
+		FROM category_split_target t JOIN budget_category c ON c.id = t.target_id
+		WHERE t.source_id = $1
+		ORDER BY t.is_default DESC, c.sort_order, c.name`, source)
+	if err != nil {
+		return nil, fmt.Errorf("split targets: %w", err)
+	}
+	defer rows.Close()
+	var out []SplitTarget
+	for rows.Next() {
+		var x SplitTarget
+		if err := rows.Scan(&x.ID, &x.Name, &x.Type, &x.Icon, &x.SortOrder, &x.IsDefault); err != nil {
+			return nil, fmt.Errorf("scan split target: %w", err)
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// ListAssignable — категории типа typ, в которые можно записать новую трату: без split-источников
+// (легаси «Еда» не назначается напрямую, ADR-013 §3).
+func (s *Store) ListAssignable(ctx context.Context, typ string) ([]Category, error) {
+	if typ != "income" && typ != "expense" {
+		return nil, fmt.Errorf("неизвестный тип категории %q", typ)
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+catCols+` FROM budget_category c
+		WHERE c.type = $1 AND NOT EXISTS (SELECT 1 FROM category_split_target t WHERE t.source_id = c.id)
+		ORDER BY sort_order, name`, typ)
+	if err != nil {
+		return nil, fmt.Errorf("list assignable: %w", err)
+	}
+	defer rows.Close()
+	var out []Category
+	for rows.Next() {
+		c, err := scanCat(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan category: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // Usage считает ссылки на категорию.
 func (s *Store) Usage(ctx context.Context, id uuid.UUID) (Counts, error) {
 	var c Counts

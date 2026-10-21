@@ -14,7 +14,12 @@ import (
 
 func catStore(t *testing.T) (*categories.Store, *sql.DB) {
 	t.Helper()
-	conn := scratchDB(t, 24)
+	return catStoreAt(t, 24)
+}
+
+func catStoreAt(t *testing.T, version int64) (*categories.Store, *sql.DB) {
+	t.Helper()
+	conn := scratchDB(t, version)
 	dsn, _ := scratchDSNs.Load(conn)
 	dsnStr, ok := dsn.(string)
 	if !ok {
@@ -345,5 +350,42 @@ func TestCategories_Resolve_RejectsBadInput(t *testing.T) {
 		if _, found, err := st.Resolve(context.Background(), tc.name, tc.typ); err == nil || found {
 			t.Errorf("Resolve(%q,%q): err=%v found=%v, ждали ошибку", tc.name, tc.typ, err, found)
 		}
+	}
+}
+
+// Цель по умолчанию идёт первой; у не-источника целей нет; ListAssignable не отдаёт split-источник
+// и не смешивает типы.
+//
+// Мутация: убрать NOT EXISTS из ListAssignable или ORDER BY is_default DESC — тест краснеет.
+func TestCategories_SplitTargetsAndListAssignable(t *testing.T) {
+	st, conn := catStoreAt(t, 25)
+	ctx := context.Background()
+	src := mkCat(t, conn, "Сплит-источник", "expense")
+	a := mkCat(t, conn, "Сплит-А", "expense")
+	b := mkCat(t, conn, "Сплит-Б", "expense")
+	mkCat(t, conn, "Сплит-доход", "income")
+	mustExec(t, conn, `INSERT INTO category_split_target (source_id,target_id,is_default) VALUES ($1,$2,false), ($1,$3,true)`, src, a, b)
+
+	got, err := st.SplitTargets(ctx, src)
+	if err != nil || len(got) != 2 || got[0].ID != b || !got[0].IsDefault || got[1].ID != a || got[1].IsDefault {
+		t.Fatalf("SplitTargets=%+v err=%v, ждали [Б(default), А]", got, err)
+	}
+	if none, err := st.SplitTargets(ctx, a); err != nil || len(none) != 0 {
+		t.Fatalf("у не-источника цели %+v err=%v", none, err)
+	}
+
+	list, err := st.ListAssignable(ctx, "expense")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, c := range list {
+		names[c.Name] = true
+	}
+	if names["Сплит-источник"] || !names["Сплит-А"] || !names["Сплит-Б"] || names["Сплит-доход"] {
+		t.Errorf("ListAssignable(expense) = %v", names)
+	}
+	if _, err := st.ListAssignable(ctx, "other"); err == nil {
+		t.Error("неизвестный тип принят")
 	}
 }
