@@ -51,20 +51,6 @@ func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 	return out, rows.Err()
 }
 
-// FindCategoryByName ищет категорию по имени (case-insensitive) и типу.
-func (s *Store) FindCategoryByName(ctx context.Context, name, typ string) (*Category, error) {
-	var c Category
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, type, icon, sort_order
-		FROM budget_category
-		WHERE LOWER(name) = LOWER($1) AND type = $2
-	`, strings.TrimSpace(name), typ).Scan(&c.ID, &c.Name, &c.Type, &c.Icon, &c.SortOrder)
-	if err != nil {
-		return nil, fmt.Errorf("find category %q: %w", name, err)
-	}
-	return &c, nil
-}
-
 // GetOrCreateCategory — единая точка получения/создания категории (ADR-010): учитывает
 // регистр, пробелы и алиасы слитых категорий, безопасна при параллельных вызовах.
 func (s *Store) GetOrCreateCategory(ctx context.Context, name, typ string) (*Category, error) {
@@ -73,23 +59,6 @@ func (s *Store) GetOrCreateCategory(ctx context.Context, name, typ string) (*Cat
 		return nil, fmt.Errorf("get or create category %q: %w", name, err)
 	}
 	return &Category{ID: c.ID, Name: c.Name, Type: c.Type, Icon: c.Icon, SortOrder: c.SortOrder}, nil
-}
-
-// AddCategory создаёт пользовательскую категорию.
-func (s *Store) AddCategory(ctx context.Context, name, typ string) (*Category, error) {
-	c := Category{
-		ID:   uuid.New(),
-		Name: strings.TrimSpace(name),
-		Type: typ,
-	}
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO budget_category (id, name, type, icon, sort_order)
-		VALUES ($1, $2, $3, '', 100)
-	`, c.ID, c.Name, c.Type)
-	if err != nil {
-		return nil, fmt.Errorf("add category: %w", err)
-	}
-	return &c, nil
 }
 
 // --- Транзакции ---
