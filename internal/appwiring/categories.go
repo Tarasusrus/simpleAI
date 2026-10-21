@@ -1,6 +1,7 @@
 package appwiring
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -39,5 +40,15 @@ func AttachCategoryChooser(bs *budgetskill.BudgetSkill, pool *pgxpool.Pool, cfg 
 		}
 	}
 	logger.Info("category chooser ready", "mode", ch.Mode)
-	bs.WithCategoryChooser(ch, store)
+	bs.WithCategoryChooser(ch, store).WithCategoryNames(func(ctx context.Context) ([]string, error) {
+		cats, err := store.ListAssignable(ctx, "expense")
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(cats))
+		for _, c := range cats {
+			names = append(names, c.Name)
+		}
+		return names, nil
+	})
 }
