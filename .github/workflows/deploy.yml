@@ -86,6 +86,13 @@ jobs:
               echo "VISION_LLM_BASE_URL=http://127.0.0.1:4000/v1"
               echo "VISION_LLM_API_KEY=$VISION_LLM_API_KEY"
               echo "VISION_MODEL=vision"
+              echo ""
+              # Классификатор категорий (ADR-012): тот же прокси, маршрут standard. Ключ тот же, что у
+              # vision (виртуальный ключ прокси видит оба маршрута). Выключить: CATEGORY_CLASSIFIER_MODE=off.
+              echo "CATEGORY_CLASSIFIER_MODE=on"
+              echo "CATEGORY_LLM_BASE_URL=http://127.0.0.1:4000/v1"
+              echo "CATEGORY_LLM_API_KEY=$VISION_LLM_API_KEY"
+              echo "CATEGORY_LLM_MODEL=standard"
             } > ~/simpleAI/.env
 
             cd ~/simpleAI
