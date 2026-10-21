@@ -2,6 +2,7 @@ package planrepo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -66,9 +67,17 @@ func (w *Writer) AddPlanned(ctx context.Context, sc plan.Scope, n plan.NewItem) 
 	}
 	id, err := w.sink.AddPlanItem(ctx, in)
 	if err != nil {
-		return "", err
+		return "", mapCategoryErr(err)
 	}
 	return id.String(), nil
+}
+
+// mapCategoryErr: имя категории, которой нет, — доменная ошибка, а не тихий NULL.
+func mapCategoryErr(err error) error {
+	if errors.Is(err, budget.ErrUnknownCategory) {
+		return plan.ErrUnknownCategory
+	}
+	return err
 }
 
 // DeletePlanned удаляет запись из области; чужой или несуществующий id — ErrNotFound.

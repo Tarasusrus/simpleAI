@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"simpleAI/internal/categories"
 )
 
 // Строки для плана окна. Деньги отдаются целыми минимальными единицами
@@ -158,6 +160,26 @@ func (s *Store) PlanReservePct(ctx context.Context) (int, error) {
 	return pct, nil
 }
 
+// ErrUnknownCategory — имя категории расходов не найдено ни среди категорий, ни среди алиасов.
+// План не создаёт категории и не пишет тихий NULL: непустое имя без категории — ошибка (ADR-012 §1).
+var ErrUnknownCategory = errors.New("budget: категория расходов не найдена")
+
+// expenseCategoryID переводит имя из формы плана в category_id через единый модуль категорий
+// (имя или алиас, регистр не важен). Пустое имя — NULL: запись без категории.
+func (s *Store) expenseCategoryID(ctx context.Context, name string) (uuid.NullUUID, error) {
+	if categories.Clean(name) == "" {
+		return uuid.NullUUID{}, nil
+	}
+	c, found, err := categories.NewStore(s.pool).Resolve(ctx, name, "expense")
+	if err != nil {
+		return uuid.NullUUID{}, fmt.Errorf("resolve category %q: %w", name, err)
+	}
+	if !found {
+		return uuid.NullUUID{}, ErrUnknownCategory
+	}
+	return uuid.NullUUID{UUID: c.ID, Valid: true}, nil
+}
+
 // PlanItemInput — новая плановая запись (расход или поступление).
 type PlanItemInput struct {
 	ChatID      int64
@@ -171,18 +193,23 @@ type PlanItemInput struct {
 }
 
 // AddPlanItem сохраняет плановую запись одной командой (одна транзакция БД).
-// Категория подбирается по имени без учёта регистра; нет такой — запись без категории.
+// Категория — по имени или алиасу через модуль категорий; пусто — без категории;
+// непустое имя без категории — ErrUnknownCategory.
 func (s *Store) AddPlanItem(ctx context.Context, in PlanItemInput) (uuid.UUID, error) {
+	catID, err := s.expenseCategoryID(ctx, in.Category)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `
+	err = s.pool.QueryRow(ctx, `
 		INSERT INTO budget_planned_expense
 		    (chat_id, direction, description, amount, currency, due_date, window_start, category_id)
 		VALUES ($1, $2, $3,
 		        CASE WHEN $4::bigint IS NULL THEN NULL ELSE $4::bigint::numeric / 100 END,
 		        $5, $6, $7,
-		        (SELECT c.id FROM budget_category c WHERE LOWER(c.name) = LOWER($8) AND c.type = 'expense' LIMIT 1))
+		        $8::uuid)
 		RETURNING id`,
-		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, in.Category).Scan(&id)
+		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, catID).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("add plan item: %w", err)
 	}
