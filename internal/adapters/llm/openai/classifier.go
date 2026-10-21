@@ -108,7 +108,9 @@ func (c *ClassifierClient) Classify(ctx context.Context, description string, can
 			openai.UserMessage(string(payload)),
 		},
 		Temperature: openai.Float(0),
-		MaxTokens:   openai.Int(200),
+		// Ответ короткий, но кириллица и тайский дорого стоят в токенах: 200 обрезало JSON посреди строки
+		// (замер на standard 2026-10-21).
+		MaxTokens: openai.Int(400),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
