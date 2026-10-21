@@ -14,6 +14,11 @@ import (
 // (amount*100), прямо из NUMERIC в SQL: через float64 копейки терялись бы на
 // границе, а домен плана считает только целыми (C1).
 
+// AddedByWeb — значение added_by у фактов, созданных экраном плана. По нему и по
+// recurring_id IS NULL экран узнаёт «свои» факты, которые можно править и возвращать в
+// план (транзакции общие и chat_id не имеют): менять в одном месте.
+const AddedByWeb = "web"
+
 // PlanTx — транзакция для плана: факт поступления или расхода.
 type PlanTx struct {
 	ID          uuid.UUID
@@ -26,6 +31,10 @@ type PlanTx struct {
 	RecurringID *uuid.UUID
 	// ScheduledFor — срок правила, к которому относится факт; у старых строк NULL.
 	ScheduledFor *time.Time
+	// AddedBy — кто создал факт ("web", "bot", ...; у старых строк пусто).
+	AddedBy string
+	// PlannedID — плановая запись, которую закрыл факт; у старых строк и чужих NULL.
+	PlannedID *uuid.UUID
 }
 
 // PlanRecurring — включённое повторяющееся правило в новом описании (шаг, якорь).
@@ -64,7 +73,8 @@ type PlanPlanned struct {
 func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id, t.type, ROUND(t.amount * 100)::bigint, t.currency, COALESCE(c.name, ''),
-		       t.description, t.transaction_date, t.recurring_id, t.scheduled_for
+		       t.description, t.transaction_date, t.recurring_id, t.scheduled_for,
+		       COALESCE(t.added_by, ''), t.planned_id
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		ORDER BY t.transaction_date, t.created_at, t.id`)
@@ -76,7 +86,7 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	for rows.Next() {
 		var x PlanTx
 		if err := rows.Scan(&x.ID, &x.Type, &x.AmountMinor, &x.Currency, &x.Category,
-			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor); err != nil {
+			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor, &x.AddedBy, &x.PlannedID); err != nil {
 			return nil, fmt.Errorf("plan transactions scan: %w", err)
 		}
 		out = append(out, x)
@@ -248,9 +258,9 @@ func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		return false, fmt.Errorf("settle plan item: нет суммы")
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by)
-		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, 'web')`,
-		uuid.New(), direction, *amount, currency, categoryID, description, date); err != nil {
+		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by, planned_id)
+		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, $8, $9)`,
+		uuid.New(), direction, *amount, currency, categoryID, description, date, AddedByWeb, id); err != nil {
 		return false, fmt.Errorf("settle plan item: transaction: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE budget_planned_expense SET settled = true WHERE id = $1`, id); err != nil {

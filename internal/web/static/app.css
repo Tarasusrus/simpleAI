@@ -68,3 +68,10 @@ td.c{cursor:pointer;text-decoration:underline dotted}.sc{overflow-x:auto}
 .forms .top{margin-bottom:12px}
 .hint.err{color:var(--bad)}
 .it .r .x{display:inline-block;margin-left:0}
+.it.st{grid-template-columns:28px 58px 1fr auto}.it.st .r{grid-column:3/-1}
+.mk{width:22px;height:22px;min-height:0;padding:0;border-radius:50%;border:2px solid var(--mut);background:transparent;color:var(--card);font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+.mk:not([disabled]):hover{border-color:var(--acc)}
+.mk.done{background:var(--acc);border-color:var(--acc);color:var(--bg)}
+.mk[disabled]{cursor:default;opacity:.55}
+.mk:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+@media(max-width:600px){.it.st{grid-template-columns:28px 48px 1fr auto}}

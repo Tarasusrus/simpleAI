@@ -17,6 +17,10 @@ func (f *fakePlanner) Item(context.Context, string) (plan.EditableItem, error) {
 	return plan.EditableItem{}, f.cmdErr
 }
 func (f *fakePlanner) Edit(context.Context, string, plan.EditInput) error { return f.cmdErr }
+func (f *fakePlanner) Reopen(_ context.Context, key string) error {
+	f.reopened = append(f.reopened, key)
+	return f.cmdErr
+}
 
 type editPlanner struct {
 	fakePlanner

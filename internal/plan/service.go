@@ -46,15 +46,20 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
-	writer Writer // nil — запись отключена
+	writer Writer     // nil — запись отключена
+	facts  FactWriter // nil — правка и возврат закрытых записей отключены
 	today  Clock
 	scope  Scope
 }
 
 // NewService собирает сервис; все зависимости приходят снаружи. Writer может быть
 // nil: тогда команды записи возвращают ErrReadOnly.
-func NewService(r Reader, w Writer, today Clock, sc Scope) *Service {
-	return &Service{reader: r, writer: w, today: today, scope: sc}
+func NewService(r Reader, w Writer, today Clock, sc Scope, opts ...Option) *Service {
+	s := &Service{reader: r, writer: w, today: today, scope: sc}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // state — снимок и окна, посчитанные от одной «сегодня»; общий для расчёта и

@@ -32,6 +32,7 @@ type fakePlanner struct {
 	rates    []int64
 	moved    []string
 	moves    []plan.MoveInput
+	reopened []string
 
 	opts []plan.ViewOptions
 }

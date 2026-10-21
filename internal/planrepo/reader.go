@@ -162,7 +162,7 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 	}
 	d := date(t.Date)
 	ev := plan.Event{
-		Key:      "transaction:" + t.ID.String(),
+		Key:      plan.TransactionKey(t.ID.String()),
 		Kind:     kind,
 		State:    plan.StateDone,
 		Name:     firstNonEmpty(t.Description, t.Category, plan.UnnamedName),
@@ -170,6 +170,7 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 		Date:     &d,
 		Category: t.Category,
 		Source:   plan.SourceTransaction,
+		Origin:   factOrigin(t),
 	}
 	if t.RecurringID != nil {
 		ev.RuleID = t.RecurringID.String()
@@ -181,6 +182,19 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 		}
 	}
 	return ev, true
+}
+
+// factOrigin — происхождение факта для прав строки (plan.Event.Actions). Решает
+// адаптер, потому что знает колонки; что с этим можно делать — решает домен.
+func factOrigin(t budget.PlanTx) plan.FactOrigin {
+	switch {
+	case t.AddedBy != budget.AddedByWeb:
+		return plan.FactExternal
+	case t.PlannedID != nil:
+		return plan.FactSettled
+	default:
+		return plan.FactWebLoose
+	}
 }
 
 func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {

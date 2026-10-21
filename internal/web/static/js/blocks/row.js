@@ -1,6 +1,7 @@
 import { h, togglePanel } from '../dom.js';
 import { money, shortDate, plural } from '../fmt.js';
 import { editable } from './edit.js';
+import { statusMark } from './status.js';
 
 // Подпись к строке по флагам, которые выставил сервер.
 function note(r) {
@@ -22,8 +23,9 @@ export function row(r, cur, ctx) {
   const n = note(r);
   // Подпись и действия — отдельной строкой под названием: в колонке они не помещаются
   // (до четырёх действий), а на телефоне колонку приходилось прятать вместе с ними.
-  const extras = [n || null, settleable(r, cur, ctx), movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)].filter(Boolean);
-  return h('div', { class: 'it' + (r.noAmount ? ' dim' : '') },
+  const extras = [n || null, movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)].filter(Boolean);
+  return h('div', { class: 'it st' + (r.noAmount ? ' dim' : '') },
+    statusMark(r, cur, ctx),
     h('span', { class: 'd' }, shortDate(r.date)),
     h('span', null, r.name, tags),
     amount,
@@ -37,27 +39,6 @@ function removable(r, ctx) {
     class: 'x', href: '#', title: 'Убрать из плана',
     onclick: (e) => { e.preventDefault(); if (confirm('Убрать «' + r.name + '» из плана?')) ctx.onDelete(r.key); },
   }, 'убрать');
-}
-
-// «Оплачено» / «пришло»: только плановая запись. Если суммы у неё не было, спрашиваем
-// её в валюте показа; пустой ответ или не число — отмена, на сервер ничего не уходит.
-function settleable(r, cur, ctx) {
-  if (!ctx || !ctx.onSettle || !String(r.key).startsWith('planned:')) return null;
-  const income = r.kind === 'income';
-  return h('a', {
-    class: 'x', href: '#', title: income ? 'Отметить: деньги пришли' : 'Отметить: оплачено',
-    onclick: (e) => {
-      e.preventDefault();
-      if (r.amount != null) {
-        if (confirm((income ? 'Пришло «' : 'Оплачено «') + r.name + '»?')) ctx.onSettle(r.key);
-        return;
-      }
-      const raw = prompt('Сколько (' + cur + ') по «' + r.name + '»?');
-      const amount = Number((raw || '').replace(/\s/g, '').replace(',', '.'));
-      if (!raw || !(amount > 0)) return;
-      ctx.onSettle(r.key, { amount, currency: cur });
-    },
-  }, income ? 'пришло' : 'оплачено');
 }
 
 // «Пропустить этот раз»: срок повторяющегося правила (ключ recurring:...).

@@ -55,6 +55,9 @@ type Row struct {
 	WindowMissing bool
 	// WindowPassed — выбранное окно уже прошло, а платёж не оплачен.
 	WindowPassed bool
+	// Editable и Reopenable — права строки (Event.Actions): «изменить» и «вернуть в план».
+	// Фронт их не выводит, а берёт готовыми.
+	Editable, Reopenable bool
 }
 
 // UndatedBlock — платежи без даты и без окна: лежат здесь и в расчёт не входят.

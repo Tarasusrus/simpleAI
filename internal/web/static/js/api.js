@@ -54,4 +54,5 @@ export const moveItem = (cur, key, body) => call('POST', '/api/plan/item/' + enc
 export const settleItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/done' + q(cur), body);
 export const getItem = (key) => call('GET', '/api/plan/item/' + encodeURIComponent(key));
 export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + encodeURIComponent(key) + q(cur), body);
+export const reopenItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/reopen' + q(cur));
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));

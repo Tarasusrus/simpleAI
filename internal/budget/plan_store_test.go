@@ -235,6 +235,16 @@ func TestSettlePlanItem(t *testing.T) {
 	if typ != "income" || minor != 123456 || cur != "THB" || added == nil || *added != "web" {
 		t.Errorf("факт: %s %d %s %v", typ, minor, cur, added)
 	}
+	// Факт помнит, какую плановую запись закрыл: по этой ссылке её потом вернут в план.
+	// Мутация: убрать planned_id из INSERT в SettlePlanItem — тест краснеет.
+	var linked *uuid.UUID
+	if err := s.pool.QueryRow(ctx, `SELECT planned_id FROM budget_transaction
+		WHERE description = 'plan-store-test' AND transaction_date = $1`, day).Scan(&linked); err != nil {
+		t.Fatalf("чтение planned_id: %v", err)
+	}
+	if linked == nil || *linked != withSum {
+		t.Errorf("planned_id факта = %v, ждали %s", linked, withSum)
+	}
 	if ok, err := s.SettlePlanItem(ctx, scope, withSum, nil, day); ok || err != nil {
 		t.Errorf("повторное закрытие: %v %v", ok, err)
 	}

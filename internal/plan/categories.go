@@ -14,7 +14,9 @@ const recentLimit = 5
 
 // rowOf собирает строку списка из события. amount — уже в валюте показа или nil.
 func rowOf(e Event, amount *int64) Row {
-	return Row{Key: e.Key, Date: e.Date, Name: e.Name, Kind: e.Kind, Amount: amount, NoAmount: e.Amount == nil}
+	a := e.Actions()
+	return Row{Key: e.Key, Date: e.Date, Name: e.Name, Kind: e.Kind, Amount: amount, NoAmount: e.Amount == nil,
+		Editable: a.Edit, Reopenable: a.Reopen}
 }
 
 // windowIndexes — какие окна дают колонки «Сейчас» и «Прошлое окно» (−1 = нет).
