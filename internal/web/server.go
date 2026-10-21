@@ -35,6 +35,7 @@ type Planner interface {
 	ExpenseCategories(ctx context.Context) ([]string, error)
 	Item(ctx context.Context, key string) (plan.EditableItem, error)
 	Edit(ctx context.Context, key string, in plan.EditInput) error
+	Reopen(ctx context.Context, key string) error
 }
 
 const (
@@ -88,6 +89,7 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("POST /api/plan/item/{key}/done", s.auth(http.HandlerFunc(s.handleDone)))
 	mux.Handle("POST /api/plan/item/{key}/move", s.auth(http.HandlerFunc(s.handleMove)))
 	mux.Handle("POST /api/plan/item/{key}/skip", s.auth(http.HandlerFunc(s.handleSkip)))
+	mux.Handle("POST /api/plan/item/{key}/reopen", s.auth(http.HandlerFunc(s.handleReopen)))
 	mux.Handle("POST /api/plan/rate", s.auth(http.HandlerFunc(s.handleRate)))
 	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))
 	mux.Handle("GET /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleItem)))

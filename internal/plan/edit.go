@@ -36,9 +36,12 @@ type EditableItem struct {
 	Key       string
 	Kind      Kind
 	Recurring bool
-	Name      string
-	Amount    *Money // nil — суммы нет (только у разового платежа)
-	Category  string
+	// Fact — закрытая запись (факт-транзакция): правятся название, сумма и дата,
+	// валюта и категория остаются.
+	Fact     bool
+	Name     string
+	Amount   *Money // nil — суммы нет (только у разового платежа)
+	Category string
 	// Date и WindowStart — размещение разовой записи; у правила nil.
 	Date, WindowStart *Date
 	// Rule — расписание правила, только для подписи в форме; у разовой nil.
@@ -93,6 +96,13 @@ func (s *Service) Edit(ctx context.Context, key string, in EditInput) error {
 	snap, err := s.reader.Read(ctx, s.scope)
 	if err != nil {
 		return err
+	}
+	if _, ok := factID(key); ok {
+		e, err := findFact(snap, key)
+		if err != nil {
+			return err
+		}
+		return s.editFact(ctx, e, in)
 	}
 	it, err := findItem(snap, key)
 	if err != nil {
@@ -156,6 +166,20 @@ func (s *Service) editRule(ctx context.Context, it EditableItem, in EditInput) e
 // findItem ищет запись по ключу строки экрана. У правила ключ срока
 // "recurring:<ruleID>@YYYY-MM-DD" ведёт к самому правилу.
 func findItem(snap Snapshot, key string) (EditableItem, error) {
+	if _, ok := factID(key); ok {
+		e, err := findFact(snap, key)
+		if err != nil {
+			return EditableItem{}, err
+		}
+		if !e.Actions().Edit {
+			return EditableItem{}, ErrNotEditable
+		}
+		name := e.Name
+		if name == UnnamedName {
+			name = ""
+		}
+		return EditableItem{Key: e.Key, Kind: e.Kind, Fact: true, Name: name, Amount: e.Amount, Category: e.Category, Date: e.Date}, nil
+	}
 	if _, ok := strings.CutPrefix(key, "planned:"); ok {
 		for _, list := range [][]Event{snap.Payments, snap.Incomes} {
 			for _, e := range list {

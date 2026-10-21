@@ -46,6 +46,9 @@ type Event struct {
 	// чтобы они не могли разойтись.
 	RuleID       string
 	ScheduledFor *Date // срок правила, к которому относится плановое событие или факт
+	// Origin — происхождение факта (только Source=SourceTransaction); от него зависят
+	// права строки, см. Actions. Нулевое значение — внешний факт без прав.
+	Origin FactOrigin
 }
 
 // IsRecurring — событие порождено правилом повтора.

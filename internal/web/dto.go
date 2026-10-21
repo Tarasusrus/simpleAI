@@ -76,6 +76,9 @@ type RowDTO struct {
 	NoAmount      bool    `json:"noAmount"`
 	WindowMissing bool    `json:"windowMissing"`
 	WindowPassed  bool    `json:"windowPassed"`
+	// Права строки выводит домен (plan.Event.Actions); фронт их не угадывает по ключу.
+	Editable   bool `json:"editable"`
+	Reopenable bool `json:"reopenable"`
 }
 
 type BlockDTO struct {
@@ -119,6 +122,7 @@ func rows(in []plan.Row) []RowDTO {
 			Key: r.Key, Date: datePtr(r.Date), Name: r.Name, Kind: string(r.Kind), Amount: r.Amount,
 			OverdueDays: r.OverdueDays, Expected: r.Expected, NotArrived: r.NotArrived, NoAmount: r.NoAmount,
 			WindowMissing: r.WindowMissing, WindowPassed: r.WindowPassed,
+			Editable: r.Editable, Reopenable: r.Reopenable,
 		})
 	}
 	return out

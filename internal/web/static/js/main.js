@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem, editItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, reopenItem, skipItem, setRate, setPast, setAvg, moveItem, editItem } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -28,7 +28,7 @@ let lastView = null;
 
 // ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
 // тот же, onDelete — убрать плановую запись, onSettle — «оплачено» / «пришло»,
-// onSkip — пропустить этот срок повтора. Ошибку команды показываем текстом сервера.
+// onSkip — пропустить этот срок повтора, onReopen — вернуть закрытую запись в план. Ошибку команды показываем текстом сервера.
 const ctx = {
   show: (view) => draw(view),
   redraw: () => { if (lastView) draw(lastView); },
@@ -43,6 +43,7 @@ const ctx = {
   onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
+  onReopen: (key) => once(() => reopenItem(cur, key), 'Не удалось вернуть в план.'),
   // onEdit — «изменить»: та же очередь, что у прочих команд; рисует ответ и отдаёт
   // true, false — занято другой командой. Ошибку показывает сам редактор.
   onEdit: async (key, body) => {
