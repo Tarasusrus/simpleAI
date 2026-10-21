@@ -184,7 +184,7 @@ func TestLimits_BadBodies(t *testing.T) {
 	if len(lp.added) != 0 {
 		t.Fatalf("плохое тело дошло до сервиса: %+v", lp.added)
 	}
-	req := httptest.NewRequest("POST", "/api/plan/limits", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/plan/limits", strings.NewReader(`{}`))
 	req.Host = "127.0.0.1"
 	req.Header.Set("Authorization", "Bearer "+goodToken)
 	rec := httptest.NewRecorder()
@@ -274,7 +274,7 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	kpi := got["kpi"].(map[string]any)
+	kpi := asMap(t, got["kpi"])
 	if kpi["canSpend"] != float64(100) || kpi["limitHold"] != float64(30) || kpi["limitsExceedFree"] != true {
 		t.Fatalf("kpi=%v", kpi)
 	}
@@ -282,7 +282,7 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	if !ok || len(ls) != 1 {
 		t.Fatalf("limits=%v", got["limits"])
 	}
-	l := ls[0].(map[string]any)
+	l := asMap(t, ls[0])
 	if l["id"] != "L1" || l["left"] != float64(30) || l["leftPct"] != float64(60) || l["attention"] != true || l["repeat"] != true {
 		t.Fatalf("limit=%v", l)
 	}
@@ -307,4 +307,13 @@ func TestLimits_RepeatRequired(t *testing.T) {
 	if len(lp.added)+len(lp.edited)+len(lp.prev) != 0 {
 		t.Fatal("запрос без repeat дошёл до сервиса")
 	}
+}
+
+func asMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("ждали объект, получили %T", v)
+	}
+	return m
 }

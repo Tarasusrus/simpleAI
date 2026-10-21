@@ -53,7 +53,7 @@ func TestPlanLimits_AddReadScope(t *testing.T) {
 	if x.ID != id || x.Category != limitCatName || x.AmountMinor != 150_000 || x.Currency != "THB" || !x.Repeat || x.WindowStart.Day() != 5 {
 		t.Fatalf("limit=%+v", x)
 	}
-	if other, _ := s.PlanLimits(ctx, []int64{limitChat - 1}); len(other) != 0 {
+	if other := mustLimits(t, s, ctx, []int64{limitChat - 1}); len(other) != 0 {
 		t.Fatalf("чужой чат видит лимиты: %v", other)
 	}
 }
@@ -87,24 +87,24 @@ func TestPlanLimits_UpdateDeleteScope(t *testing.T) {
 	if ok, err := s.UpdatePlanLimit(ctx, []int64{limitChat}, id, 200_000, "RUB", true, nil); err != nil || !ok {
 		t.Fatalf("update ok=%v err=%v", ok, err)
 	}
-	if got, _ := s.PlanLimits(ctx, []int64{limitChat}); len(got) != 1 || got[0].WindowStart.Day() != 5 {
+	if got := mustLimits(t, s, ctx, []int64{limitChat}); len(got) != 1 || got[0].WindowStart.Day() != 5 {
 		t.Fatalf("nil-окно изменило window_start: %+v", got)
 	}
 	ws := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	if ok, err := s.UpdatePlanLimit(ctx, []int64{limitChat}, id, 200_000, "RUB", true, &ws); err != nil || !ok {
 		t.Fatalf("update с окном ok=%v err=%v", ok, err)
 	}
-	if got, _ := s.PlanLimits(ctx, []int64{limitChat}); len(got) != 1 || got[0].WindowStart.Day() != 2 {
+	if got := mustLimits(t, s, ctx, []int64{limitChat}); len(got) != 1 || got[0].WindowStart.Day() != 2 {
 		t.Fatalf("окно не сменилось: %+v", got)
 	}
-	got, _ := s.PlanLimits(ctx, []int64{limitChat})
+	got := mustLimits(t, s, ctx, []int64{limitChat})
 	if len(got) != 1 || got[0].AmountMinor != 200_000 || got[0].Currency != "RUB" || !got[0].Repeat || got[0].WindowStart.Day() != 2 {
 		t.Fatalf("после правки: %+v", got)
 	}
 	if ok, err := s.DeletePlanLimit(ctx, []int64{limitChat}, id); err != nil || !ok {
 		t.Fatalf("delete ok=%v err=%v", ok, err)
 	}
-	if ok, _ := s.DeletePlanLimit(ctx, []int64{limitChat}, uuid.New()); ok {
+	if ok, err := s.DeletePlanLimit(ctx, []int64{limitChat}, uuid.New()); err != nil || ok {
 		t.Fatal("удалён несуществующий")
 	}
 }
@@ -138,8 +138,17 @@ func TestPlanLimitHistory_ExcludesRecurringAndCurrentMonth(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_transaction WHERE description LIKE 'plan-limit-test%'`)
-		_, _ = s.pool.Exec(ctx, `DELETE FROM budget_recurring WHERE id=$1`, rule)
+		for _, q := range []struct {
+			sql string
+			arg []any
+		}{
+			{`DELETE FROM budget_transaction WHERE description LIKE 'plan-limit-test%'`, nil},
+			{`DELETE FROM budget_recurring WHERE id=$1`, []any{rule}},
+		} {
+			if _, err := s.pool.Exec(ctx, q.sql, q.arg...); err != nil {
+				t.Errorf("очистка: %v", err)
+			}
+		}
 	})
 	ins := func(amount float64, date string, rec *uuid.UUID) {
 		t.Helper()
@@ -167,4 +176,13 @@ func TestPlanLimitHistory_ExcludesRecurringAndCurrentMonth(t *testing.T) {
 	if len(got) != 2 || got["2025-01"] != 150 || got["2025-03"] != 300 {
 		t.Fatalf("история=%v, ждали {2025-01:150 2025-03:300}", got)
 	}
+}
+
+func mustLimits(t *testing.T, s *Store, ctx context.Context, ids []int64) []PlanLimit {
+	t.Helper()
+	got, err := s.PlanLimits(ctx, ids)
+	if err != nil {
+		t.Fatalf("PlanLimits: %v", err)
+	}
+	return got
 }

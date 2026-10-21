@@ -171,12 +171,12 @@ func TestLimitService_PreviewMatchesRealViewAndWritesNothing(t *testing.T) {
 	// «после» = экран, на котором такой лимит уже сохранён
 	snap := baseSnap()
 	snap.Limits = []Limit{{ID: "x", Category: "Еда", Amount: *rub(8000), WindowStart: d(2026, 3, 5)}}
-	real, err := limSvc(snap, nil).View(ctx, CurRUB)
+	shown, err := limSvc(snap, nil).View(ctx, CurRUB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pv.CanSpendAfter != real.View.CanSpend || pv.LimitHoldAfter != real.View.LimitHold || pv.CanSpendAfter != 32000 {
-		t.Fatalf("предпросмотр %+v, экран canSpend=%d hold=%d", pv, real.View.CanSpend, real.View.LimitHold)
+	if pv.CanSpendAfter != shown.View.CanSpend || pv.LimitHoldAfter != shown.View.LimitHold || pv.CanSpendAfter != 32000 {
+		t.Fatalf("предпросмотр %+v, экран canSpend=%d hold=%d", pv, shown.View.CanSpend, shown.View.LimitHold)
 	}
 	if pv.Limit == nil || pv.Limit.Amount != 8000 || pv.ExceedsFree {
 		t.Fatalf("limit=%+v exceeds=%v", pv.Limit, pv.ExceedsFree)

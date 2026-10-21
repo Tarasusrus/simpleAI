@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"simpleAI/internal/budget"
+	"simpleAI/internal/plan"
 )
 
 type fakeSuggestSource struct {
@@ -43,22 +44,31 @@ func TestLimitSuggester(t *testing.T) {
 	if !got.Enough || got.Months != 2 || got.AmountTHBMinor != 420_000 {
 		t.Fatalf("Еда: %+v, ждали 2 месяца и 420000 (9000·14/30 ฿)", got)
 	}
-	if got, _ := s.Suggest(ctx, "Кафе", 14); got.Enough || got.Months != 1 || got.AmountTHBMinor != 0 {
+	if got := mustSuggest(t, s, "Кафе", 14); got.Enough || got.Months != 1 || got.AmountTHBMinor != 0 {
 		t.Fatalf("Кафе, один месяц: %+v — подсказки быть не должно", got)
 	}
-	if got, _ := s.Suggest(ctx, "Нет такой", 14); got.Enough || got.Months != 0 {
+	if got := mustSuggest(t, s, "Нет такой", 14); got.Enough || got.Months != 0 {
 		t.Fatalf("нет истории: %+v", got)
 	}
 	// месяцы без трат входят в делитель: Дек 6000 и Фев 3000 за три месяца — 3000 ฿/мес, а не 4500
 	gaps := []budget.MonthlyCategoryExpense{monthRow("Подарки", 2, 3000), {CategoryName: "Подарки", Currency: "THB", Month: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), Total: 6000}}
 	sg := NewLimitSuggester(fakeSuggestSource{rows: gaps, rates: rates})
 	sg.now = s.now
-	if got, _ := sg.Suggest(ctx, "Подарки", 14); !got.Enough || got.Months != 3 || got.AmountTHBMinor != 140_000 {
+	if got := mustSuggest(t, sg, "Подарки", 14); !got.Enough || got.Months != 3 || got.AmountTHBMinor != 140_000 {
 		t.Fatalf("Подарки: %+v, ждали 3 месяца и 140000 (3000·14/30 ฿)", got)
 	}
 	noRate := NewLimitSuggester(fakeSuggestSource{rows: rows, rates: map[string]float64{"RUB": 1}})
 	noRate.now = s.now
-	if got, _ := noRate.Suggest(ctx, "Еда", 14); got.Enough {
+	if got := mustSuggest(t, noRate, "Еда", 14); got.Enough {
 		t.Fatalf("нет курса бата: %+v", got)
 	}
+}
+
+func mustSuggest(t *testing.T, s *LimitSuggester, cat string, days int) plan.LimitSuggestion {
+	t.Helper()
+	got, err := s.Suggest(context.Background(), cat, days)
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	return got
 }
