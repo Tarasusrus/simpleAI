@@ -13,18 +13,21 @@ export function render(view, cur) {
   // Окно, которое уже закончилось, «до конца» не тратят: это итог окна.
   const closed = view.state === 'ended' || view.state === 'between';
   const upcoming = view.state === 'upcoming';
+  // С лимитами в герое только свободное вне лимитов (ADR-011): деньги в лимитах уже вычтены.
+  const limited = (view.limits || []).length > 0;
   const title = closed
     ? (short ? 'Итог окна: перерасход' : 'Итог окна: остаток')
     : upcoming
       ? (short ? 'В будущем окне не хватит' : 'Можно будет потратить в окне')
-      : (short ? 'Не хватает до конца окна' : 'Можно тратить до конца окна');
+      : (short ? 'Не хватает до конца окна' : (limited ? 'Свободно до конца окна' : 'Можно тратить до конца окна'));
   const main = card('main',
     title,
     money(short ? -k.canSpend : k.canSpend, cur),
     closed ? 'добавь поступление — откроется новое окно'
     : (k.perDay != null && view.window)
       ? money(k.perDay, cur) + ' в день · ' + view.window.daysLeft + ' ' + plural(view.window.daysLeft, 'день', 'дня', 'дней')
-      : (short ? 'платежи и траты больше поступлений' : ''));
+      : (short ? (k.limitsExceedFree ? 'лимиты откладывают больше, чем было свободно' : 'платежи и траты больше поступлений') : ''));
+  if (limited && !closed && !short) main.append(h('div', { class: 's note' }, 'свободные деньги вне лимитов: можно тратить на что угодно'));
   const income = card('', 'Поступления', money(k.received + k.expectedIncome, cur),
     k.expectedIncome > 0 ? 'из них ожидается ' + money(k.expectedIncome, cur) : 'получено');
   const out = card('', 'Платежи и траты', money(k.payments + k.spent, cur),

@@ -113,8 +113,9 @@ func (s *Store) Usage(ctx context.Context, id uuid.UUID) (Counts, error) {
 		(SELECT count(*) FROM budget_transaction WHERE category_id = $1),
 		(SELECT count(*) FROM budget_planned_expense WHERE category_id = $1),
 		(SELECT count(*) FROM budget_recurring WHERE category_id = $1),
-		(SELECT count(*) FROM budget_envelope_share_category WHERE category_id = $1)`, id).
-		Scan(&c.Transactions, &c.Planned, &c.Recurring, &c.Shares)
+		(SELECT count(*) FROM budget_envelope_share_category WHERE category_id = $1),
+		(SELECT count(*) FROM plan_category_limit WHERE category_id = $1)`, id).
+		Scan(&c.Transactions, &c.Planned, &c.Recurring, &c.Shares, &c.Limits)
 	if err != nil {
 		return c, fmt.Errorf("usage: %w", err)
 	}

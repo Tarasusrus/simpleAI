@@ -56,3 +56,10 @@ export const getItem = (key) => call('GET', '/api/plan/item/' + encodeURICompone
 export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + encodeURIComponent(key) + q(cur), body);
 export const reopenItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/reopen' + q(cur));
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));
+
+// Лимиты категорий (ADR-011). Эффект лимита (предпросмотр) и подсказку суммы считает сервер.
+export const addLimit = (cur, body) => call('POST', '/api/plan/limits' + q(cur), body);
+export const editLimit = (cur, id, body) => call('PUT', '/api/plan/limits/' + encodeURIComponent(id) + q(cur), body);
+export const deleteLimit = (cur, id) => call('DELETE', '/api/plan/limits/' + encodeURIComponent(id) + q(cur));
+export const previewLimit = (cur, body) => call('POST', '/api/plan/limits/preview' + q(cur), body);
+export const suggestLimit = (cur, category) => call('GET', '/api/plan/limits/suggest' + q(cur) + '&category=' + encodeURIComponent(category));

@@ -15,6 +15,11 @@ type View struct {
 	Income IncomeSum
 	// CanSpend знаковое: отрицательное значение — недостача.
 	CanSpend, Payments, Spent, Reserve int64
+	// LimitHold — сумма остатков лимитов категорий: отложена и из CanSpend вычтена.
+	LimitHold int64
+	// LimitsExceedFree — лимиты откладывают больше, чем было свободно до них.
+	LimitsExceedFree bool
+	Limits           []LimitView
 	// SpentBefore — траты в зазоре между окнами, пока описываемое окно ещё не началось; в окно не входят.
 	SpentBefore     int64
 	SpentBeforeFrom *Date

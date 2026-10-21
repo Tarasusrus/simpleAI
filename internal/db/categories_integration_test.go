@@ -14,7 +14,7 @@ import (
 
 func catStore(t *testing.T) (*categories.Store, *sql.DB) {
 	t.Helper()
-	conn := scratchDB(t, 22)
+	conn := scratchDB(t, 24)
 	dsn, _ := scratchDSNs.Load(conn)
 	dsnStr, ok := dsn.(string)
 	if !ok {
@@ -246,5 +246,60 @@ func TestCategories_DeduplicatorFirstRunCollapsesSecondRunNoop(t *testing.T) {
 	rep, err = d.Run(ctx, true)
 	if err != nil || len(rep.Items) != 0 {
 		t.Errorf("повторный запуск должен быть пустым: %+v err=%v", rep, err)
+	}
+}
+
+// Лимиты плана при слиянии (ADR-011): переезжают на цель; при конфликте ключа остаётся
+// лимит цели, лимит источника уходит в журнал и возвращается откатом.
+func TestCategories_MergeMovesLimitsAndRollbackRestoresDropped(t *testing.T) {
+	st, conn := catStore(t)
+	ctx := context.Background()
+	src, dst := mkCat(t, conn, "тест-ист", "expense"), mkCat(t, conn, "ТестЦель", "expense")
+	ins := `INSERT INTO plan_category_limit (id,chat_id,category_id,amount_minor,currency,repeat,window_start) VALUES ($1,$2,$3,$4,$5,$6,$7)`
+	moved, kept, droppedID := uuid.New(), uuid.New(), uuid.New()
+	mustExec(t, conn, ins, moved, 1, src, 111, "THB", false, "2026-10-05") // у цели в этом окне лимита нет — переедет
+	mustExec(t, conn, ins, droppedID, 1, src, 222, "RUB", true, "2026-10-05")
+	mustExec(t, conn, ins, kept, 1, dst, 333, "THB", true, "2026-09-21") // повторяющийся цели побеждает
+
+	res, err := st.Merge(ctx, categories.MergeRequest{Source: src, Target: dst})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if res.Moved.Limits != 1 {
+		t.Errorf("moved.Limits=%d, ждали 1", res.Moved.Limits)
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE category_id=$1`, dst) != 2 ||
+		count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1 AND category_id=$2`, moved, dst) != 1 {
+		t.Error("лимит не переехал на цель")
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1`, droppedID) != 0 {
+		t.Error("конфликтный лимит источника остался")
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1 AND amount_minor=333`, kept) != 1 {
+		t.Error("лимит цели изменился")
+	}
+
+	if err := st.Rollback(ctx, res.MergeID); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1 AND category_id=$2`, moved, src) != 1 {
+		t.Error("переехавший лимит не вернулся на источник")
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1 AND category_id=$2 AND amount_minor=222 AND currency='RUB' AND repeat`, droppedID, src) != 1 {
+		t.Error("конфликтный лимит не восстановлен целиком")
+	}
+	if count(t, conn, `SELECT count(*) FROM plan_category_limit WHERE id=$1 AND category_id=$2`, kept, dst) != 1 {
+		t.Error("лимит цели тронут откатом")
+	}
+}
+
+// Без переноса ссылок слияние не должно проходить молча: лимит держит категорию (RESTRICT).
+func TestCategories_UsageCountsLimits(t *testing.T) {
+	st, conn := catStore(t)
+	c := mkCat(t, conn, "тест-лимит", "expense")
+	mustExec(t, conn, `INSERT INTO plan_category_limit (chat_id,category_id,amount_minor,currency,repeat,window_start) VALUES (1,$1,5,'THB',true,'2026-10-05')`, c)
+	u, err := st.Usage(context.Background(), c)
+	if err != nil || u.Limits != 1 {
+		t.Fatalf("usage=%+v err=%v", u, err)
 	}
 }

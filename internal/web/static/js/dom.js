@@ -15,6 +15,11 @@ export function h(tag, attrs, ...kids) {
   return el;
 }
 
+// Подписанное поле формы: <div class="fi …"><label>…</label>input</div>.
+export function field(label, input, cls) {
+  return h('div', { class: 'fi ' + (cls || '') }, h('label', null, label), input);
+}
+
 // Панель под строкой («перенести», «изменить»). Повторное нажатие той же кнопки
 // закрывает её; другая кнопка закрывает чужую панель и открывает свою, а не просто
 // закрывает чужую. build() строит панель, возвращается она же (null — закрыли).

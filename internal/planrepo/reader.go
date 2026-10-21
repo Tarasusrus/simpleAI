@@ -26,6 +26,7 @@ type Source interface {
 // Reader реализует plan.Reader поверх Source.
 type Reader struct {
 	src    Source
+	limits LimitSource // nil — лимиты не читаются (WithLimits)
 	logger *slog.Logger
 }
 
@@ -94,6 +95,9 @@ func (r *Reader) Read(ctx context.Context, sc plan.Scope) (plan.Snapshot, error)
 		snap.Rules = append(snap.Rules, rw)
 	}
 
+	if snap.Limits, err = r.readLimits(ctx, sc); err != nil {
+		return plan.Snapshot{}, err
+	}
 	if snap.ReservePct, err = r.src.PlanReservePct(ctx); err != nil {
 		return plan.Snapshot{}, err
 	}

@@ -1,4 +1,4 @@
-import { h, togglePanel } from '../dom.js';
+import { h, field, togglePanel } from '../dom.js';
 import { getItem, getCategories } from '../api.js';
 import { longDate, plural } from '../fmt.js';
 
@@ -24,10 +24,6 @@ function placeText(item) {
   if (item.date) return 'как сейчас: ' + longDate(item.date);
   if (item.windowStart) return 'как сейчас: в окне с ' + longDate(item.windowStart);
   return 'как сейчас: без даты';
-}
-
-function field(label, input, cls) {
-  return h('div', { class: 'fi ' + (cls || '') }, h('label', null, label), input);
 }
 
 export function editable(r, cur, ctx) {
