@@ -303,3 +303,47 @@ func TestCategories_UsageCountsLimits(t *testing.T) {
 		t.Fatalf("usage=%+v err=%v", u, err)
 	}
 }
+
+func TestCategories_Resolve_FindsByNameAndAliasWithoutCreating(t *testing.T) {
+	st, conn := catStore(t)
+	ctx := context.Background()
+	var food uuid.UUID // «Еда» засеяна миграциями
+	if err := conn.QueryRow(`SELECT id FROM budget_category WHERE name='Еда' AND type='expense'`).Scan(&food); err != nil {
+		t.Fatalf("нет засеянной категории «Еда»: %v", err)
+	}
+	mustExec(t, conn, `INSERT INTO budget_category_alias (alias_lower,type,category_id,source) VALUES ('продукты','expense',$1,'merge')`, food)
+	before := count(t, conn, `SELECT count(*) FROM budget_category`)
+
+	tests := []struct {
+		name, typ string
+		want      uuid.UUID
+		found     bool
+	}{
+		{"еда", "expense", food, true},
+		{"  ЕДА ", "expense", food, true},
+		{"Продукты", "expense", food, true},
+		{"Рестораны", "expense", uuid.Nil, false},
+		{"Еда", "income", uuid.Nil, false},
+	}
+	for _, tc := range tests {
+		c, found, err := st.Resolve(ctx, tc.name, tc.typ)
+		if err != nil {
+			t.Fatalf("Resolve(%q,%q): %v", tc.name, tc.typ, err)
+		}
+		if found != tc.found || c.ID != tc.want {
+			t.Errorf("Resolve(%q,%q) = %v found=%v, want %v found=%v", tc.name, tc.typ, c.ID, found, tc.want, tc.found)
+		}
+	}
+	if after := count(t, conn, `SELECT count(*) FROM budget_category`); after != before {
+		t.Fatalf("Resolve создал категорию: было %d, стало %d", before, after)
+	}
+}
+
+func TestCategories_Resolve_RejectsBadInput(t *testing.T) {
+	st, _ := catStore(t)
+	for _, tc := range []struct{ name, typ string }{{"", "expense"}, {"   ", "expense"}, {"Еда", "other"}} {
+		if _, found, err := st.Resolve(context.Background(), tc.name, tc.typ); err == nil || found {
+			t.Errorf("Resolve(%q,%q): err=%v found=%v, ждали ошибку", tc.name, tc.typ, err, found)
+		}
+	}
+}
