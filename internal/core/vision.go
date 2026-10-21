@@ -16,7 +16,7 @@ type VisionRequest struct {
 
 // VisionLLM отправляет картинку ровно в указанную модель. Реализация не
 // переключается на другую модель при ошибке: картинка не должна уйти модели
-// без vision (ADR-010 §4).
+// без vision (ADR-014 §4).
 type VisionLLM interface {
 	AskVision(ctx context.Context, req VisionRequest) (string, error)
 }

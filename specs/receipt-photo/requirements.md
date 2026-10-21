@@ -1,6 +1,6 @@
 # Фото чека → расход: требования
 
-Источник: issue #76, решения — [ADR-010](../../docs/adr/010-receipt-photo-vision.md), эпик simpleAI-7mc6.
+Источник: issue #76, решения — [ADR-014](../../docs/adr/014-receipt-photo-vision.md), эпик simpleAI-7mc6.
 
 ## Сценарий
 

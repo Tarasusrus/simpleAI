@@ -37,7 +37,7 @@ func (r Receipt) Flow() telegram.ReceiptService {
 	return r.Service
 }
 
-// BuildReceipt собирает сценарий фото чека (ADR-010). Ошибки не фатальны:
+// BuildReceipt собирает сценарий фото чека (ADR-014). Ошибки не фатальны:
 // без vision-прокси бот должен стартовать как раньше.
 func BuildReceipt(ctx context.Context, cfg config.ReceiptConfig, registry *plugin.Registry,
 	categories budgetadapter.CategorySource, logger *slog.Logger) Receipt {
