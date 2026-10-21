@@ -24,5 +24,6 @@ var (
 	ErrBadAvgDays          = errors.New("plan: период усреднения вне 7..730 дней")
 	ErrReadOnly            = errors.New("plan: запись отключена")
 	ErrLimitExists         = errors.New("plan: лимит на эту категорию в этом окне уже есть")
+	ErrUnknownCategory     = errors.New("plan: такой категории расходов нет")
 	ErrLimitCategory       = errors.New("plan: у лимита должна быть категория расходов (не «Без категории»)")
 )

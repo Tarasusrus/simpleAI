@@ -333,6 +333,7 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrBadRate:             "Курс: число больше нуля и не больше 1000 ₽ за бат.",
 		plan.ErrNoWindow:            "Открытого окна нет: сначала добавь ожидаемое поступление с датой.",
 		plan.ErrInvalidEvent:        "Укажи либо дату, либо окно, а не оба сразу.",
+		plan.ErrUnknownCategory:     "Такой категории нет. Выбери из списка или оставь поле пустым.",
 	}
 	for target, msg := range bad {
 		if errors.Is(err, target) {

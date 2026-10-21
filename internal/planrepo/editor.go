@@ -47,7 +47,7 @@ func (w *Writer) UpdatePlanned(ctx context.Context, sc plan.Scope, id string, e 
 	}
 	ok, err := w.sink.UpdatePlanItem(ctx, sc.ChatIDs, u, in)
 	if err != nil {
-		return err
+		return mapCategoryErr(err)
 	}
 	if !ok {
 		return plan.ErrNotFound
@@ -75,7 +75,7 @@ func (w *Writer) UpdateRule(ctx context.Context, sc plan.Scope, ruleID string, e
 		Type: direction(e.Kind), Name: e.Name, AmountMinor: e.Amount.Minor, Currency: string(e.Amount.Cur), Category: e.Category,
 	})
 	if err != nil {
-		return err
+		return mapCategoryErr(err)
 	}
 	if !ok {
 		return plan.ErrNotFound
