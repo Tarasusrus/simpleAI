@@ -185,7 +185,11 @@ func TestMigration00026_StoreSeesNewTaxonomy(t *testing.T) {
 	conn := stage1Fixture(t)
 	up26(t, conn)
 	dsn, _ := scratchDSNs.Load(conn)
-	pool, err := pgxpool.New(context.Background(), dsn.(string))
+	dsnStr, ok := dsn.(string)
+	if !ok {
+		t.Fatal("нет DSN для временной базы")
+	}
+	pool, err := pgxpool.New(context.Background(), dsnStr)
 	if err != nil {
 		t.Fatal(err)
 	}
