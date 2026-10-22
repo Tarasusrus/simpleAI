@@ -64,7 +64,7 @@ func newCls(t *testing.T, s *clsServer) *ClassifierClient {
 	return c
 }
 
-// Аргументы запроса: модель, temperature 0, json_schema strict c enum из id кандидатов, в user-сообщении
+// Аргументы запроса: модель, temperature 0, json_object и схема с enum из id кандидатов в системном сообщении, в user-сообщении
 // только описание и список категорий, заголовок редакции сообщений в прокси.
 //
 // Мутации: убрать response_format, enum id, Temperature(0) или заголовок — тест краснеет.
@@ -82,19 +82,7 @@ func TestClassifier_RequestShape(t *testing.T) {
 		Model          string   `json:"model"`
 		Temperature    *float64 `json:"temperature"`
 		ResponseFormat struct {
-			Type       string `json:"type"`
-			JSONSchema struct {
-				Name   string `json:"name"`
-				Strict bool   `json:"strict"`
-				Schema struct {
-					Required   []string `json:"required"`
-					Properties struct {
-						CategoryID struct {
-							Enum []any `json:"enum"`
-						} `json:"category_id"`
-					} `json:"properties"`
-				} `json:"schema"`
-			} `json:"json_schema"`
+			Type string `json:"type"`
 		} `json:"response_format"`
 		Messages []struct {
 			Role    string `json:"role"`
@@ -107,13 +95,19 @@ func TestClassifier_RequestShape(t *testing.T) {
 	if req.Model != "standard" || req.Temperature == nil || *req.Temperature != 0 {
 		t.Errorf("модель/temperature: %q %v", req.Model, req.Temperature)
 	}
-	rf := req.ResponseFormat
-	if rf.Type != "json_schema" || !rf.JSONSchema.Strict || rf.JSONSchema.Name == "" || len(rf.JSONSchema.Schema.Required) != 5 {
-		t.Errorf("response_format: %+v", rf)
+	if req.ResponseFormat.Type != "json_object" {
+		t.Errorf("response_format.type = %q, ждали json_object", req.ResponseFormat.Type)
 	}
-	enum := rf.JSONSchema.Schema.Properties.CategoryID.Enum
-	if len(enum) != 3 || enum[0] != clsFood.String() || enum[1] != clsCafe.String() || enum[2] != nil {
-		t.Errorf("enum category_id = %v, ждали [id продуктов, id ресторанов, null]", enum)
+	var system string
+	for _, m := range req.Messages {
+		if m.Role == "system" {
+			system = m.Content
+		}
+	}
+	for _, want := range []string{"JSON Schema", clsFood.String(), clsCafe.String(), `"required"`} {
+		if !strings.Contains(system, want) {
+			t.Errorf("в системном сообщении нет %q", want)
+		}
 	}
 	var user string
 	for _, m := range req.Messages {

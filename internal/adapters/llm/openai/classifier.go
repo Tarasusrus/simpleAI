@@ -62,8 +62,8 @@ type classifyOutput struct {
 	Reason     string  `json:"reason"`
 }
 
-// classifySchema ограничивает category_id списком кандидатов: модель технически не может вернуть
-// чужой id (ADR-012 §4). Проверка id в GuardedClassifier остаётся второй линией.
+// classifySchema описывает ответ и ограничивает category_id списком кандидатов (ADR-012 §4). Схема
+// уходит модели текстом, поэтому чужой id она вернуть может: проверка в GuardedClassifier обязательна.
 func classifySchema(candidates []categories.Candidate) map[string]any {
 	ids := make([]any, 0, len(candidates)+1)
 	for _, c := range candidates {
@@ -101,10 +101,18 @@ func (c *ClassifierClient) Classify(ctx context.Context, description string, can
 		return categories.Classification{}, fmt.Errorf("classifier: marshal: %w", err)
 	}
 
+	schema, err := json.Marshal(classifySchema(candidates))
+	if err != nil {
+		return categories.Classification{}, fmt.Errorf("classifier: marshal schema: %w", err)
+	}
+	// json_object вместо json_schema: его принимают все провайдеры, включая DeepSeek (тот отвечает 400 на
+	// json_schema). Схема уходит текстом в системное сообщение, чужой id отсекает GuardedClassifier.
+	system := prompts.Get("categories/classify.tmpl") + "\n\nФормат ответа: один JSON-объект, соответствующий этой JSON Schema:\n" + string(schema)
+
 	resp, err := c.api.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model: c.model,
 		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(prompts.Get("categories/classify.tmpl")),
+			openai.SystemMessage(system),
 			openai.UserMessage(string(payload)),
 		},
 		Temperature: openai.Float(0),
@@ -112,13 +120,7 @@ func (c *ClassifierClient) Classify(ctx context.Context, description string, can
 		// (замер на standard 2026-10-21).
 		MaxTokens: openai.Int(400),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
-				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-					Name:   "category_classification",
-					Strict: openai.Bool(true),
-					Schema: classifySchema(candidates),
-				},
-			},
+			OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
 		},
 	})
 	if err != nil {
