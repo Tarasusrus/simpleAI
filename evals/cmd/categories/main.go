@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// Тот же GuardedClassifier, что в проде: чужой id и плохие имена отсекаются так же, как у бота.
-	guarded := categories.NewGuardedClassifier(&paced{inner: client, pause: *pause}, categories.GuardConfig{MaxCallsPerDay: len(cases) + 10, MaxCreatesPerDay: len(cases)})
+	guarded := categories.NewGuardedClassifier(&paced{inner: client, pause: *pause}, categories.GuardConfig{MaxCallsPerDay: len(cases) + 10, MaxCreatesPerDay: len(cases), BreakerFailures: 1 << 30}) // предохранитель выключен: замер должен видеть каждый сбой
 	rep := classifier.Run(context.Background(), guarded, cases, cands)
 	for _, r := range rep.Results {
 		if r.Outcome != classifier.OK {
