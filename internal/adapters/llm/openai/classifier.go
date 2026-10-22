@@ -18,9 +18,8 @@ import (
 	"simpleAI/internal/prompts"
 )
 
-// ClassifierClient — categories.Classifier поверх OpenAI-совместимого API (маршрут standard
-// прокси LiteLLM, ADR-012 §4). Как VisionClient: без ретраев и без fallback-клиента, цепочку
-// моделей ведёт сам маршрут. Защита (потолки, предохранитель, проверка id) — в
+// ClassifierClient — categories.Classifier поверх OpenAI-совместимого API (DeepSeek, ADR-012 §4;
+// подходит и прокси LiteLLM). Как VisionClient: без ретраев и без fallback-клиента. Защита (потолки, предохранитель, проверка id) — в
 // categories.GuardedClassifier поверх этого клиента.
 type ClassifierClient struct {
 	api     openai.Client
