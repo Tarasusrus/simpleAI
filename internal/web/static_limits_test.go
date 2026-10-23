@@ -101,3 +101,24 @@ func TestStatic_UnplannedWired(t *testing.T) {
 		}
 	}
 }
+
+// Поздняя подсказка не затирает ввод; раскрытие сбрасывается после «Запланировать»; Enter на шевроне не открывает форму правки.
+func TestStatic_UnplannedFormGuards(t *testing.T) {
+	read := func(p string) string {
+		b, err := staticFS.ReadFile("static/" + p)
+		if err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		return string(b)
+	}
+	pf := read("js/blocks/plan-form.js")
+	if !strings.Contains(pf, "if (!touched) amount.value") || !strings.Contains(pf, "onPlanned()") {
+		t.Error("plan-form.js: нет защиты от затирания ввода или сброса раскрытия")
+	}
+	if !strings.Contains(read("js/blocks/unplanned.js"), "() => open.delete(key))") {
+		t.Error("unplanned.js: не передан onPlanned")
+	}
+	if !strings.Contains(read("js/blocks/limits.js"), "e.target === row &&") {
+		t.Error("limits.js: Enter на шевроне откроет форму правки")
+	}
+}

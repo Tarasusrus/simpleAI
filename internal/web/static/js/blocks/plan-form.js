@@ -30,7 +30,7 @@ export function defaultAmount(sug, row) {
   return sug && sug.enough && sug.amount > row.spent ? sug.amount : row.prefill;
 }
 
-export function planForm(row, cur, ctx, onClose) {
+export function planForm(row, cur, ctx, onClose, onPlanned) {
   const head = h('div', { class: 'pf-t' }, 'Распределить деньги на эту категорию?');
   const sub = h('div', { class: 'pf-s' }, 'Загружаю подсказку…');
   const amount = h('input', {
@@ -65,14 +65,15 @@ export function planForm(row, cur, ctx, onClose) {
     }
   }, 250);
   const refresh = () => run();
-  amount.addEventListener('input', refresh);
+  let touched = false; // запоздавшая подсказка не затирает то, что владелец уже ввёл
+  amount.addEventListener('input', () => { touched = true; refresh(); });
   rep.addEventListener('change', refresh);
 
   suggestLimit(cur, row.category).catch(() => null).then((sug) => {
     const p = prompts(sug, row, cur);
     head.textContent = p.title;
     sub.textContent = p.sub;
-    amount.value = String(defaultAmount(sug, row));
+    if (!touched) amount.value = String(defaultAmount(sug, row));
     refresh();
   });
 
@@ -96,6 +97,7 @@ export function planForm(row, cur, ctx, onClose) {
     const repeat = rep.checked;
     try {
       const view = await addLimit(cur, { category: row.category, amount: amount.value, currency: cur, repeat });
+      if (onPlanned) onPlanned(); // строка уйдёт из блока: раскрытие не должно вернуться вместе с ней после «Отменить»
       ctx.show(view);
       // «Отменить» для повторяющегося лимита не показываем: иначе молча уйдёт план на будущие окна.
       if (!repeat && view.limitId) {

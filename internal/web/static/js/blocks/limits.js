@@ -45,7 +45,7 @@ function rowOf(l, cur, ctx) {
     if (box) box.replaceChildren(txPanel(l.category, cur));
   });
   row.addEventListener('click', toggle);
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  row.addEventListener('keydown', (e) => { if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); } });
   return row;
 }
 

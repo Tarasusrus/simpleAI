@@ -32,7 +32,7 @@ function rowOf(r, cur, ctx) {
   });
   if (isOpen) {
     wrap.append(h('div', { class: 'ubody' },
-      planForm(r, cur, ctx, () => { open.delete(key); ctx.redraw(); }),
+      planForm(r, cur, ctx, () => { open.delete(key); ctx.redraw(); }, () => open.delete(key)),
       txPanel(r.category, cur),
       h('div', { class: 'ufoot' },
         h('button', {
