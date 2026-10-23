@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,7 +15,12 @@ import (
 
 func catStore(t *testing.T) (*categories.Store, *sql.DB) {
 	t.Helper()
-	conn := scratchDB(t, 24)
+	return catStoreAt(t, 24)
+}
+
+func catStoreAt(t *testing.T, version int64) (*categories.Store, *sql.DB) {
+	t.Helper()
+	conn := scratchDB(t, version)
 	dsn, _ := scratchDSNs.Load(conn)
 	dsnStr, ok := dsn.(string)
 	if !ok {
@@ -301,5 +307,154 @@ func TestCategories_UsageCountsLimits(t *testing.T) {
 	u, err := st.Usage(context.Background(), c)
 	if err != nil || u.Limits != 1 {
 		t.Fatalf("usage=%+v err=%v", u, err)
+	}
+}
+
+func TestCategories_Resolve_FindsByNameAndAliasWithoutCreating(t *testing.T) {
+	st, conn := catStore(t)
+	ctx := context.Background()
+	var food uuid.UUID // «Еда» засеяна миграциями
+	if err := conn.QueryRow(`SELECT id FROM budget_category WHERE name='Еда' AND type='expense'`).Scan(&food); err != nil {
+		t.Fatalf("нет засеянной категории «Еда»: %v", err)
+	}
+	mustExec(t, conn, `INSERT INTO budget_category_alias (alias_lower,type,category_id,source) VALUES ('продукты','expense',$1,'merge')`, food)
+	before := count(t, conn, `SELECT count(*) FROM budget_category`)
+
+	tests := []struct {
+		name, typ string
+		want      uuid.UUID
+		found     bool
+	}{
+		{"еда", "expense", food, true},
+		{"  ЕДА ", "expense", food, true},
+		{"Продукты", "expense", food, true},
+		{"Рестораны", "expense", uuid.Nil, false},
+		{"Еда", "income", uuid.Nil, false},
+	}
+	for _, tc := range tests {
+		c, found, err := st.Resolve(ctx, tc.name, tc.typ)
+		if err != nil {
+			t.Fatalf("Resolve(%q,%q): %v", tc.name, tc.typ, err)
+		}
+		if found != tc.found || c.ID != tc.want {
+			t.Errorf("Resolve(%q,%q) = %v found=%v, want %v found=%v", tc.name, tc.typ, c.ID, found, tc.want, tc.found)
+		}
+	}
+	if after := count(t, conn, `SELECT count(*) FROM budget_category`); after != before {
+		t.Fatalf("Resolve создал категорию: было %d, стало %d", before, after)
+	}
+}
+
+func TestCategories_Resolve_RejectsBadInput(t *testing.T) {
+	st, _ := catStore(t)
+	for _, tc := range []struct{ name, typ string }{{"", "expense"}, {"   ", "expense"}, {"Еда", "other"}} {
+		if _, found, err := st.Resolve(context.Background(), tc.name, tc.typ); err == nil || found {
+			t.Errorf("Resolve(%q,%q): err=%v found=%v, ждали ошибку", tc.name, tc.typ, err, found)
+		}
+	}
+}
+
+// Цель по умолчанию идёт первой; у не-источника целей нет; ListAssignable не отдаёт split-источник
+// и не смешивает типы.
+//
+// Мутация: убрать NOT EXISTS из ListAssignable или ORDER BY is_default DESC — тест краснеет.
+func TestCategories_SplitTargetsAndListAssignable(t *testing.T) {
+	st, conn := catStoreAt(t, 25)
+	ctx := context.Background()
+	src := mkCat(t, conn, "Сплит-источник", "expense")
+	a := mkCat(t, conn, "Сплит-А", "expense")
+	b := mkCat(t, conn, "Сплит-Б", "expense")
+	mkCat(t, conn, "Сплит-доход", "income")
+	mustExec(t, conn, `INSERT INTO category_split_target (source_id,target_id,is_default) VALUES ($1,$2,false), ($1,$3,true)`, src, a, b)
+
+	got, err := st.SplitTargets(ctx, src)
+	if err != nil || len(got) != 2 || got[0].ID != b || !got[0].IsDefault || got[1].ID != a || got[1].IsDefault {
+		t.Fatalf("SplitTargets=%+v err=%v, ждали [Б(default), А]", got, err)
+	}
+	if none, err := st.SplitTargets(ctx, a); err != nil || len(none) != 0 {
+		t.Fatalf("у не-источника цели %+v err=%v", none, err)
+	}
+
+	list, err := st.ListAssignable(ctx, "expense")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, c := range list {
+		names[c.Name] = true
+	}
+	if names["Сплит-источник"] || !names["Сплит-А"] || !names["Сплит-Б"] || names["Сплит-доход"] {
+		t.Errorf("ListAssignable(expense) = %v", names)
+	}
+	if _, err := st.ListAssignable(ctx, "other"); err == nil {
+		t.Error("неизвестный тип принят")
+	}
+}
+
+func addTx(t *testing.T, conn *sql.DB, typ, desc string, cat uuid.UUID) {
+	t.Helper()
+	mustExec(t, conn, `INSERT INTO budget_transaction (id,type,amount,currency,description,category_id,transaction_date) VALUES ($1,$2,100,'THB',$3,$4,'2026-10-01')`,
+		uuid.New(), typ, desc, cat)
+}
+
+// Память описаний: самая частая категория для такого же описания (регистр и края не важны);
+// «Прочее» и split-источник не запоминаются; чужой тип и пустое описание не находят ничего.
+//
+// Мутации: убрать фильтр «Прочее», убрать NOT EXISTS по split, убрать ORDER BY count — тест краснеет.
+func TestCategories_MostUsedCategory(t *testing.T) {
+	st, conn := catStoreAt(t, 25)
+	ctx := context.Background()
+	food := mkCat(t, conn, "Память-продукты", "expense")
+	rest := mkCat(t, conn, "Память-рестораны", "expense")
+	other := mkCat(t, conn, "Прочее-память", "expense")
+	var prochee uuid.UUID
+	if err := conn.QueryRow(`SELECT id FROM budget_category WHERE name='Прочее' AND type='expense'`).Scan(&prochee); err != nil {
+		t.Fatalf("нет засеянного «Прочее»: %v", err)
+	}
+	src := mkCat(t, conn, "Память-источник", "expense")
+	mustExec(t, conn, `INSERT INTO category_split_target (source_id,target_id,is_default) VALUES ($1,$2,true)`, src, food)
+	_ = other
+
+	addTx(t, conn, "expense", "Пятёрочка", food)
+	addTx(t, conn, "expense", " пятёрочка ", food)
+	addTx(t, conn, "expense", "ПЯТЁРОЧКА", rest)
+	addTx(t, conn, "expense", "пятёрочка", rest)
+	addTx(t, conn, "expense", "пятёрочка", rest)
+	for i := 0; i < 5; i++ { // «Прочее» и split-источник чаще всех, но не запоминаются
+		addTx(t, conn, "expense", "пятёрочка", prochee)
+		addTx(t, conn, "expense", "пятёрочка", src)
+	}
+
+	got, ok, err := st.MostUsedCategory(ctx, "expense", "  Пятёрочка")
+	if err != nil || !ok || got.ID != rest {
+		t.Fatalf("got=%+v ok=%v err=%v, ждали рестораны (3 против 2, хотя по алфавиту раньше продукты)", got, ok, err)
+	}
+	if _, ok, err := st.MostUsedCategory(ctx, "income", "пятёрочка"); err != nil || ok {
+		t.Errorf("чужой тип нашёл категорию: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := st.MostUsedCategory(ctx, "expense", "  "); err != nil || ok {
+		t.Errorf("пустое описание нашло категорию: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := st.MostUsedCategory(ctx, "expense", "неизвестное описание"); err != nil || ok {
+		t.Errorf("неизвестное описание нашло категорию: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestCategories_AddProposal(t *testing.T) {
+	st, conn := catStoreAt(t, 25)
+	tx := uuid.New()
+	if err := st.AddProposal(context.Background(), categories.Proposal{Type: "expense", Name: " Хобби ", Description: "краски", Reason: "новое"}, tx); err != nil {
+		t.Fatal(err)
+	}
+	var name, lower, kind, status, payload string
+	if err := conn.QueryRow(`SELECT name, name_lower, kind, status, payload::text FROM category_review_queue`).Scan(&name, &lower, &kind, &status, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Хобби" || lower != "хобби" || kind != "proposal" || status != "pending" ||
+		!strings.Contains(payload, tx.String()) || !strings.Contains(payload, "краски") {
+		t.Errorf("очередь: %q %q %q %q %s", name, lower, kind, status, payload)
+	}
+	if err := st.AddProposal(context.Background(), categories.Proposal{Type: "expense", Name: "  "}, tx); err == nil {
+		t.Error("пустое имя принято")
 	}
 }

@@ -135,6 +135,7 @@ func TestCommands_BadInputsAndErrors(t *testing.T) {
 		{"отрицательная", `{"name":"x","amount":-5,"currency":"RUB","date":"2026-03-20"}`, nil, 400, "Сумма"},
 		{"дата кривая", `{"name":"x","amount":5,"currency":"RUB","date":"20.03.2026"}`, nil, 400, "дата"},
 		{"30 февраля", `{"name":"x","amount":5,"currency":"RUB","date":"2026-02-30"}`, nil, 400, "дата"},
+		{"доменная: нет такой категории", `{"name":"x","amount":5,"currency":"RUB","date":"2026-03-20"}`, plan.ErrUnknownCategory, 400, "категории нет"},
 		{"доменная: нет названия", `{"name":"","amount":5,"currency":"RUB","date":"2026-03-20"}`, plan.ErrNameRequired, 400, "название"},
 		{"доменная: внутренняя", `{"name":"x","amount":5,"currency":"RUB","date":"2026-03-20"}`, errors.New("pq: connection refused host=db"), 500, "Не удалось"},
 	}

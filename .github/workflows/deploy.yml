@@ -81,11 +81,18 @@ jobs:
               echo "PLAN_WEB_ENABLED=$PLAN_WEB_ENABLED"
               echo "PLAN_WEB_TOKEN=$PLAN_WEB_TOKEN"
               echo ""
-              # Фото чеков (ADR-010): прокси LiteLLM на этом же сервере,
+              # Фото чеков (ADR-014): прокси LiteLLM на этом же сервере,
               # контейнер litellm на 127.0.0.1:4000, маршрут vision.
               echo "VISION_LLM_BASE_URL=http://127.0.0.1:4000/v1"
               echo "VISION_LLM_API_KEY=$VISION_LLM_API_KEY"
               echo "VISION_MODEL=vision"
+              echo ""
+              # Классификатор категорий (ADR-012): тот же платный DeepSeek, что у чата. Бесплатные квоты
+              # прокси (маршруты standard/classify) не тянули даже замер. Выключить: CATEGORY_CLASSIFIER_MODE=off.
+              echo "CATEGORY_CLASSIFIER_MODE=on"
+              echo "CATEGORY_LLM_BASE_URL=https://api.deepseek.com/v1"
+              echo "CATEGORY_LLM_API_KEY=$DEEPSEEK_API_KEY"
+              echo "CATEGORY_LLM_MODEL=deepseek-v4-flash"
             } > ~/simpleAI/.env
 
             cd ~/simpleAI

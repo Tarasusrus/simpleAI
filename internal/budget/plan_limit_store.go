@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -73,23 +72,24 @@ func isUniqueViolation(err error) bool {
 // AddPlanLimit сохраняет лимит. Нет категории расходов с таким именем —
 // ErrPlanLimitCategory; ключ уникальности занят — ErrPlanLimitDuplicate.
 func (s *Store) AddPlanLimit(ctx context.Context, in PlanLimitInput) (uuid.UUID, error) {
+	catID, err := s.expenseCategoryID(ctx, in.Category)
+	if errors.Is(err, ErrUnknownCategory) || (err == nil && !catID.Valid) {
+		return uuid.Nil, ErrPlanLimitCategory
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `
+	err = s.pool.QueryRow(ctx, `
 		INSERT INTO plan_category_limit (chat_id, category_id, amount_minor, currency, repeat, window_start)
-		SELECT $1, c.id, $3, $4, $5, $6
-		FROM budget_category c
-		WHERE LOWER(c.name) = LOWER($2) AND c.type = 'expense'
-		ORDER BY c.name = $2 DESC, c.id
-		LIMIT 1
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`,
-		in.ChatID, in.Category, in.AmountMinor, in.Currency, in.Repeat, in.WindowStart).Scan(&id)
+		in.ChatID, catID.UUID, in.AmountMinor, in.Currency, in.Repeat, in.WindowStart).Scan(&id)
 	switch {
 	case err == nil:
 		return id, nil
 	case isUniqueViolation(err):
 		return uuid.Nil, ErrPlanLimitDuplicate
-	case errors.Is(err, pgx.ErrNoRows):
-		return uuid.Nil, ErrPlanLimitCategory
 	}
 	return uuid.Nil, fmt.Errorf("add plan limit: %w", err)
 }

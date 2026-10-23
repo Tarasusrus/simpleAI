@@ -12,13 +12,14 @@ import (
 )
 
 type Config struct {
-	SysPrompt string `env:"SYS_PROMPT"`
-	DB        DBConfig
-	RAG       RAGConfig
-	Mail      MailConfig
-	Telegram  TelegramBotConfig
-	LLM       LLMConfig
-	Receipt   ReceiptConfig
+	SysPrompt  string `env:"SYS_PROMPT"`
+	DB         DBConfig
+	RAG        RAGConfig
+	Mail       MailConfig
+	Telegram   TelegramBotConfig
+	LLM        LLMConfig
+	Receipt    ReceiptConfig
+	Classifier CategoryClassifierConfig
 }
 
 type DBConfig struct {
@@ -35,10 +36,10 @@ type RAGConfig struct {
 
 type LLMConfig struct {
 	// Primary provider
-	Provider   string
-	APIKey     string
-	BaseURL    string
-	ChatModel  string
+	Provider          string
+	APIKey            string
+	BaseURL           string
+	ChatModel         string
 	Timeout           time.Duration
 	RetryCount        int
 	RetryBase         time.Duration
@@ -117,6 +118,7 @@ func LoadConfig() (Config, error) {
 	cfg.Mail = mailCfg
 	cfg.Telegram = loadTelegramBotConfig()
 	cfg.Receipt = loadReceiptConfig()
+	cfg.Classifier = loadCategoryClassifierConfig()
 	return cfg, nil
 }
 
@@ -163,10 +165,10 @@ func loadTelegramBotConfig() TelegramBotConfig {
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Provider:   getenvOrDefault("LLM_PROVIDER", "openai"),
-		APIKey:     os.Getenv("DEEPSEEK_API_KEY"),
-		BaseURL:    getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
-		ChatModel:  getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
+		Provider:          getenvOrDefault("LLM_PROVIDER", "openai"),
+		APIKey:            os.Getenv("DEEPSEEK_API_KEY"),
+		BaseURL:           getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+		ChatModel:         getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
 		Timeout:           parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
 		RetryCount:        parseInt(os.Getenv("LLM_RETRY_COUNT"), 0),
 		RetryBase:         parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),

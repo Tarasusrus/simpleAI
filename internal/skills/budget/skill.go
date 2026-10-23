@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
 
 	"simpleAI/internal/budget"
+	"simpleAI/internal/categories"
 	"simpleAI/internal/plugin"
 )
 
@@ -18,6 +24,103 @@ type BudgetSkill struct {
 	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
 	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
 	shareStore shareWarningStore
+	// chooser выбирает категорию (ADR-012); nil — прежнее поведение: имя из запроса через
+	// GetOrCreateCategory, без классификатора.
+	chooser   CategoryChooser
+	proposals ProposalSink
+	// categoryNames даёт имена назначаемых категорий расходов для схемы инструмента (ADR-012 §2);
+	// nil — запасной список в коде. Ответ кэшируется на categoryTTL.
+	categoryNames func(ctx context.Context) ([]string, error)
+	catMu         sync.Mutex
+	catCache      []string
+	catCacheUntil time.Time
+	catRetryAt    time.Time // после сбоя БД не ходим в неё до этого момента
+	now           func() time.Time
+}
+
+// categoryTTL — как долго схема помнит список категорий из БД. Короткий срок нужен, чтобы новая
+// категория появилась в подсказке модели без перезапуска; длинный — чтобы не ходить в БД на каждый
+// запрос списка инструментов.
+const categoryTTL = 5 * time.Minute
+
+// categoryRetry — пауза после сбоя чтения списка: без неё каждый запрос схемы ждал бы таймаут БД.
+const categoryRetry = 30 * time.Second
+
+// fallbackExpenseCategories — список, если БД недоступна или провайдера имён нет.
+var fallbackExpenseCategories = []string{"Продукты", "Рестораны", "Транспорт", "Жильё", "Здоровье", "Красота", "Развлечения", "Подписки", "Одежда", "Переводы", "Прочее"}
+
+// WithCategoryNames подключает источник имён категорий для схемы инструмента.
+func (s *BudgetSkill) WithCategoryNames(f func(ctx context.Context) ([]string, error)) *BudgetSkill {
+	s.categoryNames = f
+	return s
+}
+
+// expenseCategoryNames — имена из БД (с кэшем) либо запасной список. Сбой БД не ломает схему.
+func (s *BudgetSkill) expenseCategoryNames() []string {
+	if s.categoryNames == nil {
+		return fallbackExpenseCategories
+	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	s.catMu.Lock()
+	defer s.catMu.Unlock()
+	if len(s.catCache) > 0 && now().Before(s.catCacheUntil) {
+		return s.catCache
+	}
+	if now().Before(s.catRetryAt) {
+		return s.staleOrFallback()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	names, err := s.categoryNames(ctx)
+	if err != nil || len(names) == 0 {
+		if err != nil {
+			slog.Warn("category names for tool schema unavailable, using fallback", "err", err)
+		}
+		s.catRetryAt = now().Add(categoryRetry)
+		return s.staleOrFallback()
+	}
+	s.catCache, s.catCacheUntil = names, now().Add(categoryTTL)
+	return names
+}
+
+// staleOrFallback — последний удачный список из БД лучше запасного. Вызывать под catMu.
+func (s *BudgetSkill) staleOrFallback() []string {
+	if len(s.catCache) > 0 {
+		return s.catCache
+	}
+	return fallbackExpenseCategories
+}
+
+// categoryFieldDescription — описание поля category для модели. Главное правило (ADR-012 §3):
+// категорию называет только пользователь; иначе поле пустое, а система определяет её по описанию.
+func categoryFieldDescription(expense []string) string {
+	return "Category the USER NAMED in their message. Pass it ONLY when the user explicitly named a category " +
+		"('запиши в транспорт', 'категория развлечения', 'на еду' as the category itself) — pass it as-is. " +
+		"If the user only described what they bought or paid for ('поход в кафе', 'Пятёрочка', 'такси домой'), " +
+		"LEAVE category EMPTY and put the text into description: the system picks the category from the description. " +
+		"Never guess a category and never use 'прочее' as a guess. " +
+		"Existing expense categories: " + strings.Join(expense, ", ") + ". " +
+		"Income categories: зарплата, фриланс, прочее. " +
+		"A category that does not exist yet is created only when the user explicitly named it."
+}
+
+// CategoryChooser — то, что навык берёт у модуля категорий (реализует *categories.Chooser).
+type CategoryChooser interface {
+	Choose(ctx context.Context, in categories.ChooseInput) (categories.Choice, error)
+}
+
+// ProposalSink принимает то, что бот не смог определить (реализует *categories.Store).
+type ProposalSink interface {
+	AddProposal(ctx context.Context, p categories.Proposal, transactionID uuid.UUID) error
+}
+
+// WithCategoryChooser подключает выбор категории с памятью описаний и классификатором.
+func (s *BudgetSkill) WithCategoryChooser(ch CategoryChooser, sink ProposalSink) *BudgetSkill {
+	s.chooser, s.proposals = ch, sink
+	return s
 }
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
@@ -82,7 +185,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"category": map[string]any{
 						"type":        "string",
-						"description": "Expense or income category. Standard expense categories: еда (food), транспорт (transport), жильё (housing), здоровье (health), красота (beauty), развлечения (entertainment), подписки (subscriptions), одежда (clothes), переводы (transfers), прочее (other). Standard income categories: зарплата (salary), фриланс (freelance), прочее (other). If the user explicitly named a category — pass it as-is, do not replace with 'прочее'. The system will create a new category automatically if no match is found.",
+						"description": categoryFieldDescription(s.expenseCategoryNames()),
 					},
 					"description": map[string]any{
 						"type":        "string",

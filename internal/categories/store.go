@@ -2,8 +2,10 @@ package categories
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -71,15 +73,35 @@ func find(ctx context.Context, q querier, name, typ string) (Category, bool, err
 	return Category{}, false, nil
 }
 
+// checkInput чистит имя и проверяет тип: общий вход Resolve и GetOrCreate.
+func checkInput(name, typ string) (string, error) {
+	name = Clean(name)
+	if name == "" {
+		return "", errors.New("пустое имя категории")
+	}
+	if typ != "income" && typ != "expense" {
+		return "", fmt.Errorf("неизвестный тип категории %q", typ)
+	}
+	return name, nil
+}
+
+// Resolve находит категорию по имени или алиасу и ничего не создаёт (ADR-012 §1).
+// found=false без ошибки означает «такой категории нет»: вызывающий сам решает, что делать
+// (веб-план отвечает ошибкой вместо тихого NULL).
+func (s *Store) Resolve(ctx context.Context, name, typ string) (Category, bool, error) {
+	name, err := checkInput(name, typ)
+	if err != nil {
+		return Category{}, false, err
+	}
+	return find(ctx, s.pool, name, typ)
+}
+
 // GetOrCreate — единая точка создания категории (ADR-010 §2). Имя-алиас ведёт на целевую
 // категорию, «Кофе» и «кофе» — одна категория; параллельные вызовы создают ровно одну.
 func (s *Store) GetOrCreate(ctx context.Context, name, typ string) (Category, bool, error) {
-	name = Clean(name)
-	if name == "" {
-		return Category{}, false, errors.New("пустое имя категории")
-	}
-	if typ != "income" && typ != "expense" {
-		return Category{}, false, fmt.Errorf("неизвестный тип категории %q", typ)
+	name, err := checkInput(name, typ)
+	if err != nil {
+		return Category{}, false, err
 	}
 	if c, ok, err := find(ctx, s.pool, name, typ); err != nil || ok {
 		return c, false, err
@@ -104,6 +126,104 @@ func (s *Store) GetOrCreate(ctx context.Context, name, typ string) (Category, bo
 		return Category{}, false, fmt.Errorf("категория %q не найдена после конфликта вставки", name)
 	}
 	return c, false, nil
+}
+
+// SplitTarget — одна из целей разделения легаси-категории (ADR-013 §2).
+type SplitTarget struct {
+	Category
+	IsDefault bool
+}
+
+// SplitTargets возвращает цели, на которые разделена категория; пусто — это не split-источник.
+// Цель по умолчанию идёт первой.
+func (s *Store) SplitTargets(ctx context.Context, source uuid.UUID) ([]SplitTarget, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.name, c.type, c.icon, c.sort_order, t.is_default
+		FROM category_split_target t JOIN budget_category c ON c.id = t.target_id
+		WHERE t.source_id = $1
+		ORDER BY t.is_default DESC, c.sort_order, c.name`, source)
+	if err != nil {
+		return nil, fmt.Errorf("split targets: %w", err)
+	}
+	defer rows.Close()
+	var out []SplitTarget
+	for rows.Next() {
+		var x SplitTarget
+		if err := rows.Scan(&x.ID, &x.Name, &x.Type, &x.Icon, &x.SortOrder, &x.IsDefault); err != nil {
+			return nil, fmt.Errorf("scan split target: %w", err)
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// ListAssignable — категории типа typ, в которые можно записать новую трату: без split-источников
+// (легаси «Еда» не назначается напрямую, ADR-013 §3).
+func (s *Store) ListAssignable(ctx context.Context, typ string) ([]Category, error) {
+	if typ != "income" && typ != "expense" {
+		return nil, fmt.Errorf("неизвестный тип категории %q", typ)
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+catCols+` FROM budget_category c
+		WHERE c.type = $1 AND NOT EXISTS (SELECT 1 FROM category_split_target t WHERE t.source_id = c.id)
+		ORDER BY sort_order, name`, typ)
+	if err != nil {
+		return nil, fmt.Errorf("list assignable: %w", err)
+	}
+	defer rows.Close()
+	var out []Category
+	for rows.Next() {
+		c, err := scanCat(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan category: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// MostUsedCategory — самая частая категория среди прошлых трат с таким же описанием (без учёта
+// регистра и краёв). Не отдаёт split-источник («Еда» смешивает цели) и «Прочее» (результат
+// деградации не должен закрепляться за описанием навсегда).
+func (s *Store) MostUsedCategory(ctx context.Context, typ, description string) (Category, bool, error) {
+	key := strings.ToLower(Clean(description))
+	if key == "" {
+		return Category{}, false, nil
+	}
+	c, err := scanCat(s.pool.QueryRow(ctx, `
+		SELECT c.id, c.name, c.type, c.icon, c.sort_order
+		FROM budget_transaction t JOIN budget_category c ON c.id = t.category_id
+		WHERE t.type = $1 AND lower(btrim(t.description)) = $2
+		  AND lower(c.name) <> 'прочее'
+		  AND NOT EXISTS (SELECT 1 FROM category_split_target s WHERE s.source_id = c.id)
+		GROUP BY c.id ORDER BY count(*) DESC, c.name LIMIT 1`, typ, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Category{}, false, nil
+	}
+	if err != nil {
+		return Category{}, false, fmt.Errorf("most used category: %w", err)
+	}
+	return c, true, nil
+}
+
+// AddProposal кладёт в очередь разбора то, что бот не смог определить (kind='proposal').
+// transactionID — запись, из-за которой появилось предложение.
+func (s *Store) AddProposal(ctx context.Context, p Proposal, transactionID uuid.UUID) error {
+	name := Clean(p.Name)
+	if name == "" {
+		return errors.New("пустое имя предложения")
+	}
+	payload := map[string]any{"description": p.Description, "reason": p.Reason, "transaction_id": transactionID.String()}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("proposal payload: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO category_review_queue (type, name, name_lower, kind, payload)
+		VALUES ($1, $2, lower($2), 'proposal', $3)`, p.Type, name, raw); err != nil {
+		return fmt.Errorf("add proposal: %w", err)
+	}
+	return nil
 }
 
 // Usage считает ссылки на категорию.

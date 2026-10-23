@@ -14,6 +14,7 @@ import (
 
 type fakeSink struct {
 	added   []budget.PlanItemInput
+	addErr  error
 	delIDs  [][]int64
 	delOK   bool
 	delErr  error
@@ -53,6 +54,9 @@ type skipCall struct {
 
 func (f *fakeSink) AddPlanItem(_ context.Context, in budget.PlanItemInput) (uuid.UUID, error) {
 	f.added = append(f.added, in)
+	if f.addErr != nil {
+		return uuid.Nil, f.addErr
+	}
 	return uuid.New(), nil
 }
 

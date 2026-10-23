@@ -12,23 +12,25 @@ import (
 // есть одна транзакция БД; область чатов, «не закрыта» и направление стоят в WHERE,
 // поэтому чужую, закрытую или подменённую запись правка не заденет.
 //
-// Категория подбирается по имени так же, как в AddPlanItem. Когда появится единое
-// разрешение категорий с алиасами (simpleAI-nebf, ADR о дедупликации категорий),
-// переводить на него все три места вместе.
+// Имя категории переводится в category_id до SQL тем же модулем категорий, что и в
+// AddPlanItem (имя или алиас, ADR-012 §1); SQL получает готовый UUID.
 
-// keepCategorySQL — новая category_id записи по имени из формы ($7). Поступлению
-// категория не меняется. Если имя совпадает с текущей категорией записи (без учёта
-// регистра), она остаётся как есть: категория другого типа или дубль по регистру
-// («Еда» и «еда») не должны молча смениться или обнулиться от правки суммы. Иначе —
-// категория расходов с этим именем, точное совпадение регистра первым.
+// keepCategorySQL — новая category_id записи ($7 — UUID из expenseCategoryID, NULL —
+// без категории). Поступлению категория не меняется.
 func keepCategorySQL(table, dirCol string) string {
 	return `CASE
 		    WHEN ` + table + `.` + dirCol + ` = 'income' THEN ` + table + `.category_id
-		    WHEN EXISTS (SELECT 1 FROM budget_category cur
-		                 WHERE cur.id = ` + table + `.category_id AND LOWER(cur.name) = LOWER($7)) THEN ` + table + `.category_id
-		    ELSE (SELECT c.id FROM budget_category c WHERE LOWER(c.name) = LOWER($7) AND c.type = 'expense'
-		          ORDER BY c.name = $7 DESC, c.id LIMIT 1)
+		    ELSE $7::uuid
 		END`
+}
+
+// editCategoryID — category_id для правки: у поступления имя не разрешается (категория
+// не меняется), у расхода непустое неизвестное имя — ErrUnknownCategory.
+func (s *Store) editCategoryID(ctx context.Context, direction, name string) (uuid.NullUUID, error) {
+	if direction == "income" {
+		return uuid.NullUUID{}, nil
+	}
+	return s.expenseCategoryID(ctx, name)
 }
 
 // PlanItemEdit — новые значения плановой записи. SetPlace=false — дата и окно
@@ -51,6 +53,10 @@ func (s *Store) UpdatePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 	if e.SetPlace && e.DueDate != nil && e.WindowStart != nil {
 		return false, fmt.Errorf("update plan item: дата и окно вместе")
 	}
+	catID, err := s.editCategoryID(ctx, e.Direction, e.Category)
+	if err != nil {
+		return false, err
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE budget_planned_expense SET
 		    description  = $4,
@@ -60,7 +66,7 @@ func (s *Store) UpdatePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		    due_date     = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
 		    window_start = CASE WHEN $8::boolean THEN $10::date ELSE window_start END
 		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled AND direction = $3`,
-		id, chatIDs, e.Direction, e.Description, e.AmountMinor, e.Currency, e.Category, e.SetPlace, e.DueDate, e.WindowStart)
+		id, chatIDs, e.Direction, e.Description, e.AmountMinor, e.Currency, catID, e.SetPlace, e.DueDate, e.WindowStart)
 	if err != nil {
 		return false, fmt.Errorf("update plan item: %w", err)
 	}
@@ -82,6 +88,10 @@ type RecurringEdit struct {
 // UpdateRecurringRule меняет включённое правило из перечисленных чатов. false —
 // правила нет в этих чатах, оно выключено или у него другой тип.
 func (s *Store) UpdateRecurringRule(ctx context.Context, chatIDs []int64, id uuid.UUID, e RecurringEdit) (bool, error) {
+	catID, err := s.editCategoryID(ctx, e.Type, e.Category)
+	if err != nil {
+		return false, err
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE budget_recurring SET
 		    name        = $4,
@@ -90,7 +100,7 @@ func (s *Store) UpdateRecurringRule(ctx context.Context, chatIDs []int64, id uui
 		    category_id = `+keepCategorySQL("budget_recurring", "type")+`,
 		    updated_at  = NOW()
 		WHERE id = $1 AND chat_id = ANY($2) AND enabled AND type = $3`,
-		id, chatIDs, e.Type, e.Name, e.AmountMinor, e.Currency, e.Category)
+		id, chatIDs, e.Type, e.Name, e.AmountMinor, e.Currency, catID)
 	if err != nil {
 		return false, fmt.Errorf("update recurring rule: %w", err)
 	}
