@@ -189,15 +189,18 @@ func TestView_RowsCarryActions(t *testing.T) {
 	snap := baseSnap()
 	settled := factEvent("transaction:settled", FactSettled, "")
 	ext := factEvent("transaction:ext", FactExternal, "")
-	// Закрытые в прошлые дни в ленту не идут: берём факты сегодняшнего числа.
-	settled.Date, ext.Date = dp(2026, 3, 10), dp(2026, 3, 10)
 	snap.Payments = append(snap.Payments, settled, ext)
 	res, err := NewService(&fakeReader{snap: snap}, nil, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{7}}).View(context.Background(), CurTHB)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var seen int
-	for _, r := range res.View.Timeline {
+	// Факты в ленту «Ближайшие платежи» не идут: их видно в тратах категорий.
+	var recent []Row
+	for _, c := range res.View.Categories {
+		recent = append(recent, c.Recent...)
+	}
+	for _, r := range recent {
 		switch r.Key {
 		case "transaction:settled":
 			seen++
@@ -212,7 +215,7 @@ func TestView_RowsCarryActions(t *testing.T) {
 		}
 	}
 	if seen != 2 {
-		t.Fatalf("в ленте найдено %d из 2 фактов", seen)
+		t.Fatalf("в тратах категорий найдено %d из 2 фактов", seen)
 	}
 }
 

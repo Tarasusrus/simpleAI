@@ -63,9 +63,9 @@ func TestTimeline_Order(t *testing.T) {
 	})
 	v := mustCompute(t, in(ws, ev, CurRUB, r25, Date{2026, 10, 11}, 0)) // сегодня 11.10: просрочены только 06.10 и 08.10
 	got := keysOf(v.Timeline)
-	// просроченные (06.10, 08.10) первыми по дате ↑; 05.10 факт — прошлое, в ленту не идёт;
-	// 12.10: факт, план, потом платежи (Альфа/альфа/бета); 16.10
-	want := []string{"over1", "over2", "fact12", "plan", "a-pay", "a-pay2", "b-pay", "z-late"}
+	// просроченные (06.10, 08.10) первыми по дате ↑; пришедшие поступления (fact, fact12)
+	// в ленту не идут; 12.10: план, потом платежи (Альфа/альфа/бета); 16.10
+	want := []string{"over1", "over2", "plan", "a-pay", "a-pay2", "b-pay", "z-late"}
 	if !sameKeys(got, want) {
 		t.Fatalf("порядок ленты:\n got  %v\n want %v", got, want)
 	}
@@ -115,16 +115,16 @@ func TestTimeline_OverdueOnlyForOneOffPlanned(t *testing.T) {
 	}
 }
 
-// Лента «Ближайшие платежи» смотрит вперёд: оплаченное сегодня остаётся (можно вернуть
-// в план), оплаченное в прошлые дни и вне окна — нет.
-func TestTimeline_FactsOnlyTodayOnward(t *testing.T) {
+// Лента «Ближайшие платежи» — только то, что ещё впереди: оплаченное не показывается ни
+// сегодня, ни в прошлые дни.
+func TestTimeline_NoFacts(t *testing.T) {
 	v := tl(t, []Event{
 		payDone("today", "Сегодня", 100_000, CurRUB, Date{2026, 10, 14}),
 		payDone("past", "Вчера", 100_000, CurRUB, Date{2026, 10, 13}),
-		payDone("out", "Вне окна", 100, CurRUB, Date{2026, 10, 25}),
+		planAmount("open", "Не оплачено", 100, &Date{2026, 10, 15}, nil),
 	}, Date{2026, 10, 14})
 	k := keysOf(v.Timeline)
-	if !contains(k, "today") || contains(k, "past") || contains(k, "out") {
+	if contains(k, "today") || contains(k, "past") || !contains(k, "open") {
 		t.Fatalf("лента: %v", k)
 	}
 }
