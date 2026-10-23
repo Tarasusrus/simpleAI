@@ -273,6 +273,9 @@ func (c calc) core() (View, error) {
 	if v.Limits, v.LimitHold, err = c.limits(); err != nil {
 		return View{}, err
 	}
+	if v.Unplanned, v.UnplannedSpent, err = c.unplanned(); err != nil {
+		return View{}, err
+	}
 	out := income - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	v.CanSpend = out
 	v.LimitsExceedFree = v.LimitHold > max(out+v.LimitHold, 0)

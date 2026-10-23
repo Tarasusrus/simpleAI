@@ -20,6 +20,10 @@ type View struct {
 	// LimitsExceedFree — лимиты откладывают больше, чем было свободно до них.
 	LimitsExceedFree bool
 	Limits           []LimitView
+	// Unplanned — категории без действующего лимита с тратами окна; UnplannedSpent — их сумма.
+	// Часть Spent, в формулу не входит (ADR-015 §2).
+	Unplanned      []UnplannedRow
+	UnplannedSpent int64
 	// SpentBefore — траты в зазоре между окнами, пока описываемое окно ещё не началось; в окно не входят.
 	SpentBefore     int64
 	SpentBeforeFrom *Date

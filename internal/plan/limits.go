@@ -210,3 +210,52 @@ func (c calc) limits() (views []LimitView, hold int64, err error) {
 	}
 	return views, hold, nil
 }
+
+// UnplannedRow — категория без действующего лимита с оплаченными тратами окна (ADR-015 §3).
+type UnplannedRow struct {
+	Category string
+	Spent    int64
+}
+
+// unplanned считает оплаченные траты окна в категориях без лимита, действующего на это окно
+// (ADR-015 §2). Факты с RuleID (платежи правил — обязательства) и «Без категории» не входят.
+// В формулу CanSpend сумма не входит: эти траты уже в Spent.
+func (c calc) unplanned() (rows []UnplannedRow, total int64, err error) {
+	limited := map[string]bool{}
+	for _, l := range c.limitsFor() {
+		limited[CategoryKey(l.Category)] = true
+	}
+	idx := map[string]int{}
+	for _, e := range c.in.Events {
+		if e.State != StateDone || e.RuleID != "" || e.Amount == nil || e.Category == "" || e.Date == nil {
+			continue
+		}
+		k := CategoryKey(e.Category)
+		if limited[k] || !c.inWindowByDate(*e.Date) {
+			continue
+		}
+		n, cerr := c.money(e.Amount)
+		if cerr != nil {
+			return nil, 0, cerr
+		}
+		i, ok := idx[k]
+		if !ok {
+			i = len(rows)
+			idx[k] = i
+			rows = append(rows, UnplannedRow{Category: e.Category})
+		}
+		if rows[i].Spent, err = addI64(rows[i].Spent, n); err != nil {
+			return nil, 0, err
+		}
+		if total, err = addI64(total, n); err != nil {
+			return nil, 0, err
+		}
+	}
+	sort.SliceStable(rows, func(a, b int) bool {
+		if rows[a].Spent != rows[b].Spent {
+			return rows[a].Spent > rows[b].Spent
+		}
+		return CategoryKey(rows[a].Category) < CategoryKey(rows[b].Category)
+	})
+	return rows, total, nil
+}

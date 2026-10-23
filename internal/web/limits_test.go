@@ -266,7 +266,8 @@ func TestLimits_Suggest(t *testing.T) {
 
 // Старые поля ответа на месте, новые добавлены, пустые лимиты — [] а не null.
 func TestWindow_LimitsFieldsAdditive(t *testing.T) {
-	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true,
+	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true, UnplannedSpent: 70,
+		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70}},
 		Limits: []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
 	s, _ := newServer(t, &fakePlanner{res: res})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
@@ -278,6 +279,12 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	if kpi["canSpend"] != float64(100) || kpi["limitHold"] != float64(30) || kpi["limitsExceedFree"] != true {
 		t.Fatalf("kpi=%v", kpi)
 	}
+	if kpi["unplannedSpent"] != float64(70) {
+		t.Fatalf("unplannedSpent: kpi=%v", kpi)
+	}
+	if up, ok := got["unplanned"].([]any); !ok || len(up) != 1 || asMap(t, up[0])["category"] != "Кафе" || asMap(t, up[0])["spent"] != float64(70) {
+		t.Fatalf("unplanned=%v", got["unplanned"])
+	}
 	ls, ok := got["limits"].([]any)
 	if !ok || len(ls) != 1 {
 		t.Fatalf("limits=%v", got["limits"])
@@ -288,8 +295,8 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	}
 	empty, _ := newServer(t, &fakePlanner{})
 	rec = do(empty, "GET", "/api/plan/window", goodToken)
-	if !strings.Contains(rec.Body.String(), `"limits":[]`) {
-		t.Fatalf("пустые лимиты не []: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"limits":[]`) || !strings.Contains(rec.Body.String(), `"unplanned":[]`) {
+		t.Fatalf("пустые лимиты/unplanned не []: %s", rec.Body.String())
 	}
 }
 
