@@ -223,3 +223,19 @@ func TestRunRemaining_ShadowLogsAndKeepsOldReply(t *testing.T) {
 		t.Fatalf("shadow-лог:\n%s", logs.String())
 	}
 }
+
+// Старый путь без конверта не зовёт к снятому start_envelope («разложи по конвертам», «запомни приход»).
+//
+// Мутация: вернуть подсказки про раскладку в remaining.go — тест краснеет.
+func TestOldPath_NoEnvelopeReplyDoesNotAdvertiseStartEnvelope(t *testing.T) {
+	var logs bytes.Buffer
+	for _, q := range []string{`{"question":"сколько осталось в конвертах"}`, `{"question":"сколько свободно осталось"}`} {
+		out, err := skillWith(fakeStore{}, nil, LimitsMode{}, &logs).Run(chatCtx(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "Активного конверта нет") || strings.Contains(out, "разложи по конвертам") || strings.Contains(out, "запомни приход") {
+			t.Errorf("%s: %q", q, out)
+		}
+	}
+}

@@ -25,7 +25,7 @@ func (s *SafeToSpendSkill) runRemaining(ctx context.Context, chatID int64, rates
 		return "Не удалось получить конверт — попробуй позже.", nil
 	}
 	if !ok {
-		return "Активного конверта нет. Скажи «пришло X, сколько свободно?» — посчитаю, или «запомни приход X», чтобы отслеживать остаток.", nil
+		return "Активного конверта нет. Скажи «пришло X, сколько свободно?» — посчитаю.", nil
 	}
 
 	incomeTHB, ok := budget.ToTHB(env.IncomeAmount, env.IncomeCurrency, rates)
@@ -100,7 +100,7 @@ func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates ma
 		return "Не удалось получить конверт — попробуй позже.", nil
 	}
 	if !ok {
-		return "Активного конверта нет. Скажи «пришло X, разложи по конвертам» — заведу раскладку.", nil
+		return "Активного конверта нет. Конверты больше не заводятся: лимиты на категории ставятся словами («на еду хватит 15000») и считаются по окну плана — для этого нужен ожидаемый приход в плане.", nil
 	}
 
 	shares, err := s.store.ListShares(ctx, chatID, env.ID)
