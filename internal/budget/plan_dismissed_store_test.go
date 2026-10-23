@@ -33,13 +33,13 @@ func TestPlanDismissed_DismissRestoreScope(t *testing.T) {
 	if err := s.RestorePlanCategory(ctx, []int64{limitChat}, limitCatAnother); err != nil { // чужая категория чужого чата
 		t.Fatal(err)
 	}
-	if got, _ := s.PlanDismissed(ctx, []int64{limitChat - 1}); len(got) != 1 {
+	if got, err := s.PlanDismissed(ctx, []int64{limitChat - 1}); err != nil || len(got) != 1 {
 		t.Fatalf("Restore затронул чужой чат: %v", got)
 	}
 	if err := s.RestorePlanCategory(ctx, []int64{limitChat}, limitCatName); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.PlanDismissed(ctx, []int64{limitChat}); len(got) != 0 {
+	if got, err := s.PlanDismissed(ctx, []int64{limitChat}); err != nil || len(got) != 0 {
 		t.Fatalf("после Restore: %v", got)
 	}
 	if err := s.DismissPlanCategory(ctx, limitChat, "нет-такой-категории-xyz"); !errors.Is(err, ErrPlanLimitCategory) {
