@@ -2,6 +2,7 @@ package botlimits
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"simpleAI/internal/plan"
@@ -87,5 +88,131 @@ func TestSnapshot_NoWindowAndBadCurrency(t *testing.T) {
 	}
 	if _, _, err := newPlan(&fakeReader{snap: fixture()}, 42).Snapshot(context.Background(), 42, "USD"); err == nil {
 		t.Fatal("валюта USD принята")
+	}
+}
+
+type fakeWriter struct {
+	added   []plan.NewLimit
+	edited  map[string]plan.LimitEdit
+	deleted []string
+	scopes  []plan.Scope
+	err     error
+}
+
+func (f *fakeWriter) AddLimit(_ context.Context, sc plan.Scope, n plan.NewLimit) (string, error) {
+	f.added = append(f.added, n)
+	f.scopes = append(f.scopes, sc)
+	return "new-1", f.err
+}
+
+func (f *fakeWriter) UpdateLimit(_ context.Context, sc plan.Scope, id string, e plan.LimitEdit) error {
+	if f.edited == nil {
+		f.edited = map[string]plan.LimitEdit{}
+	}
+	f.edited[id] = e
+	f.scopes = append(f.scopes, sc)
+	return f.err
+}
+
+func (f *fakeWriter) DeleteLimit(_ context.Context, sc plan.Scope, id string) error {
+	f.deleted = append(f.deleted, id)
+	f.scopes = append(f.scopes, sc)
+	return f.err
+}
+
+func newWritable(f *fakeReader, w *fakeWriter, chats ...int64) *Plan {
+	svc := plan.NewService(f, nil, func() plan.Date { return d(2026, 3, 10) }, plan.Scope{ChatIDs: []int64{1}}).WithLimitWriter(w)
+	return NewPlan(svc, ScopeOfChats(chats))
+}
+
+// SetLimit: существующий лимит меняется (повтор сохраняется), новый создаётся повторяющимся на окно плана;
+// сумма в минимальных единицах, валюта по умолчанию RUB, область запроса доходит до писателя.
+//
+// Мутации: создавать разовый вместо повторяющегося; терять Repeat при правке; брать область сервиса; минор без округления.
+func TestSetLimit_EditsExistingAddsRepeatingNew(t *testing.T) {
+	snap := fixture()
+	snap.Limits[0].Repeat = true // «Еда» повторяется, «Кино» — разовый: признак сохраняется у каждого
+	snap.Limits = append(snap.Limits, plan.Limit{ID: "L2", Category: "Кино", Amount: plan.Money{Minor: 100000, Cur: plan.CurRUB}, WindowStart: d(2026, 3, 5)})
+	f := &fakeReader{snap: snap}
+	w := &fakeWriter{}
+	p := newWritable(f, w, 42, 43)
+	ctx := context.Background()
+	ok, err := p.SetLimit(ctx, 42, " еда ", 15000.005, "")
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	e, edited := w.edited["L1"]
+	if !edited || e.Amount != (plan.Money{Minor: 1500001, Cur: plan.CurRUB}) || !e.Repeat {
+		t.Fatalf("правка существующего: %+v (ждали 15000,01 ₽ и Repeat=true как у лимита)", w.edited)
+	}
+	if ok, err := p.SetLimit(ctx, 42, "кино", 500, "RUB"); err != nil || !ok || w.edited["L2"].Repeat {
+		t.Fatalf("разовый лимит стал повторяющимся: ok=%v err=%v %+v", ok, err, w.edited)
+	}
+	ok, err = p.SetLimit(ctx, 42, "Такси", 3000, "thb")
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	want := plan.NewLimit{Category: "Такси", Amount: plan.Money{Minor: 300000, Cur: plan.CurTHB}, Repeat: true, WindowStart: d(2026, 3, 5)}
+	if len(w.added) != 1 || w.added[0] != want {
+		t.Fatalf("новый лимит %+v, ждали %+v", w.added, want)
+	}
+	if len(w.scopes) != 3 || len(w.scopes[2].ChatIDs) != 2 || w.scopes[2].ChatIDs[0] != 42 {
+		t.Fatalf("область записи: %+v", w.scopes)
+	}
+}
+
+func TestSetLimit_OutOfScopeNoWindowBadCurrency(t *testing.T) {
+	w := &fakeWriter{}
+	ctx := context.Background()
+	if ok, err := newWritable(&fakeReader{snap: fixture()}, w, 42).SetLimit(ctx, 99, "Еда", 1, "RUB"); ok || err != nil {
+		t.Fatalf("чат вне области: ok=%v err=%v", ok, err)
+	}
+	noWin := &fakeReader{snap: plan.Snapshot{Rate: &plan.Rate{RubPerThbMicro: 2_500_000}}}
+	if ok, err := newWritable(noWin, w, 42).SetLimit(ctx, 42, "Еда", 1, "RUB"); ok || err != nil {
+		t.Fatalf("нет окна: ok=%v err=%v, ждали старый путь", ok, err)
+	}
+	if _, err := newWritable(&fakeReader{snap: fixture()}, w, 42).SetLimit(ctx, 42, "Еда", 1, "USD"); err == nil {
+		t.Fatal("валюта USD принята")
+	}
+	if len(w.added)+len(w.edited) != 0 {
+		t.Fatalf("писали при отказе: %+v %+v", w.added, w.edited)
+	}
+}
+
+func TestClearLimit_DeletesFoundOnly(t *testing.T) {
+	w := &fakeWriter{}
+	p := newWritable(&fakeReader{snap: fixture()}, w, 42)
+	ctx := context.Background()
+	ok, found, err := p.ClearLimit(ctx, 42, " ЕДА")
+	if err != nil || !ok || !found || len(w.deleted) != 1 || w.deleted[0] != "L1" {
+		t.Fatalf("ok=%v found=%v err=%v deleted=%v", ok, found, err, w.deleted)
+	}
+	ok, found, err = p.ClearLimit(ctx, 42, "Такси")
+	if err != nil || !ok || found || len(w.deleted) != 1 {
+		t.Fatalf("нет лимита: ok=%v found=%v err=%v deleted=%v", ok, found, err, w.deleted)
+	}
+	if ok, _, err := p.ClearLimit(ctx, 99, "Еда"); ok || err != nil {
+		t.Fatalf("чат вне области обслужен планом: ok=%v err=%v", ok, err)
+	}
+}
+
+// Отказ плана про категорию доходит до скилла как ErrUnknownCategory (скилл не импортирует plan); прочее — как есть.
+func TestWriter_MapsCategoryErrors(t *testing.T) {
+	ctx := context.Background()
+	w := &fakeWriter{err: plan.ErrLimitCategory}
+	p := newWritable(&fakeReader{snap: fixture()}, w, 42)
+	if _, err := p.SetLimit(ctx, 42, "Такси", 1, "RUB"); !errors.Is(err, ErrUnknownCategory) {
+		t.Errorf("Add: %v", err)
+	}
+	w.err = plan.ErrUnknownCategory
+	if _, err := p.SetLimit(ctx, 42, "Еда", 1, "RUB"); !errors.Is(err, ErrUnknownCategory) {
+		t.Errorf("Edit: %v", err)
+	}
+	if _, _, err := p.ClearLimit(ctx, 42, "Еда"); !errors.Is(err, ErrUnknownCategory) {
+		t.Errorf("Delete: %v", err)
+	}
+	w.err = errors.New("boom")
+	if _, err := p.SetLimit(ctx, 42, "Еда", 1, "RUB"); err == nil || errors.Is(err, ErrUnknownCategory) {
+		t.Errorf("прочая ошибка: %v", err)
 	}
 }

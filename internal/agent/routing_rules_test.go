@@ -79,7 +79,7 @@ func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.
 	// лимит: разграничение читается как уточнение к ним, а не наоборот.
 	rateAt := strings.Index(rules, "КУРС БАТА")
 	displayAt := strings.Index(rules, "ВАЛЮТА КОНВЕРТОВ")
-	limitAt := strings.Index(rules, "Правка ЛИМИТА конверта")
+	limitAt := strings.Index(rules, "Правка ЛИМИТА категории")
 	if rateAt < 0 || displayAt < 0 || limitAt < 0 {
 		t.Fatalf("не найдены заголовки правил: курс=%d показ=%d лимит=%d", rateAt, displayAt, limitAt)
 	}

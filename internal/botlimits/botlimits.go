@@ -5,6 +5,7 @@ package botlimits
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"simpleAI/internal/plan"
@@ -52,6 +53,19 @@ func (s Snapshot) ForCategory(name string) (Limit, bool) {
 // плана или окна с приходом нет), а не «лимитов нет» (ADR-016 §2, §4).
 type Reader interface {
 	Snapshot(ctx context.Context, chatID int64, cur string) (snap Snapshot, ok bool, err error)
+}
+
+// ErrUnknownCategory — у лимита нет такой категории расходов (или это «Без категории»). Скиллы различают её через
+// errors.Is, не импортируя plan.
+var ErrUnknownCategory = errors.New("botlimits: нет такой категории расходов")
+
+// Writer пишет лимиты категорий через ядро плана (ADR-016 §6).
+type Writer interface {
+	// SetLimit ставит или меняет лимит категории на текущее окно плана. amount в основных единицах
+	// валюты currency (RUB|THB). ok=false — чат обслуживается старым путём.
+	SetLimit(ctx context.Context, chatID int64, category string, amount float64, currency string) (ok bool, err error)
+	// ClearLimit снимает лимит категории. found=false — лимита не было.
+	ClearLimit(ctx context.Context, chatID int64, category string) (ok, found bool, err error)
 }
 
 func key(s string) string { return plan.CategoryKey(s) }

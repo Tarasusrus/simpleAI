@@ -120,6 +120,7 @@ func formatShareWarning(rem safetospend.ShareRemaining, m safetospend.Display) s
 // WithLimits подключает лимиты из плана (ADR-016): при fromPlan предупреждение о трате считает ядро плана.
 func (s *BudgetSkill) WithLimits(r botlimits.Reader, fromPlan bool) *BudgetSkill {
 	s.limits, s.limitsFromPlan = r, fromPlan
+	s.limitsWriter, _ = r.(botlimits.Writer) //nolint:errcheck // нет писателя — старый путь
 	return s
 }
 

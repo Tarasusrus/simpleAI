@@ -29,6 +29,7 @@ type BudgetSkill struct {
 	// конверта. nil или выключено — прежний путь.
 	limits         botlimits.Reader
 	limitsFromPlan bool
+	limitsWriter   botlimits.Writer // запись лимитов через план (set_share_limit/clear); nil — старый путь
 	// chooser выбирает категорию (ADR-012); nil — прежнее поведение: имя из запроса через
 	// GetOrCreateCategory, без классификатора.
 	chooser   CategoryChooser
@@ -165,9 +166,9 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 			"action='start_envelope' SAVES an arrived income and SPLITS it into category envelopes ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X', " +
 			"'пришло X, разложи по конвертам', 'разложи приход X по конвертам', 'раскидай X по конвертам', 'пришло X, разложи'). " +
 			"Any 'разложи / раскидай / распредели ... по конвертам' with an arrived income is start_envelope — it WRITES the envelope and its shares; safe_to_spend only counts and writes nothing. " +
-			"action='set_share_limit' CORRECTS the LIMIT of a category envelope by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
-			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The correction is remembered and applied to every following income until removed. " +
-			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the limit goes back to being computed from spending history; pass name=<категория>. " +
+			"action='set_share_limit' CORRECTS the LIMIT of a category (a limit on the plan window; people also call it an envelope limit) by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
+			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The limit repeats every plan window until removed. " +
+			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the category has no limit any more; pass name=<категория>. " +
 			"action='set_rate' SETS the ฿→₽ EXCHANGE RATE by hand ('курс 2,7', 'ставь курс 2.65', 'курс бата 2,7') — pass amount=<rate>. " +
 			"It is NOT a transaction and NOT a limit: the number is rubles per one baht, not money spent or planned. " +
 			"action='clear_rate' returns to the automatic rate ('курс авто', 'верни автоматический курс', 'бери курс сам'). " +

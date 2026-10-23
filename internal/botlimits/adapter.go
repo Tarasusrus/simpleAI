@@ -2,7 +2,9 @@ package botlimits
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -29,7 +31,7 @@ func ScopeOfChats(chats []int64) ScopeFor {
 	return func(chatID int64) (plan.Scope, bool) { return scope, in[chatID] }
 }
 
-// Plan реализует Reader поверх plan.Service.
+// Plan реализует Reader и Writer поверх plan.Service.
 type Plan struct {
 	svc   PlanService
 	scope ScopeFor
@@ -37,7 +39,10 @@ type Plan struct {
 
 func NewPlan(svc PlanService, scope ScopeFor) *Plan { return &Plan{svc: svc, scope: scope} }
 
-var _ Reader = (*Plan)(nil)
+var (
+	_ Reader = (*Plan)(nil)
+	_ Writer = (*Plan)(nil)
+)
 
 func parseCur(cur string) (plan.Currency, error) {
 	c := plan.Currency(strings.ToUpper(strings.TrimSpace(cur)))
@@ -77,4 +82,83 @@ func (p *Plan) Snapshot(ctx context.Context, chatID int64, cur string) (Snapshot
 		s.Limits = append(s.Limits, Limit{Category: l.Category, Repeat: l.Repeat, Amount: l.Amount, Spent: l.Spent, Planned: l.Planned, Left: l.Left, Over: l.Over})
 	}
 	return s, true, nil
+}
+
+// mapWriteErr переводит отказ плана про категорию в ErrUnknownCategory; прочее отдаёт как есть.
+func mapWriteErr(err error) error {
+	if errors.Is(err, plan.ErrLimitCategory) || errors.Is(err, plan.ErrUnknownCategory) {
+		return fmt.Errorf("%w: %w", ErrUnknownCategory, err)
+	}
+	return err
+}
+
+// windowOf читает окно плана для поиска лимита. Валюта показа здесь не важна (нужны id и имена), поэтому
+// сначала рубли, а при ошибке перевода (нет курса) — баты: хотя бы одна из валют считается без курса.
+func windowOf(ctx context.Context, svc *plan.Service) (plan.Result, error) {
+	res, err := svc.View(ctx, plan.CurRUB)
+	if err != nil {
+		var err2 error
+		if res, err2 = svc.View(ctx, plan.CurTHB); err2 != nil {
+			return plan.Result{}, fmt.Errorf("botlimits: окно плана: %w", err)
+		}
+	}
+	return res, nil
+}
+
+// minor — сумма в минимальных единицах валюты (копейки, сатанги) с округлением до ближайшей.
+func minor(amount float64) int64 { return int64(math.Round(amount * 100)) }
+
+// SetLimit ставит лимит категории на окно плана через plan.Service. Существующий лимит меняется (его признак
+// «повторяется» сохраняется), новый создаётся повторяющимся: прежний set_share_limit тоже жил между приходами,
+// пока его не снимут. Валюта по умолчанию — RUB, как у прежнего set_share_limit. Окна с приходом нет — ok=false.
+func (p *Plan) SetLimit(ctx context.Context, chatID int64, category string, amount float64, currency string) (bool, error) {
+	sc, in := p.scope(chatID)
+	if !in {
+		return false, nil
+	}
+	if strings.TrimSpace(currency) == "" {
+		currency = string(plan.CurRUB)
+	}
+	c, err := parseCur(currency)
+	if err != nil {
+		return true, err
+	}
+	money := plan.Money{Minor: minor(amount), Cur: c}
+	svc := p.svc.ForScope(sc)
+	res, err := windowOf(ctx, svc)
+	if err != nil {
+		return true, err
+	}
+	if res.View.Window == nil || res.View.State == plan.StateNone || res.View.State == plan.StateEnded {
+		return false, nil
+	}
+	for _, l := range res.View.Limits {
+		if plan.CategoryKey(l.Category) == plan.CategoryKey(category) {
+			return true, mapWriteErr(svc.EditLimit(ctx, l.ID, plan.LimitEdit{Amount: money, Repeat: l.Repeat}))
+		}
+	}
+	_, err = svc.AddLimit(ctx, plan.AddLimitInput{Category: category, Amount: money, Repeat: true})
+	return true, mapWriteErr(err)
+}
+
+// ClearLimit снимает лимит категории, действующий на окно плана.
+func (p *Plan) ClearLimit(ctx context.Context, chatID int64, category string) (ok, found bool, err error) {
+	sc, in := p.scope(chatID)
+	if !in {
+		return false, false, nil
+	}
+	svc := p.svc.ForScope(sc)
+	res, err := windowOf(ctx, svc)
+	if err != nil {
+		return true, false, err
+	}
+	if res.View.Window == nil || res.View.State == plan.StateNone || res.View.State == plan.StateEnded {
+		return false, false, nil
+	}
+	for _, l := range res.View.Limits {
+		if plan.CategoryKey(l.Category) == plan.CategoryKey(category) {
+			return true, true, mapWriteErr(svc.DeleteLimit(ctx, l.ID))
+		}
+	}
+	return true, false, nil
 }
