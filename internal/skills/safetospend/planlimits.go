@@ -128,13 +128,13 @@ func formatPlanLimits(snap botlimits.Snapshot, m Display, now time.Time) string 
 		snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, pluralDays(snap.DaysLeft))
 	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(m.RubPerTHB), now.Format("02.01"))
 
+	var over []string
 	if len(snap.Limits) == 0 {
 		b.WriteString("\nЛимитов на категории в этом окне нет. Скажи «на еду хватит 15000» — поставлю лимит.\n")
 	} else {
 		b.WriteString("\n**Что осталось**\n```\n")
 		fmt.Fprintf(&b, "%s%s%s\n", padRight("", remLabelWidth), padLeft("потрачено", remSpentWidth), padLeft("осталось", remLeftWidth))
 		var spentTotal, leftTotal int64
-		var over []string
 		for _, l := range snap.Limits {
 			left := l.Left - l.Over
 			spentTotal += l.Spent
@@ -150,13 +150,11 @@ func formatPlanLimits(snap botlimits.Snapshot, m Display, now time.Time) string 
 			padLeft(strings.Repeat("-", utf8.RuneCountInString(spentStr)), remSpentWidth),
 			padLeft(strings.Repeat("-", utf8.RuneCountInString(leftStr)), remLeftWidth))
 		fmt.Fprintf(&b, "%s%s%s\n```\n", padRight("", remLabelWidth), padLeft(spentStr, remSpentWidth), padLeft(leftStr, remLeftWidth))
-		b.WriteString(planDayLines(snap, m))
-		if len(over) > 0 {
-			fmt.Fprintf(&b, "\n\n⚠️ Пробито: %s — дальше тратишь из свободных денег.", strings.Join(over, ", "))
-		}
-		return b.String()
 	}
 	b.WriteString(planDayLines(snap, m))
+	if len(over) > 0 {
+		fmt.Fprintf(&b, "\n\n⚠️ Пробито: %s — дальше тратишь из свободных денег.", strings.Join(over, ", "))
+	}
 	return b.String()
 }
 
