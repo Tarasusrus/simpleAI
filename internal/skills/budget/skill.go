@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/categories"
 	"simpleAI/internal/plugin"
@@ -24,6 +25,10 @@ type BudgetSkill struct {
 	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
 	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
 	shareStore shareWarningStore
+	// limits — лимиты из плана (ADR-016); при limitsFromPlan предупреждение о трате берётся из плана, а не из долей
+	// конверта. nil или выключено — прежний путь.
+	limits         botlimits.Reader
+	limitsFromPlan bool
 	// chooser выбирает категорию (ADR-012); nil — прежнее поведение: имя из запроса через
 	// GetOrCreateCategory, без классификатора.
 	chooser   CategoryChooser

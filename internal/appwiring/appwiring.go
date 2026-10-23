@@ -59,7 +59,7 @@ func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	budgetStore := budget.NewStore(pool)
-	bs := budgetskill.NewBudgetSkill(budgetStore)
+	bs := budgetskill.NewBudgetSkill(budgetStore).WithLimits(o.limits, o.limitsMode.FromPlan)
 	if err := registry.Register(bs); err != nil {
 		logger.Error("failed to register budget skill", "err", err)
 	}
