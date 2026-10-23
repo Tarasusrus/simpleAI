@@ -37,6 +37,7 @@ func runSplit(args []string) error {
 	source := fs.String("source", "Еда", "категория-источник (должна быть в category_split_target)")
 	apply := fs.Bool("apply", false, "перенести строки (без флага — только таблица)")
 	rollback := fs.String("rollback-split", "", "split_id для отката")
+	planPath := fs.String("plan-file", "split-plan.json", "файл плана: dry-run его пишет, --apply применяет именно его")
 	retire := fs.Bool("retire", false, "убрать пустой источник слиянием в цель по умолчанию")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -86,6 +87,24 @@ func runSplit(args []string) error {
 		return nil
 	}
 
+	if *apply {
+		// Применяется ровно тот план, что владелец видел в dry-run: классификатор заново не зовётся.
+		data, err := os.ReadFile(*planPath)
+		if err != nil {
+			return fmt.Errorf("нет файла плана %s: сначала dry-run (categories split), утверди таблицу, потом --apply: %w", *planPath, err)
+		}
+		p, err := st.LoadSplitPlan(ctx, data, *source)
+		if err != nil {
+			return err
+		}
+		res, err := st.ApplySplit(ctx, p)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("ПРИМЕНЕНО: split_id=%s, перенесено %v (строк в плане %d)\nОткат: categories split --rollback-split %s\n", res.SplitID, res.Moved, len(p.Rows), res.SplitID)
+		return nil
+	}
+
 	rows, err := st.SplitRows(ctx, src.ID)
 	if err != nil {
 		return err
@@ -105,15 +124,14 @@ func runSplit(args []string) error {
 	if _, err := fmt.Fprint(os.Stdout, report.String()); err != nil {
 		return err
 	}
-	if !*apply {
-		fmt.Println("\nДРАЙ-РАН: ничего не записано. Применить — тот же вызов с --apply (после ответа владельца на таблицу).")
-		return nil
-	}
-	res, err := st.ApplySplit(ctx, p)
+	data, err := p.Marshal(time.Now())
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\nПРИМЕНЕНО: split_id=%s, перенесено %v\nОткат: categories split --rollback-split %s\n", res.SplitID, res.Moved, res.SplitID)
+	if err := os.WriteFile(*planPath, data, 0o600); err != nil {
+		return fmt.Errorf("запись плана: %w", err)
+	}
+	fmt.Printf("\nДРАЙ-РАН: в базу ничего не записано. План сохранён в %s. Применить: categories split --apply --plan-file %s (после ответа владельца на таблицу).\n", *planPath, *planPath)
 	return nil
 }
 

@@ -2,6 +2,7 @@ package categories
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -312,4 +313,69 @@ func (s *Store) RetireSource(ctx context.Context, src Category, target Category)
 			src.Name, c.Transactions, c.Planned, c.Recurring)
 	}
 	return s.Merge(ctx, MergeRequest{Source: src.ID, Target: target.ID, Decider: "manual", Reason: "этап 2 ADR-013: история разнесена, «Еда» убрана"})
+}
+
+// planFile — то, что dry-run сохраняет на диск и принимает --apply: только id строк и цели (без описаний). Владелец
+// утверждает таблицу, а применяется именно сохранённый план: повторный вызов классификатора мог бы ответить иначе.
+type planFile struct {
+	SourceID   uuid.UUID `json:"source_id"`
+	SourceName string    `json:"source_name"`
+	CreatedAt  time.Time `json:"created_at"`
+	Rows       []struct {
+		Table      string    `json:"table"`
+		ID         uuid.UUID `json:"id"`
+		TargetID   uuid.UUID `json:"target_id"`
+		TargetName string    `json:"target_name"`
+	} `json:"rows"`
+}
+
+// Marshal сохраняет план для --apply.
+func (p SplitPlan) Marshal(now time.Time) ([]byte, error) {
+	f := planFile{SourceID: p.Source.ID, SourceName: p.Source.Name, CreatedAt: now.UTC()}
+	for _, r := range p.Rows {
+		f.Rows = append(f.Rows, struct {
+			Table      string    `json:"table"`
+			ID         uuid.UUID `json:"id"`
+			TargetID   uuid.UUID `json:"target_id"`
+			TargetName string    `json:"target_name"`
+		}{r.Row.Table, r.Row.ID, r.Target.ID, r.Target.Name})
+	}
+	return json.MarshalIndent(f, "", "  ")
+}
+
+// LoadSplitPlan читает сохранённый план и проверяет его по базе: источник — тот же split-источник, каждая цель — из
+// его split-таблицы, таблицы строк известны. Чужой или устаревший файл отвергается.
+func (s *Store) LoadSplitPlan(ctx context.Context, data []byte, sourceName string) (SplitPlan, error) {
+	var f planFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return SplitPlan{}, fmt.Errorf("план разнесения: %w", err)
+	}
+	src, targets, err := s.SplitSource(ctx, sourceName)
+	if err != nil {
+		return SplitPlan{}, err
+	}
+	if f.SourceID != src.ID {
+		return SplitPlan{}, fmt.Errorf("план составлен для другой категории (%s), а не для %q", f.SourceName, src.Name)
+	}
+	byID := map[uuid.UUID]SplitTarget{}
+	p := SplitPlan{Source: src, Targets: targets}
+	for _, t := range targets {
+		byID[t.ID] = t
+		if t.IsDefault {
+			p.Default = t
+		}
+	}
+	for _, r := range f.Rows {
+		t, ok := byID[r.TargetID]
+		if !ok {
+			return SplitPlan{}, fmt.Errorf("в плане цель %q (%s) не из split-таблицы источника", r.TargetName, r.TargetID)
+		}
+		switch r.Table {
+		case logTx, logPlanned, logRecurring:
+		default:
+			return SplitPlan{}, fmt.Errorf("в плане неизвестная таблица %q", r.Table)
+		}
+		p.Rows = append(p.Rows, RowChoice{Row: SplitRow{Table: r.Table, ID: r.ID}, Target: t.Category, Basis: "saved"})
+	}
+	return p, nil
 }

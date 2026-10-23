@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -148,4 +150,58 @@ func mustRows(t *testing.T, st *categories.Store, src categories.Category) []cat
 		t.Fatal(err)
 	}
 	return rows
+}
+
+// План сохраняется и применяется именно тем, что видел владелец: классификатор при apply не нужен; чужой источник,
+// цель вне split-таблицы и неизвестная таблица отвергаются.
+//
+// Мутации: не проверять источник, цель или таблицу при загрузке; терять цель строки при записи — краснеют.
+func TestCategories_SplitPlanFile(t *testing.T) {
+	st, conn := catStoreAt(t, 26)
+	ctx := context.Background()
+	rest := catID(t, conn, "Рестораны")
+	tx := uuid.New()
+	mustExec(t, conn, `INSERT INTO budget_transaction (id,type,amount,currency,category_id,description,transaction_date) VALUES ($1,'expense',100,'THB',$2,'Cafe','2026-10-05')`, tx, edaID)
+	src, targets, err := st.SplitSource(ctx, "Еда")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := categories.PlanSplit(ctx, src, targets, mustRows(t, st, src), fixedClassifier{"Cafe": "Рестораны"}, categories.DefaultHints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := plan.Marshal(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := st.LoadSplitPlan(ctx, data, "Еда")
+	if err != nil || len(loaded.Rows) != 1 || loaded.Rows[0].Target.ID.String() != rest {
+		t.Fatalf("загруженный план: %+v err=%v", loaded.Rows, err)
+	}
+	if _, err := st.ApplySplit(ctx, loaded); err != nil {
+		t.Fatal(err)
+	}
+	var cat string
+	if err := conn.QueryRow(`SELECT category_id::text FROM budget_transaction WHERE id=$1`, tx).Scan(&cat); err != nil || cat != rest {
+		t.Fatalf("категория после apply плана из файла: %s err=%v", cat, err)
+	}
+
+	// чужой источник
+	foreign := strings.Replace(string(data), edaID, uuid.NewString(), 1)
+	if _, err := st.LoadSplitPlan(ctx, []byte(foreign), "Еда"); err == nil {
+		t.Error("план другого источника принят")
+	}
+	// цель вне split-таблицы
+	badTarget := strings.Replace(string(data), rest, mkCat(t, conn, "тест-чужая", "expense").String(), 1)
+	if _, err := st.LoadSplitPlan(ctx, []byte(badTarget), "Еда"); err == nil {
+		t.Error("цель вне split-таблицы принята")
+	}
+	// неизвестная таблица (защита от подстановки в UPDATE)
+	badTable := strings.Replace(string(data), `"budget_transaction"`, `"budget_category"`, 1)
+	if _, err := st.LoadSplitPlan(ctx, []byte(badTable), "Еда"); err == nil {
+		t.Error("неизвестная таблица принята")
+	}
+	if _, err := st.LoadSplitPlan(ctx, []byte("не json"), "Еда"); err == nil {
+		t.Error("мусор принят")
+	}
 }
