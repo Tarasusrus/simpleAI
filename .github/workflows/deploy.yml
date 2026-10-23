@@ -80,6 +80,8 @@ jobs:
               echo ""
               echo "PLAN_WEB_ENABLED=$PLAN_WEB_ENABLED"
               echo "PLAN_WEB_TOKEN=$PLAN_WEB_TOKEN"
+              # Лимиты бота и утренний пуш читают план (ADR-016/017); область чатов — PLAN_CHAT_IDS, иначе TELEGRAM_ALLOWED_CHATS.
+              echo "BOT_LIMITS_FROM_PLAN=true"
               echo ""
               # Фото чеков (ADR-014): прокси LiteLLM на этом же сервере,
               # контейнер litellm на 127.0.0.1:4000, маршрут vision.
