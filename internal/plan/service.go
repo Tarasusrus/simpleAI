@@ -46,9 +46,10 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
-	writer Writer      // nil — запись отключена
-	facts  FactWriter  // nil — правка и возврат закрытых записей отключены
-	limits LimitWriter // nil — запись лимитов отключена (WithLimitWriter)
+	writer Writer        // nil — запись отключена
+	facts  FactWriter    // nil — правка и возврат закрытых записей отключены
+	limits LimitWriter   // nil — запись лимитов отключена (WithLimitWriter)
+	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
 	today  Clock
 	scope  Scope
 }
@@ -172,6 +173,7 @@ func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
 		Today:      asOf,
 		ReservePct: ld.snap.ReservePct,
 		Limits:     ld.limits,
+		Dismissed:  ld.snap.Dismissed,
 	})
 	if err != nil {
 		return Result{}, err

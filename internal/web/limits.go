@@ -27,6 +27,18 @@ func (s *Server) WithLimits(p LimitPlanner, sg plan.LimitSuggester) *Server {
 	return s
 }
 
+// CategoryHider — то, что вебу нужно от plan.Service для «Не планировать» (ADR-015 §3).
+type CategoryHider interface {
+	DismissCategory(ctx context.Context, category string) error
+	RestoreCategory(ctx context.Context, category string) error
+}
+
+// WithCategoryHider подключает скрытие категорий. Без него маршруты отвечают 404.
+func (s *Server) WithCategoryHider(h CategoryHider) *Server {
+	s.hider = h
+	return s
+}
+
 // LimitDTO — лимит окна в валюте показа; все числа готовы, фронт ничего не считает.
 type LimitDTO struct {
 	ID        string `json:"id"`
@@ -262,7 +274,56 @@ func (s *Server) writeLimitError(w http.ResponseWriter, err error) {
 	}
 }
 
+type dismissBody struct {
+	Category string `json:"category"`
+}
+
+// hiderOn отвечает 404, если лимиты или скрытие не подключены.
+func (s *Server) hiderOn(w http.ResponseWriter) bool {
+	if !s.limitsOn(w) {
+		return false
+	}
+	if s.hider == nil {
+		writeError(w, http.StatusNotFound, "Скрытие категорий не включено.")
+		return false
+	}
+	return true
+}
+
+// handleDismissCategory: POST /api/plan/categories/dismissed {category} — «Не планировать».
+func (s *Server) handleDismissCategory(w http.ResponseWriter, r *http.Request) {
+	if !s.hiderOn(w) {
+		return
+	}
+	var b dismissBody
+	if !decode(w, r, &b) {
+		return
+	}
+	if err := s.hider.DismissCategory(r.Context(), b.Category); err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "category_dismiss", "category", b.Category, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
+// handleRestoreCategory: DELETE /api/plan/categories/dismissed?category=… — вернуть в блок.
+func (s *Server) handleRestoreCategory(w http.ResponseWriter, r *http.Request) {
+	if !s.hiderOn(w) {
+		return
+	}
+	cat := strings.TrimSpace(r.URL.Query().Get("category"))
+	if err := s.hider.RestoreCategory(r.Context(), cat); err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "category_restore", "category", cat, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
 func (s *Server) registerLimitRoutes(mux *http.ServeMux) {
+	mux.Handle("POST /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleDismissCategory)))
+	mux.Handle("DELETE /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleRestoreCategory)))
 	mux.Handle("POST /api/plan/limits", s.auth(http.HandlerFunc(s.handleAddLimit)))
 	mux.Handle("POST /api/plan/limits/preview", s.auth(http.HandlerFunc(s.handlePreviewLimit)))
 	mux.Handle("GET /api/plan/limits/suggest", s.auth(http.HandlerFunc(s.handleSuggestLimit)))

@@ -56,6 +56,8 @@ type Server struct {
 	// limits и suggester — лимиты категорий (WithLimits); nil — маршруты отвечают 404.
 	limits    LimitPlanner
 	suggester plan.LimitSuggester
+	// hider — «Не планировать» (ADR-015 §3); nil — маршруты отвечают 404.
+	hider CategoryHider
 }
 
 // New собирает сервер. Невалидный конфиг (в том числе слабый токен) — ошибка:

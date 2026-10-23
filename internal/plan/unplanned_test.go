@@ -196,3 +196,26 @@ func TestUnplanned_EndedWindow(t *testing.T) {
 		t.Fatalf("state=%v Spent=%d Unplanned=%d", v.State, v.Spent, v.UnplannedSpent)
 	}
 }
+
+func TestUnplanned_DismissedMoveToHidden(t *testing.T) {
+	start := Date{2026, 10, 1}
+	dt := start.AddDays(1)
+	inc := Event{Key: "in", Kind: KindIncome, State: StateDone, Amount: ruble(100000), Date: &start, Source: SourceTransaction}
+	mk := func(k, cat string, n int64) Event {
+		return Event{Key: k, Kind: KindPayment, State: StateDone, Amount: ruble(n), Date: &dt, Category: cat, Source: SourceTransaction}
+	}
+	in := ComputeInput{Windows: BuildWindows([]Event{inc}), Today: start.AddDays(2), Cur: CurRUB,
+		Events:    []Event{mk("a", "Такси", 30000), mk("b", "Кафе", 90000)},
+		Dismissed: []string{" КАФЕ "}}
+	v, err := Compute(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Unplanned) != 1 || v.Unplanned[0].Category != "Такси" || len(v.Hidden) != 1 || v.Hidden[0].Category != "Кафе" || v.Hidden[0].Spent != 900 {
+		t.Fatalf("Unplanned=%+v Hidden=%+v", v.Unplanned, v.Hidden)
+	}
+	// скрытие — только про показ: сумма «вне плана» и расход окна прежние
+	if v.UnplannedSpent != 1200 || v.Spent != 1200 {
+		t.Fatalf("UnplannedSpent=%d Spent=%d, ждали 1200", v.UnplannedSpent, v.Spent)
+	}
+}

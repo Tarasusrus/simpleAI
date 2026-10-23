@@ -172,3 +172,71 @@ func TestLimitWriter_UpdateDeleteScopeAndNotFound(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+type fakeDismissSrc struct {
+	names []string
+	got   [][]int64
+}
+
+func (f *fakeDismissSrc) PlanDismissed(_ context.Context, ids []int64) ([]string, error) {
+	f.got = append(f.got, ids)
+	return f.names, nil
+}
+
+func TestRead_DismissedMappedAndScoped(t *testing.T) {
+	ds := &fakeDismissSrc{names: []string{"Кафе"}}
+	f := &fakeSource{rates: map[string]float64{"THB": 2.5}}
+	snap, err := newReader(f).WithDismissed(ds).Read(context.Background(), plan.Scope{ChatIDs: []int64{7, 9}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snap.Dismissed, []string{"Кафе"}) || !reflect.DeepEqual(ds.got, [][]int64{{7, 9}}) {
+		t.Fatalf("Dismissed=%v, область=%v", snap.Dismissed, ds.got)
+	}
+	if snap, err := newReader(f).Read(context.Background(), plan.Scope{ChatIDs: []int64{7}}); err != nil || len(snap.Dismissed) != 0 {
+		t.Fatalf("без источника: %v %v", snap.Dismissed, err)
+	}
+}
+
+type fakeDismissSink struct {
+	dChat  []int64
+	dCat   []string
+	rScope [][]int64
+	rCat   []string
+	err    error
+}
+
+func (f *fakeDismissSink) DismissPlanCategory(_ context.Context, chat int64, c string) error {
+	f.dChat, f.dCat = append(f.dChat, chat), append(f.dCat, c)
+	return f.err
+}
+
+func (f *fakeDismissSink) RestorePlanCategory(_ context.Context, ids []int64, c string) error {
+	f.rScope, f.rCat = append(f.rScope, ids), append(f.rCat, c)
+	return f.err
+}
+
+func TestCategoryHider_FirstChatOnDismissWholeScopeOnRestore(t *testing.T) {
+	f := &fakeDismissSink{}
+	h := NewCategoryHider(f)
+	ctx := context.Background()
+	if err := h.Dismiss(ctx, limScope, "Кафе"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Restore(ctx, limScope, "Кафе"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.dChat, []int64{7}) || !reflect.DeepEqual(f.rScope, [][]int64{{7, 9}}) || f.dCat[0] != "Кафе" || f.rCat[0] != "Кафе" {
+		t.Fatalf("dismiss chat=%v restore scope=%v", f.dChat, f.rScope)
+	}
+	if err := h.Dismiss(ctx, plan.Scope{}, "Кафе"); err == nil {
+		t.Error("пустая область принята (Dismiss)")
+	}
+	if err := h.Restore(ctx, plan.Scope{}, "Кафе"); err == nil {
+		t.Error("пустая область принята (Restore)")
+	}
+	f.err = budget.ErrPlanLimitCategory
+	if err := h.Dismiss(ctx, limScope, "Нет"); !errors.Is(err, plan.ErrLimitCategory) {
+		t.Errorf("маппинг ошибки: %v", err)
+	}
+}

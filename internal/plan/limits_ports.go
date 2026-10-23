@@ -24,6 +24,15 @@ type LimitSuggester interface {
 	Suggest(ctx context.Context, category string, days int) (LimitSuggestion, error)
 }
 
+// CategoryHider скрывает и возвращает категории в блоке «Не запланировано» (ADR-015 §3).
+// Запись идёт в первый чат области (как AddLimit), снятие скрытия — по всей области.
+type CategoryHider interface {
+	// Dismiss скрывает категорию; повтор безопасен. Нет такой категории — ErrLimitCategory.
+	Dismiss(ctx context.Context, sc Scope, category string) error
+	// Restore возвращает категорию в блок; не была скрыта — не ошибка. Нет категории — ErrLimitCategory.
+	Restore(ctx context.Context, sc Scope, category string) error
+}
+
 // LimitWriter пишет лимиты категорий (ADR-011). Отдельный порт, а не часть Writer:
 // лимиты — самостоятельная сущность плана со своей таблицей. Область (чаты)
 // принудительно ограничивает и запись, и правку, и удаление.

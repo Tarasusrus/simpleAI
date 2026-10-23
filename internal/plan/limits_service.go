@@ -12,6 +12,36 @@ func (s *Service) WithLimitWriter(w LimitWriter) *Service {
 	return s
 }
 
+// WithCategoryHider подключает «Не планировать» / «Вернуть» (ADR-015 §3) и возвращает сервис.
+func (s *Service) WithCategoryHider(h CategoryHider) *Service {
+	s.hider = h
+	return s
+}
+
+// DismissCategory скрывает категорию в блоке «Не запланировано». «Без категории» скрывать нечего.
+func (s *Service) DismissCategory(ctx context.Context, category string) error {
+	if s.hider == nil {
+		return ErrReadOnly
+	}
+	category = strings.TrimSpace(category)
+	if category == "" || CategoryKey(category) == CategoryKey(UncategorizedName) {
+		return ErrLimitCategory
+	}
+	return s.hider.Dismiss(ctx, s.scope, category)
+}
+
+// RestoreCategory возвращает скрытую категорию в блок.
+func (s *Service) RestoreCategory(ctx context.Context, category string) error {
+	if s.hider == nil {
+		return ErrReadOnly
+	}
+	category = strings.TrimSpace(category)
+	if category == "" {
+		return ErrLimitCategory
+	}
+	return s.hider.Restore(ctx, s.scope, category)
+}
+
 func (s *Service) canWriteLimits() error {
 	if s.limits == nil {
 		return ErrReadOnly

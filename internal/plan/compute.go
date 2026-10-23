@@ -22,6 +22,8 @@ type ComputeInput struct {
 	AvgDays int
 	// Limits — лимиты категорий (ADR-011); выбор действующих на окно делает Compute.
 	Limits []Limit
+	// Dismissed — названия скрытых категорий: их строки уходят из View.Unplanned в View.Hidden.
+	Dismissed []string
 }
 
 // defaultAvgDays — окно усреднения «обычных» трат по умолчанию.
@@ -273,7 +275,7 @@ func (c calc) core() (View, error) {
 	if v.Limits, v.LimitHold, err = c.limits(); err != nil {
 		return View{}, err
 	}
-	if v.Unplanned, v.UnplannedSpent, err = c.unplanned(); err != nil {
+	if v.Unplanned, v.Hidden, v.UnplannedSpent, err = c.unplanned(); err != nil {
 		return View{}, err
 	}
 	out := income - v.Payments - v.Spent - v.Reserve - v.LimitHold

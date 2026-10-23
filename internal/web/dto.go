@@ -32,6 +32,8 @@ type WindowView struct {
 	Limits []LimitDTO `json:"limits"`
 	// Unplanned — категории без действующего лимита с тратами окна (ADR-015 §3); [] если их нет.
 	Unplanned []UnplannedDTO `json:"unplanned"`
+	// Hidden — то же по скрытым категориям («Скрытые · N»); [] если их нет.
+	Hidden []UnplannedDTO `json:"hidden"`
 	// LimitID — id только что созданного лимита (ответ POST /api/plan/limits); иначе поля нет.
 	// По нему тост «Отменить» удаляет лимит (ADR-015 §5).
 	LimitID string `json:"limitId,omitempty"`
@@ -172,6 +174,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		Categories: make([]CategoryDTO, 0, len(v.Categories)),
 		Limits:     limitDTOs(v.Limits),
 		Unplanned:  unplannedDTOs(v.Unplanned),
+		Hidden:     unplannedDTOs(v.Hidden),
 	}
 	if v.Window != nil {
 		out.Window = &WindowDTO{

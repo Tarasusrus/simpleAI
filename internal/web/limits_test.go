@@ -88,6 +88,8 @@ var limRoutes = []struct{ method, target, body string }{
 	{"DELETE", "/api/plan/limits/L1", ``},
 	{"POST", "/api/plan/limits/preview", `{"category":"Еда","amount":100,"currency":"THB"}`},
 	{"GET", "/api/plan/limits/suggest?category=Еда", ``},
+	{"POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`},
+	{"DELETE", "/api/plan/categories/dismissed?category=Кафе", ``},
 }
 
 // Без токена ни один маршрут лимитов не доходит до сервиса.
@@ -95,8 +97,9 @@ var limRoutes = []struct{ method, target, body string }{
 // Мутация: убрать s.auth(...) у любого маршрута лимитов — тест краснеет.
 func TestLimits_RequireToken(t *testing.T) {
 	lp := &fakeLimitPlanner{}
-	s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{})
 	for _, r := range limRoutes {
+		// отдельный сервер на маршрут: счётчик неудачных входов общий и иначе даёт 429 вместо 401
+		s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{}).WithCategoryHider(&fakeHider{})
 		for _, tok := range []string{"", "wrong"} {
 			if rec := send(s, r.method, r.target, r.body, tok); rec.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s токен %q: %d, ждали 401", r.method, r.target, tok, rec.Code)
@@ -277,6 +280,7 @@ func TestLimits_Suggest(t *testing.T) {
 func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true, UnplannedSpent: 70,
 		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70, Count: 3, Prefill: 140}},
+		Hidden:    []plan.UnplannedRow{{Category: "Дом", Spent: 5}},
 		Limits:    []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
 	s, _ := newServer(t, &fakePlanner{res: res})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
@@ -294,6 +298,9 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	if up, ok := got["unplanned"].([]any); !ok || len(up) != 1 || asMap(t, up[0])["category"] != "Кафе" || asMap(t, up[0])["spent"] != float64(70) || asMap(t, up[0])["count"] != float64(3) || asMap(t, up[0])["prefill"] != float64(140) {
 		t.Fatalf("unplanned=%v", got["unplanned"])
 	}
+	if hd, ok := got["hidden"].([]any); !ok || len(hd) != 1 || asMap(t, hd[0])["category"] != "Дом" {
+		t.Fatalf("hidden=%v", got["hidden"])
+	}
 	ls, ok := got["limits"].([]any)
 	if !ok || len(ls) != 1 {
 		t.Fatalf("limits=%v", got["limits"])
@@ -304,7 +311,7 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	}
 	empty, _ := newServer(t, &fakePlanner{})
 	rec = do(empty, "GET", "/api/plan/window", goodToken)
-	if !strings.Contains(rec.Body.String(), `"limits":[]`) || !strings.Contains(rec.Body.String(), `"unplanned":[]`) {
+	if !strings.Contains(rec.Body.String(), `"limits":[]`) || !strings.Contains(rec.Body.String(), `"unplanned":[]`) || !strings.Contains(rec.Body.String(), `"hidden":[]`) {
 		t.Fatalf("пустые лимиты/unplanned не []: %s", rec.Body.String())
 	}
 }
@@ -332,4 +339,50 @@ func asMap(t *testing.T, v any) map[string]any {
 		t.Fatalf("ждали объект, получили %T", v)
 	}
 	return m
+}
+
+type fakeHider struct {
+	dismissed, restored []string
+	err                 error
+}
+
+func (f *fakeHider) DismissCategory(_ context.Context, c string) error {
+	f.dismissed = append(f.dismissed, c)
+	return f.err
+}
+
+func (f *fakeHider) RestoreCategory(_ context.Context, c string) error {
+	f.restored = append(f.restored, c)
+	return f.err
+}
+
+func TestHider_DismissRestoreEndpoints(t *testing.T) {
+	h := &fakeHider{}
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil).WithCategoryHider(h)
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`, goodToken); rec.Code != http.StatusOK {
+		t.Fatalf("dismiss %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := send(s, "DELETE", "/api/plan/categories/dismissed?category=Кафе", ``, goodToken); rec.Code != http.StatusOK {
+		t.Fatalf("restore %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(h.dismissed) != 1 || h.dismissed[0] != "Кафе" || len(h.restored) != 1 || h.restored[0] != "Кафе" {
+		t.Fatalf("в порт ушло dismissed=%v restored=%v", h.dismissed, h.restored)
+	}
+	h.err = plan.ErrLimitCategory
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Без категории"}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("ErrLimitCategory: %d, ждали 400", rec.Code)
+	}
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"nope":1}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("лишнее поле: %d, ждали 400", rec.Code)
+	}
+}
+
+func TestHider_NotWired_404(t *testing.T) {
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil) // лимиты есть, скрытия нет
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("dismiss без hider: %d, ждали 404", rec.Code)
+	}
+	if rec := send(s, "DELETE", "/api/plan/categories/dismissed?category=Кафе", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("restore без hider: %d, ждали 404", rec.Code)
+	}
 }
