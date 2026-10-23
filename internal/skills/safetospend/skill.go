@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 	"simpleAI/internal/plugin"
@@ -35,6 +36,9 @@ type SafeToSpendSkill struct {
 	llm        core.LLM
 	logger     *slog.Logger
 	llmTimeout time.Duration
+	// limits — лимиты и «Свободно» из плана (ADR-016); nil — только старый путь по долям конверта.
+	limits     botlimits.Reader
+	limitsMode LimitsMode
 }
 
 func NewSafeToSpendSkill(s store, llm core.LLM, logger *slog.Logger) *SafeToSpendSkill {
