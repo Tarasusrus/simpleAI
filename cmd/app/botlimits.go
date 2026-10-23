@@ -9,6 +9,7 @@ import (
 	"simpleAI/config"
 	"simpleAI/internal/appwiring"
 	"simpleAI/internal/botlimits"
+	"simpleAI/internal/envelopepush"
 	safetospendskill "simpleAI/internal/skills/safetospend"
 )
 
@@ -32,18 +33,40 @@ func envBool(v string, def bool) bool {
 	return def
 }
 
-// botLimitsOptions подключает план к скиллам бота, если он нужен (флаг или shadow) и собирается из окружения.
+// botLimits — план для бота: читатель, режим флагов. Пустой читатель — план недоступен, старый путь.
+type botLimits struct {
+	reader botlimits.Reader
+	mode   safetospendskill.LimitsMode
+}
+
+// newBotLimits подключает план к скиллам бота, если он нужен (флаг или shadow) и собирается из окружения.
 // Нет области чатов или плохой PLAN_TZ — бот работает по старому пути.
-func botLimitsOptions(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, getenv func(string) string) []appwiring.RegistryOption {
+func newBotLimits(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, getenv func(string) string) botLimits {
 	mode := botLimitsMode(getenv)
 	if !mode.FromPlan && !mode.Shadow {
-		return nil
+		return botLimits{mode: mode}
 	}
 	svc, _, chats, ok := newPlanService(cfg, logger, pool)
 	if !ok {
 		logger.Warn("bot limits: план недоступен, бот работает по старому пути")
-		return nil
+		return botLimits{mode: mode}
 	}
 	logger.Info("bot limits wired", "from_plan", mode.FromPlan, "shadow", mode.Shadow && !mode.FromPlan, "chats", len(chats))
-	return []appwiring.RegistryOption{appwiring.WithBotLimits(botlimits.NewPlan(svc, botlimits.ScopeOfChats(chats)), mode)}
+	return botLimits{reader: botlimits.NewPlan(svc, botlimits.ScopeOfChats(chats)), mode: mode}
+}
+
+// options — опция реестра скиллов (пусто, если плана нет).
+func (b botLimits) options() []appwiring.RegistryOption {
+	if b.reader == nil {
+		return nil
+	}
+	return []appwiring.RegistryOption{appwiring.WithBotLimits(b.reader, b.mode)}
+}
+
+// pushSource переключает утренний пуш на план при BOT_LIMITS_FROM_PLAN; иначе источник остаётся прежним.
+func (b botLimits) pushSource(src *envelopepush.Source) *envelopepush.Source {
+	if b.reader != nil && b.mode.FromPlan {
+		return src.WithPlan(b.reader)
+	}
+	return src
 }

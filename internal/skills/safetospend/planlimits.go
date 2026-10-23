@@ -180,3 +180,23 @@ func formatPlanFree(snap botlimits.Snapshot, m Display) string {
 	b.WriteString(strings.TrimPrefix(planDayLines(snap, m), "\n"))
 	return b.String()
 }
+
+// FormatPlanDigest — короткая сводка окна плана для утреннего пуша (ADR-017 §2): окно, «на день», «Свободно» и лимиты
+// категорий строками. Те же числа и те же форматтеры, что в ответе бота; без таблицы, чтобы влезать в уведомление.
+func FormatPlanDigest(snap botlimits.Snapshot) string {
+	m := NewDisplay(snap.Cur, 0)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, pluralDays(snap.DaysLeft))
+	b.WriteString(planDayLines(snap, m))
+	if len(snap.Limits) > 0 {
+		b.WriteString("\n\nЛимиты:")
+		for _, l := range snap.Limits {
+			if l.Over > 0 {
+				fmt.Fprintf(&b, "\n• %s — пробито на %s (лимит %s)", normalizeLabel(l.Category), m.Signed(int(l.Over)), m.Signed(int(l.Amount)))
+				continue
+			}
+			fmt.Fprintf(&b, "\n• %s — осталось %s из %s", normalizeLabel(l.Category), m.Signed(int(l.Left)), m.Signed(int(l.Amount)))
+		}
+	}
+	return b.String()
+}

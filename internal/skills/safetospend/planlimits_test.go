@@ -239,3 +239,22 @@ func TestOldPath_NoEnvelopeReplyDoesNotAdvertiseStartEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatPlanDigest(t *testing.T) {
+	snap := planSnap("THB")
+	out := FormatPlanDigest(snap)
+	for _, want := range []string{"05.03 — 18.03 · осталось 9 дней", "**На день: 8 888 ฿**", "Свободно до конца окна: 80 000 ฿",
+		"Лимиты:", "• Еда — осталось 13 000 ฿ из 20 000 ฿", "• Такси — пробито на 300 ฿ (лимит 1 000 ฿)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("нет %q:\n%s", want, out)
+		}
+	}
+	snap.Limits = nil
+	if out := FormatPlanDigest(snap); strings.Contains(out, "Лимиты:") {
+		t.Errorf("пустой блок лимитов:\n%s", out)
+	}
+	snap.Cur = "RUB"
+	if out := FormatPlanDigest(snap); !strings.Contains(out, "80 000 ₽") {
+		t.Errorf("валюта сводки не из снимка:\n%s", out)
+	}
+}

@@ -9,11 +9,14 @@ package envelopepush
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
+	"simpleAI/internal/skills/safetospend"
 )
 
 // MorningHeader — шапка утреннего пуша. Тело под ней — вывод скилла как есть.
@@ -34,11 +37,27 @@ type sharesSkill interface {
 type Source struct {
 	store envelopeStore
 	skill sharesSkill
+	// plan — окно плана вместо конвертов (ADR-017 §2, BOT_LIMITS_FROM_PLAN); nil — только старый путь.
+	plan botlimits.Reader
 }
 
 // New собирает источник утренних конвертов.
 func New(store envelopeStore, skill sharesSkill) *Source {
 	return &Source{store: store, skill: skill}
+}
+
+// PlanHeader — шапка утреннего пуша из плана: слова «конверты» нет, их больше не заводят (ADR-017).
+const PlanHeader = "☀️ Доброе утро! План на сегодня:"
+
+// planCurrency — валюта сводки: баты, как у ответов бота по умолчанию.
+const planCurrency = "THB"
+
+// WithPlan переключает пуш на окно плана: «Свободно» и «на день» из plan.View, условие — в плане есть окно с
+// приходом. Возвращает копию источника. Чат вне области плана, окно без прихода или ошибка плана — прежний путь по конверту (переходный период).
+func (s *Source) WithPlan(r botlimits.Reader) *Source {
+	c := *s
+	c.plan = r
+	return &c
 }
 
 // sharesRequest — тот же запрос, что оператор задаёт словами: без суммы и со
@@ -48,6 +67,15 @@ const sharesRequest = `{"question":"сколько осталось в конв�
 // MorningEnvelopes возвращает тело пуша. Пустая строка = слать нечего:
 // активного конверта нет либо показ ничего не напечатал.
 func (s *Source) MorningEnvelopes(ctx context.Context, chatID int64, _ *time.Location) (string, error) {
+	if s.plan != nil {
+		snap, ok, err := s.plan.Snapshot(ctx, chatID, planCurrency)
+		switch {
+		case err != nil:
+			slog.Default().WarnContext(ctx, "envelopepush: план недоступен, пуш по старому пути", "err", err, "chat_id", chatID)
+		case ok:
+			return PlanHeader + "\n\n" + safetospend.FormatPlanDigest(snap), nil
+		}
+	}
 	// Проверка конверта здесь, а не по тексту ответа: скилл на отсутствие
 	// раскладки отвечает связной фразой («Активного конверта нет…»), и пуш
 	// каждое утро повторял бы её вместо молчания.
