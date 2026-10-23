@@ -39,6 +39,10 @@ const ctx = {
   canWindow: () => !!lastView && ['current', 'upcoming', 'between'].includes(lastView.state),
   onMove: (key, body) => once(() => moveItem(cur, key, body), 'Не удалось перенести.'),
   onAvg: (days) => { setAvg(days); try { sessionStorage.setItem('plan_avg', String(days)); } catch (e) { /* не страшно */ } load(); },
+  // reload — перечитать окно с сервера (например, после «Отменить», когда лимита уже нет).
+  reload: () => load(),
+  // toast — короткое сообщение с необязательным действием; «Отменить» действует, пока тост на экране.
+  toast: showToast,
   onShowPast: () => { setPast(true); load(); },
   onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
@@ -52,6 +56,21 @@ const ctx = {
     return !!view;
   },
 };
+
+let toastEl = null;
+let toastTimer = null;
+function showToast(text, actionLabel, onAction) {
+  if (!toastEl) {
+    toastEl = h('div', { class: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.append(toastEl);
+  }
+  clearTimeout(toastTimer);
+  const hide = () => { toastEl.classList.remove('on'); toastEl.replaceChildren(); };
+  toastEl.replaceChildren(h('span', null, text),
+    actionLabel ? h('button', { type: 'button', class: 'tact', onclick: () => { hide(); onAction(); } }, actionLabel) : null);
+  toastEl.classList.add('on');
+  toastTimer = setTimeout(hide, 10000);
+}
 
 // Одна команда за раз: второй тап, пока первая в пути, не должен дать «не найдено».
 let busy = false;

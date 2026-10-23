@@ -88,6 +88,9 @@ var limRoutes = []struct{ method, target, body string }{
 	{"DELETE", "/api/plan/limits/L1", ``},
 	{"POST", "/api/plan/limits/preview", `{"category":"Еда","amount":100,"currency":"THB"}`},
 	{"GET", "/api/plan/limits/suggest?category=Еда", ``},
+	{"POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`},
+	{"DELETE", "/api/plan/categories/dismissed?category=Кафе", ``},
+	{"GET", "/api/plan/categories/transactions?category=Кафе", ``},
 }
 
 // Без токена ни один маршрут лимитов не доходит до сервиса.
@@ -95,8 +98,9 @@ var limRoutes = []struct{ method, target, body string }{
 // Мутация: убрать s.auth(...) у любого маршрута лимитов — тест краснеет.
 func TestLimits_RequireToken(t *testing.T) {
 	lp := &fakeLimitPlanner{}
-	s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{})
 	for _, r := range limRoutes {
+		// отдельный сервер на маршрут: счётчик неудачных входов общий и иначе даёт 429 вместо 401
+		s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{}).WithCategoryHider(&fakeHider{}).WithCategoryTransactions(&fakeTxPlanner{})
 		for _, tok := range []string{"", "wrong"} {
 			if rec := send(s, r.method, r.target, r.body, tok); rec.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s токен %q: %d, ждали 401", r.method, r.target, tok, rec.Code)
@@ -125,6 +129,10 @@ func TestLimits_AddEditDelete(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("add %d: %s", rec.Code, rec.Body.String())
 	}
+	var added map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &added); err != nil || added["limitId"] != "lim-1" {
+		t.Fatalf("POST не вернул id созданного лимита: %v %s", err, rec.Body.String())
+	}
 	want := plan.AddLimitInput{Category: "Еда", Amount: plan.Money{Minor: 123450, Cur: plan.CurTHB}, Repeat: true}
 	if len(lp.added) != 1 || lp.added[0] != want {
 		t.Fatalf("added=%+v, ждали %+v", lp.added, want)
@@ -132,7 +140,8 @@ func TestLimits_AddEditDelete(t *testing.T) {
 	if len(p.curs) != 1 || p.curs[0] != plan.CurTHB {
 		t.Fatalf("ответ не перечитан в валюте показа: %v", p.curs)
 	}
-	if rec := send(s, "PUT", "/api/plan/limits/L9", `{"amount":50,"currency":"RUB","repeat":false}`, goodToken); rec.Code != http.StatusOK {
+	rec = send(s, "PUT", "/api/plan/limits/L9", `{"amount":50,"currency":"RUB","repeat":false}`, goodToken)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "limitId") {
 		t.Fatalf("edit %d: %s", rec.Code, rec.Body.String())
 	}
 	if e := lp.edited["L9"]; e.Amount != (plan.Money{Minor: 5000, Cur: plan.CurRUB}) || e.Repeat {
@@ -245,6 +254,10 @@ func TestLimits_Suggest(t *testing.T) {
 		t.Fatalf("в подсказку ушло %v/%v", sg.cats, sg.days)
 	}
 	// мало данных: суммы нет, но месяцы видны
+	sg.sug = plan.LimitSuggestion{Enough: true, Months: 3, AmountTHBMinor: 420_000, AvgCount: 4}
+	if d := get("/api/plan/limits/suggest?category=Еда&cur=THB"); d.AvgCount != 4 {
+		t.Fatalf("avgCount не дошёл до ответа: %+v", d)
+	}
 	sg.sug = plan.LimitSuggestion{Enough: false, Months: 1}
 	if d := get("/api/plan/limits/suggest?category=Еда"); d.Enough || d.Amount != nil || d.Months != 1 {
 		t.Fatalf("мало данных: %+v", d)
@@ -266,8 +279,10 @@ func TestLimits_Suggest(t *testing.T) {
 
 // Старые поля ответа на месте, новые добавлены, пустые лимиты — [] а не null.
 func TestWindow_LimitsFieldsAdditive(t *testing.T) {
-	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true,
-		Limits: []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
+	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true, UnplannedSpent: 70,
+		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70, Count: 3, Prefill: 140}},
+		Hidden:    []plan.UnplannedRow{{Category: "Дом", Spent: 5}},
+		Limits:    []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
 	s, _ := newServer(t, &fakePlanner{res: res})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
 	var got map[string]any
@@ -277,6 +292,15 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	kpi := asMap(t, got["kpi"])
 	if kpi["canSpend"] != float64(100) || kpi["limitHold"] != float64(30) || kpi["limitsExceedFree"] != true {
 		t.Fatalf("kpi=%v", kpi)
+	}
+	if kpi["unplannedSpent"] != float64(70) {
+		t.Fatalf("unplannedSpent: kpi=%v", kpi)
+	}
+	if up, ok := got["unplanned"].([]any); !ok || len(up) != 1 || asMap(t, up[0])["category"] != "Кафе" || asMap(t, up[0])["spent"] != float64(70) || asMap(t, up[0])["count"] != float64(3) || asMap(t, up[0])["prefill"] != float64(140) {
+		t.Fatalf("unplanned=%v", got["unplanned"])
+	}
+	if hd, ok := got["hidden"].([]any); !ok || len(hd) != 1 || asMap(t, hd[0])["category"] != "Дом" {
+		t.Fatalf("hidden=%v", got["hidden"])
 	}
 	ls, ok := got["limits"].([]any)
 	if !ok || len(ls) != 1 {
@@ -288,8 +312,8 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	}
 	empty, _ := newServer(t, &fakePlanner{})
 	rec = do(empty, "GET", "/api/plan/window", goodToken)
-	if !strings.Contains(rec.Body.String(), `"limits":[]`) {
-		t.Fatalf("пустые лимиты не []: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"limits":[]`) || !strings.Contains(rec.Body.String(), `"unplanned":[]`) || !strings.Contains(rec.Body.String(), `"hidden":[]`) {
+		t.Fatalf("пустые лимиты/unplanned не []: %s", rec.Body.String())
 	}
 }
 
@@ -316,4 +340,119 @@ func asMap(t *testing.T, v any) map[string]any {
 		t.Fatalf("ждали объект, получили %T", v)
 	}
 	return m
+}
+
+type fakeHider struct {
+	dismissed, restored []string
+	err                 error
+}
+
+func (f *fakeHider) DismissCategory(_ context.Context, c string) error {
+	f.dismissed = append(f.dismissed, c)
+	return f.err
+}
+
+func (f *fakeHider) RestoreCategory(_ context.Context, c string) error {
+	f.restored = append(f.restored, c)
+	return f.err
+}
+
+func TestHider_DismissRestoreEndpoints(t *testing.T) {
+	h := &fakeHider{}
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil).WithCategoryHider(h)
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`, goodToken); rec.Code != http.StatusOK {
+		t.Fatalf("dismiss %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := send(s, "DELETE", "/api/plan/categories/dismissed?category=Кафе", ``, goodToken); rec.Code != http.StatusOK {
+		t.Fatalf("restore %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(h.dismissed) != 1 || h.dismissed[0] != "Кафе" || len(h.restored) != 1 || h.restored[0] != "Кафе" {
+		t.Fatalf("в порт ушло dismissed=%v restored=%v", h.dismissed, h.restored)
+	}
+	h.err = plan.ErrLimitCategory
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Без категории"}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("ErrLimitCategory: %d, ждали 400", rec.Code)
+	}
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"nope":1}`, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("лишнее поле: %d, ждали 400", rec.Code)
+	}
+}
+
+func TestHider_NotWired_404(t *testing.T) {
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil) // лимиты есть, скрытия нет
+	if rec := send(s, "POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("dismiss без hider: %d, ждали 404", rec.Code)
+	}
+	if rec := send(s, "DELETE", "/api/plan/categories/dismissed?category=Кафе", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("restore без hider: %d, ждали 404", rec.Code)
+	}
+}
+
+type fakeTxPlanner struct {
+	page plan.CategoryTxPage
+	err  error
+	cur  []plan.Currency
+	cat  []string
+	crs  []string
+}
+
+func (f *fakeTxPlanner) CategoryTransactions(_ context.Context, cur plan.Currency, cat, cursor string) (plan.CategoryTxPage, error) {
+	f.cur, f.cat, f.crs = append(f.cur, cur), append(f.cat, cat), append(f.crs, cursor)
+	return f.page, f.err
+}
+
+func TestCategoryTx_Endpoint(t *testing.T) {
+	dt := plan.Date{Year: 2026, Month: 3, Day: 12}
+	amt := int64(900)
+	f := &fakeTxPlanner{page: plan.CategoryTxPage{
+		Start: plan.Date{Year: 2026, Month: 3, Day: 5}, End: plan.Date{Year: 2026, Month: 3, Day: 18},
+		Rows:    []plan.TxRow{{Key: "transaction:x", Date: plan.Date{Year: 2026, Month: 3, Day: 9}, Name: "такси", Amount: 625}},
+		HasMore: true, Next: "2026-03-09|x",
+		Ahead: []plan.Row{{Key: "planned:a", Date: &dt, Name: "в аэропорт", Kind: plan.KindPayment, Amount: &amt}},
+	}}
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil).WithCategoryTransactions(f)
+	rec := send(s, "GET", "/api/plan/categories/transactions?category=%D0%A2%D0%B0%D0%BA%D1%81%D0%B8&cursor=c1&cur=THB", ``, goodToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d: %s", rec.Code, rec.Body.String())
+	}
+	if f.cat[0] != "Такси" || f.crs[0] != "c1" || f.cur[0] != plan.CurTHB {
+		t.Fatalf("в сервис ушло cat=%v cursor=%v cur=%v", f.cat, f.crs, f.cur)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	rows, ok1 := got["rows"].([]any)
+	ahead, ok2 := got["ahead"].([]any)
+	if !ok1 || !ok2 {
+		t.Fatalf("rows/ahead не списки: %v", got)
+	}
+	if got["category"] != "Такси" || got["start"] != "2026-03-05" || got["end"] != "2026-03-18" || got["hasMore"] != true || got["next"] != "2026-03-09|x" ||
+		len(rows) != 1 || asMap(t, rows[0])["amount"] != float64(625) || asMap(t, rows[0])["date"] != "2026-03-09" ||
+		len(ahead) != 1 || asMap(t, ahead[0])["name"] != "в аэропорт" {
+		t.Fatalf("ответ %v", got)
+	}
+	// ошибки: «Без категории» и плохой курсор — 400
+	for _, e := range []error{plan.ErrLimitCategory, plan.ErrBadCursor} {
+		f.err = e
+		if rec := send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d, ждали 400", e, rec.Code)
+		}
+	}
+	// пустая страница — [] а не null
+	f.err, f.page = nil, plan.CategoryTxPage{}
+	rec = send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken)
+	if !strings.Contains(rec.Body.String(), `"rows":[]`) || !strings.Contains(rec.Body.String(), `"ahead":[]`) {
+		t.Fatalf("пустая страница: %s", rec.Body.String())
+	}
+}
+
+func TestCategoryTx_NotWired_404(t *testing.T) {
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil)
+	if rec := send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("без читателя: %d, ждали 404", rec.Code)
+	}
+	if rec := send(limServer(t, &fakePlanner{}, nil, nil).WithCategoryTransactions(&fakeTxPlanner{}), "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("без флага лимитов: %d, ждали 404", rec.Code)
+	}
 }

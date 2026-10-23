@@ -62,8 +62,11 @@ func main() {
 		log.Fatal("failed to init llm client: ", err)
 	}
 
+	// Лимиты из плана для бота и утреннего пуша (ADR-016/017); по умолчанию выключены.
+	bl := newBotLimits(cfg, logger, pool, os.Getenv)
+
 	// Единый реестр skills для всех компонентов.
-	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout, bl.options()...)
 	appwiring.AttachCategoryChooser(budgetSkill, pool, cfg.Classifier, logger)
 
 	// Контекст с graceful shutdown.
@@ -131,7 +134,7 @@ func main() {
 		// Утренние конверты: тело печатает тот же safe_to_spend, что отвечает на
 		// «сколько в конвертах» — формат живёт в скилле, воркер его не дублирует.
 		if skill, ok := registry.Get("safe_to_spend"); ok {
-			worker = worker.WithEnvelopes(envelopepush.New(budgetStore, skill))
+			worker = worker.WithEnvelopes(bl.pushSource(envelopepush.New(budgetStore, skill)))
 		} else {
 			logger.Warn("safe_to_spend skill not registered: morning envelope push disabled")
 		}

@@ -13,11 +13,24 @@ type LimitSuggestion struct {
 	Months int
 	// AmountTHBMinor — сатанги на окно длиной days.
 	AmountTHBMinor int64
+	// AvgCount — сколько трат категории обычно приходится на окно длиной days (округлено,
+	// не меньше 1, если история есть); 0 — истории меньше MinMonths. Нужен для текста
+	// «Это трата 1 из примерно N» (ADR-015 §4).
+	AvgCount int
 }
 
 // LimitSuggester считает подсказку суммы. Реализует internal/planrepo.
 type LimitSuggester interface {
 	Suggest(ctx context.Context, category string, days int) (LimitSuggestion, error)
+}
+
+// CategoryHider скрывает и возвращает категории в блоке «Не запланировано» (ADR-015 §3).
+// Запись идёт в первый чат области (как AddLimit), снятие скрытия — по всей области.
+type CategoryHider interface {
+	// Dismiss скрывает категорию; повтор безопасен. Нет такой категории — ErrLimitCategory.
+	Dismiss(ctx context.Context, sc Scope, category string) error
+	// Restore возвращает категорию в блок; не была скрыта — не ошибка. Нет категории — ErrLimitCategory.
+	Restore(ctx context.Context, sc Scope, category string) error
 }
 
 // LimitWriter пишет лимиты категорий (ADR-011). Отдельный порт, а не часть Writer:

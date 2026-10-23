@@ -27,6 +27,29 @@ func (s *Server) WithLimits(p LimitPlanner, sg plan.LimitSuggester) *Server {
 	return s
 }
 
+// CategoryHider — то, что вебу нужно от plan.Service для «Не планировать» (ADR-015 §3).
+type CategoryHider interface {
+	DismissCategory(ctx context.Context, category string) error
+	RestoreCategory(ctx context.Context, category string) error
+}
+
+// WithCategoryHider подключает скрытие категорий. Без него маршруты отвечают 404.
+func (s *Server) WithCategoryHider(h CategoryHider) *Server {
+	s.hider = h
+	return s
+}
+
+// CategoryTxPlanner — то, что вебу нужно от plan.Service для списка трат категории.
+type CategoryTxPlanner interface {
+	CategoryTransactions(ctx context.Context, cur plan.Currency, category, cursor string) (plan.CategoryTxPage, error)
+}
+
+// WithCategoryTransactions подключает список трат категории. Без него маршрут отвечает 404.
+func (s *Server) WithCategoryTransactions(p CategoryTxPlanner) *Server {
+	s.txs = p
+	return s
+}
+
 // LimitDTO — лимит окна в валюте показа; все числа готовы, фронт ничего не считает.
 type LimitDTO struct {
 	ID        string `json:"id"`
@@ -101,7 +124,7 @@ func (s *Server) handleAddLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("plan web command", "command", "limit_add", "id", id, "added_by", "web")
-	s.respondView(w, r, http.StatusCreated)
+	s.respondViewWith(w, r, http.StatusCreated, func(v *WindowView) { v.LimitID = id })
 }
 
 // handleEditLimit: PUT /api/plan/limits/{id} — сумма, валюта и повтор (категория не меняется).
@@ -194,6 +217,8 @@ type SuggestDTO struct {
 	Amount *int64 `json:"amount"`
 	Cur    string `json:"cur"`
 	Days   int    `json:"days"`
+	// AvgCount — трат категории за окно в среднем; 0, если истории мало (ADR-015 §4).
+	AvgCount int `json:"avgCount"`
 }
 
 // handleSuggestLimit: GET /api/plan/limits/suggest?category=…&cur=… — среднее по категории
@@ -218,7 +243,7 @@ func (s *Server) handleSuggestLimit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Не удалось посчитать подсказку.")
 		return
 	}
-	out := SuggestDTO{Enough: false, Months: sug.Months, Cur: string(cur), Days: plan.WindowDays}
+	out := SuggestDTO{Enough: false, Months: sug.Months, Cur: string(cur), Days: plan.WindowDays, AvgCount: sug.AvgCount}
 	if sug.Enough {
 		amount, ok := s.suggestionIn(r, cur, sug.AmountTHBMinor)
 		if ok {
@@ -253,6 +278,8 @@ func (s *Server) writeLimitError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "На эту категорию в этом окне лимит уже есть. Измени его.")
 	case errors.Is(err, errLimitFields):
 		writeError(w, http.StatusBadRequest, "Нужны поля category (только при создании), amount, currency и repeat.")
+	case errors.Is(err, plan.ErrBadCursor):
+		writeError(w, http.StatusBadRequest, "Некорректный курсор страницы.")
 	case errors.Is(err, plan.ErrLimitCategory):
 		writeError(w, http.StatusBadRequest, "Выбери существующую категорию расходов (не «Без категории»).")
 	default:
@@ -260,7 +287,103 @@ func (s *Server) writeLimitError(w http.ResponseWriter, err error) {
 	}
 }
 
+type dismissBody struct {
+	Category string `json:"category"`
+}
+
+// hiderOn отвечает 404, если лимиты или скрытие не подключены.
+func (s *Server) hiderOn(w http.ResponseWriter) bool {
+	if !s.limitsOn(w) {
+		return false
+	}
+	if s.hider == nil {
+		writeError(w, http.StatusNotFound, "Скрытие категорий не включено.")
+		return false
+	}
+	return true
+}
+
+// handleDismissCategory: POST /api/plan/categories/dismissed {category} — «Не планировать».
+func (s *Server) handleDismissCategory(w http.ResponseWriter, r *http.Request) {
+	if !s.hiderOn(w) {
+		return
+	}
+	var b dismissBody
+	if !decode(w, r, &b) {
+		return
+	}
+	if err := s.hider.DismissCategory(r.Context(), b.Category); err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "category_dismiss", "category", b.Category, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
+// handleRestoreCategory: DELETE /api/plan/categories/dismissed?category=… — вернуть в блок.
+func (s *Server) handleRestoreCategory(w http.ResponseWriter, r *http.Request) {
+	if !s.hiderOn(w) {
+		return
+	}
+	cat := strings.TrimSpace(r.URL.Query().Get("category"))
+	if err := s.hider.RestoreCategory(r.Context(), cat); err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	s.logger.Info("plan web command", "command", "category_restore", "category", cat, "added_by", "web")
+	s.respondView(w, r, http.StatusOK)
+}
+
+// TxDTO — трата категории в валюте показа.
+type TxDTO struct {
+	Key    string `json:"key"`
+	Date   string `json:"date"`
+	Name   string `json:"name"`
+	Amount int64  `json:"amount"`
+}
+
+// CategoryTxDTO — страница трат категории окна. Окно определяет сервер.
+type CategoryTxDTO struct {
+	Category string  `json:"category"`
+	Start    string  `json:"start"`
+	End      string  `json:"end"`
+	Rows     []TxDTO `json:"rows"`
+	HasMore  bool    `json:"hasMore"`
+	Next     string  `json:"next"`
+	// Ahead — «Впереди в категории»: неоплаченные платежи окна; только на первой странице.
+	Ahead []RowDTO `json:"ahead"`
+}
+
+// handleCategoryTransactions: GET /api/plan/categories/transactions?category=…&cursor=…&cur=…
+func (s *Server) handleCategoryTransactions(w http.ResponseWriter, r *http.Request) {
+	if !s.limitsOn(w) {
+		return
+	}
+	if s.txs == nil {
+		writeError(w, http.StatusNotFound, "Траты категории не включены.")
+		return
+	}
+	cat := strings.TrimSpace(r.URL.Query().Get("category"))
+	cur := s.curFrom(r)
+	page, err := s.txs.CategoryTransactions(r.Context(), cur, cat, r.URL.Query().Get("cursor"))
+	if err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	out := CategoryTxDTO{Category: cat, Rows: make([]TxDTO, 0, len(page.Rows)), HasMore: page.HasMore, Next: page.Next, Ahead: rows(page.Ahead)}
+	if page.Start != (plan.Date{}) {
+		out.Start, out.End = dateStr(page.Start), dateStr(page.End)
+	}
+	for _, t := range page.Rows {
+		out.Rows = append(out.Rows, TxDTO{Key: t.Key, Date: dateStr(t.Date), Name: t.Name, Amount: t.Amount})
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) registerLimitRoutes(mux *http.ServeMux) {
+	mux.Handle("GET /api/plan/categories/transactions", s.auth(http.HandlerFunc(s.handleCategoryTransactions)))
+	mux.Handle("POST /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleDismissCategory)))
+	mux.Handle("DELETE /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleRestoreCategory)))
 	mux.Handle("POST /api/plan/limits", s.auth(http.HandlerFunc(s.handleAddLimit)))
 	mux.Handle("POST /api/plan/limits/preview", s.auth(http.HandlerFunc(s.handlePreviewLimit)))
 	mux.Handle("GET /api/plan/limits/suggest", s.auth(http.HandlerFunc(s.handleSuggestLimit)))

@@ -210,3 +210,79 @@ func (c calc) limits() (views []LimitView, hold int64, err error) {
 	}
 	return views, hold, nil
 }
+
+// UnplannedRow — категория без действующего лимита с оплаченными тратами окна (ADR-015 §3).
+type UnplannedRow struct {
+	Category string
+	Spent    int64
+	// Count — число оплаченных трат категории в окне (для «Это уже k-я, обычно N»).
+	Count int
+	// Prefill — сумма по умолчанию в форме «Запланировать» при малой истории: 2 × потрачено
+	// (ещё столько же на остаток окна). Равную потраченному предзаполнять нельзя: лимит L ≤ S
+	// даёт LimitHold = 0, и «Свободно после плана» не менялось бы (ADR-015 §4).
+	Prefill int64
+}
+
+// unplanned считает оплаченные траты окна в категориях без лимита, действующего на это окно
+// (ADR-015 §2). Факты с RuleID (платежи правил — обязательства) и «Без категории» не входят.
+// В формулу CanSpend сумма не входит: эти траты уже в Spent.
+func (c calc) unplanned() (visible, hidden []UnplannedRow, total int64, err error) {
+	var rows []UnplannedRow
+	limited := map[string]bool{}
+	for _, l := range c.limitsFor() {
+		limited[CategoryKey(l.Category)] = true
+	}
+	idx := map[string]int{}
+	for _, e := range c.in.Events {
+		if e.State != StateDone || e.RuleID != "" || e.Amount == nil || e.Category == "" || e.Date == nil {
+			continue
+		}
+		k := CategoryKey(e.Category)
+		if limited[k] || !c.inWindowByDate(*e.Date) {
+			continue
+		}
+		n, cerr := c.money(e.Amount)
+		if cerr != nil {
+			return nil, nil, 0, cerr
+		}
+		if n == 0 {
+			continue // копейки, округлённые до нуля: пустая строка «0 ₽» экрану не нужна
+		}
+		i, ok := idx[k]
+		if !ok {
+			i = len(rows)
+			idx[k] = i
+			rows = append(rows, UnplannedRow{Category: strings.TrimSpace(e.Category)})
+		}
+		rows[i].Count++
+		if rows[i].Spent, err = addI64(rows[i].Spent, n); err != nil {
+			return nil, nil, 0, err
+		}
+		if total, err = addI64(total, n); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	for i := range rows {
+		if rows[i].Prefill, err = addI64(rows[i].Spent, rows[i].Spent); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	sort.SliceStable(rows, func(a, b int) bool {
+		if rows[a].Spent != rows[b].Spent {
+			return rows[a].Spent > rows[b].Spent
+		}
+		return CategoryKey(rows[a].Category) < CategoryKey(rows[b].Category)
+	})
+	dismissed := map[string]bool{}
+	for _, n := range c.in.Dismissed {
+		dismissed[CategoryKey(n)] = true
+	}
+	for _, r := range rows {
+		if dismissed[CategoryKey(r.Category)] {
+			hidden = append(hidden, r)
+		} else {
+			visible = append(visible, r)
+		}
+	}
+	return visible, hidden, total, nil
+}

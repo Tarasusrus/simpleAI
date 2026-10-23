@@ -35,6 +35,8 @@ type Snapshot struct {
 	Skipped int
 	// Limits — лимиты категорий всех окон; действующие на окно выбирает Compute.
 	Limits []Limit
+	// Dismissed — названия категорий, скрытых из блока «Не запланировано» (ADR-015 §3).
+	Dismissed []string
 }
 
 // Reader читает данные для плана. Реализует internal/planrepo.

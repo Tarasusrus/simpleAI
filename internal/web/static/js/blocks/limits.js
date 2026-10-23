@@ -1,6 +1,7 @@
 import { h, togglePanel } from '../dom.js';
 import { money, plural } from '../fmt.js';
 import { editForm } from './limit-form.js';
+import { txPanel } from './cat-tx.js';
 
 // Блок «Лимиты · N». Тонкие строки только для тех, где расход уже заметен (флаг attention
 // считает сервер: перерасход, остаток меньше 30%, траты за последние дни); остальные
@@ -26,7 +27,8 @@ function barOf(l) {
 
 function rowOf(l, cur, ctx) {
   const over = l.over > 0;
-  const name = h('span', { class: 'ln' }, l.category,
+  const chev = h('button', { type: 'button', class: 'chevb', 'aria-label': 'Траты категории «' + l.category + '» в этом окне', title: 'Траты в этом окне' }, h('span', { class: 'chev', 'aria-hidden': 'true' }));
+  const name = h('span', { class: 'ln' }, chev, l.category,
     over ? h('span', { class: 'tag bad' }, 'перерасход') : null,
     l.repeat ? h('span', { class: 'tag mut', title: 'Повторяется каждое окно' }, '↻') : null);
   const right = h('span', { class: 'lr' + (over ? ' bad' : l.leftPct < 30 ? ' warn' : '') }, over ? money(-l.over, cur) : money(l.left, cur));
@@ -36,8 +38,14 @@ function rowOf(l, cur, ctx) {
     const box = open();
     if (box) box.replaceChildren(editForm(l, cur, ctx, box));
   };
+  chev.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const box = togglePanel(row, 'tx', () => h('div', { class: 'it ed' }));
+    chev.classList.toggle('on', !!box);
+    if (box) box.replaceChildren(txPanel(l.category, cur));
+  });
   row.addEventListener('click', toggle);
-  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  row.addEventListener('keydown', (e) => { if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); } });
   return row;
 }
 

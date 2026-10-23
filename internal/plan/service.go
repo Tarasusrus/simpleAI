@@ -46,9 +46,11 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
-	writer Writer      // nil — запись отключена
-	facts  FactWriter  // nil — правка и возврат закрытых записей отключены
-	limits LimitWriter // nil — запись лимитов отключена (WithLimitWriter)
+	writer Writer        // nil — запись отключена
+	facts  FactWriter    // nil — правка и возврат закрытых записей отключены
+	limits LimitWriter   // nil — запись лимитов отключена (WithLimitWriter)
+	txs    TxLister      // nil — список трат категории отключён (WithTxLister)
+	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
 	today  Clock
 	scope  Scope
 }
@@ -61,6 +63,16 @@ func NewService(r Reader, w Writer, today Clock, sc Scope, opts ...Option) *Serv
 		o(s)
 	}
 	return s
+}
+
+// ForScope возвращает сервис с другой областью чатов; зависимости общие. Область — параметр запроса,
+// а не свойство процесса: бот многочатовый, а сервис собирается один раз (ADR-016 §2). Выбрана копия
+// сервиса, а не параметр у каждого метода: публичный API plan не меняется, а область по-прежнему
+// принудительно ограничивает чтение, запись, правку и удаление.
+func (s *Service) ForScope(sc Scope) *Service {
+	c := *s
+	c.scope = sc
+	return &c
 }
 
 // state — снимок и окна, посчитанные от одной «сегодня»; общий для расчёта и
@@ -172,6 +184,7 @@ func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
 		Today:      asOf,
 		ReservePct: ld.snap.ReservePct,
 		Limits:     ld.limits,
+		Dismissed:  ld.snap.Dismissed,
 	})
 	if err != nil {
 		return Result{}, err

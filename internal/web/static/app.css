@@ -90,3 +90,33 @@ h2 .rt{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;fon
 .it.ed .row .sp{flex:1}
 @media(max-width:600px){.it.lim{grid-template-columns:minmax(0,92px) minmax(0,1fr) 78px;gap:6px;padding-left:12px;padding-right:12px}}
 @media(max-width:600px){.it.lim .tag.mut{display:none}}
+/* Траты вне плана (ADR-015): блок «Не запланировано», раскрытие трат, форма «Запланировать», тост */
+.chev{display:inline-block;width:8px;height:8px;border-right:2px solid var(--mut);border-bottom:2px solid var(--mut);transform:rotate(-45deg);margin:0 6px 0 2px;transition:transform .12s}
+.chev.on{transform:rotate(45deg);margin-top:-4px}
+.chevb{background:transparent;border:0;padding:0;min-height:44px;min-width:32px;margin:-12px 0 -12px -8px;display:inline-flex;align-items:center;justify-content:center;color:inherit;vertical-align:middle}
+.chevb:focus-visible,.urow:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.unp{border-bottom:1px solid var(--line)}.unp:last-child{border-bottom:0}
+.urow{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;min-height:48px;padding:12px 14px;background:transparent;border:0;border-radius:0;color:var(--ink);font-weight:400;text-align:left}
+.urow .un{font-weight:600;display:flex;align-items:center;gap:0;overflow-wrap:anywhere}.urow .ua{font-weight:600;white-space:nowrap}
+.ubody{background:var(--soft);border-top:1px solid var(--line);padding:6px 14px 10px}
+.txp{margin-top:8px}.cap2{font-size:12px;color:var(--mut);padding:6px 0 2px}.cap2.top2{border-top:1px solid var(--line);margin-top:6px}
+.tr{display:flex;align-items:baseline;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.tr .td{width:40px;color:var(--mut);font-size:13px;flex:none}.tr .tn{flex:1;overflow-wrap:anywhere}.tr .ta{font-weight:600;white-space:nowrap}.tr .ta.mut,.mut{color:var(--mut);font-weight:400}
+.lnk{background:transparent;border:0;color:var(--acc);text-decoration:underline;min-height:44px;padding:0;font-size:14px;font-weight:500;display:inline-flex;align-items:center}
+.ufoot{display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:13px;border-top:1px solid var(--line);margin-top:6px}
+.hlink{margin:6px 2px 0}.hrow{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line)}.hrow:last-child{border-bottom:0}
+.hrow .un{flex:1;font-weight:600;overflow-wrap:anywhere}.hrow .ua{font-weight:600;white-space:nowrap}.hbtn{min-height:44px}
+.pf{border-bottom:1px dashed var(--line);padding-bottom:12px}
+.pf-t{font-size:14px;line-height:1.4;margin-top:10px}.pf-s{font-size:13px;color:var(--mut);line-height:1.4;margin-top:2px}
+.pf-r{display:flex;justify-content:space-between;align-items:center;margin-top:12px;background:var(--card);border-radius:10px;padding:8px 8px 8px 12px;gap:8px;flex-wrap:wrap}
+.pf-k{font-size:13px;color:var(--mut)}.pf-a{display:flex;align-items:center;gap:4px}
+.pf-b{width:44px;height:44px;min-height:44px;padding:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:9px;font-size:20px;font-weight:500}
+.pf-in{width:96px;height:44px;box-sizing:border-box;text-align:center;font-size:16px;font-weight:600}
+.pf-p{display:flex;justify-content:space-between;gap:10px;margin-top:10px;font-size:14px;flex-wrap:wrap}.pf-w{width:100%;font-size:13px}
+.pf-rep{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;color:var(--ink);cursor:pointer;margin:2px 0 0}.pf-c{width:22px;height:22px;margin:0}
+.pf-bt{display:flex;gap:8px;margin-top:8px}.pf-go{flex:1;min-height:44px}.pf-ng{min-height:44px}
+.toast{position:fixed;left:14px;right:14px;bottom:16px;max-width:480px;margin:0 auto;display:none;justify-content:space-between;align-items:center;gap:12px;background:var(--ink);color:var(--card);border-radius:12px;padding:6px 6px 6px 16px;font-size:14px;z-index:10}
+.toast.on{display:flex}.tact{background:transparent;color:var(--acc);border:1px solid var(--line);min-height:44px;padding:0 14px;font-size:14px}
+@media(prefers-color-scheme:dark){.toast{background:#e8edf3;color:#11161b}.tact{color:#0b5d4d;border-color:#9fb3ad}}
+.it.lim .ln{display:flex;align-items:center;flex-wrap:nowrap}
+@media(max-width:600px){.it.lim{grid-template-columns:minmax(0,122px) minmax(0,1fr) 74px}}

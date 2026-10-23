@@ -27,6 +27,7 @@ export function render(view, cur) {
     : (k.perDay != null && view.window)
       ? money(k.perDay, cur) + ' в день · ' + view.window.daysLeft + ' ' + plural(view.window.daysLeft, 'день', 'дня', 'дней')
       : (short ? (k.limitsExceedFree ? 'лимиты откладывают больше, чем было свободно' : 'платежи и траты больше поступлений') : ''));
+  if (k.unplannedSpent > 0 && !closed) main.append(h('div', { class: 's note' }, 'В том числе ' + money(k.unplannedSpent, cur) + ' потрачено вне плана'));
   if (limited && !closed && !short) main.append(h('div', { class: 's note' }, 'свободные деньги вне лимитов: можно тратить на что угодно'));
   const income = card('', 'Поступления', money(k.received + k.expectedIncome, cur),
     k.expectedIncome > 0 ? 'из них ожидается ' + money(k.expectedIncome, cur) : 'получено');

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 	"simpleAI/internal/observability"
@@ -24,10 +25,28 @@ import (
 	"simpleAI/internal/trace"
 )
 
+// RegistryOption — необязательная настройка реестра.
+type RegistryOption func(*registryOpts)
+
+type registryOpts struct {
+	limits     botlimits.Reader
+	limitsMode safetospendskill.LimitsMode
+}
+
+// WithBotLimits подключает лимиты из плана для safe_to_spend (ADR-016): числа ответов берутся из plan.Service,
+// когда mode.FromPlan, иначе — только shadow-сравнение (mode.Shadow). Без опции скилл работает по-старому.
+func WithBotLimits(r botlimits.Reader, mode safetospendskill.LimitsMode) RegistryOption {
+	return func(o *registryOpts) { o.limits, o.limitsMode = r, mode }
+}
+
 // BuildRegistry собирает единый реестр skills (rag_search, budget, advisor)
 // поверх пула БД. Возвращает реестр и BudgetSkill (нужен отдельно для
 // Telegram callback-хендлера).
-func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration) (*plugin.Registry, *budgetskill.BudgetSkill) {
+func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.Pool, advisorLLMTimeout time.Duration, opts ...RegistryOption) (*plugin.Registry, *budgetskill.BudgetSkill) {
+	var o registryOpts
+	for _, f := range opts {
+		f(&o)
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -40,7 +59,7 @@ func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	budgetStore := budget.NewStore(pool)
-	bs := budgetskill.NewBudgetSkill(budgetStore)
+	bs := budgetskill.NewBudgetSkill(budgetStore).WithLimits(o.limits, o.limitsMode.FromPlan)
 	if err := registry.Register(bs); err != nil {
 		logger.Error("failed to register budget skill", "err", err)
 	}
@@ -52,7 +71,8 @@ func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 	}
 
 	safeToSpendSkill := safetospendskill.NewSafeToSpendSkill(budgetStore, llmClient, logger).
-		WithLLMTimeout(advisorLLMTimeout)
+		WithLLMTimeout(advisorLLMTimeout).
+		WithLimits(o.limits, o.limitsMode)
 	if err := registry.Register(safeToSpendSkill); err != nil {
 		logger.Error("failed to register safe_to_spend skill", "err", err)
 	}

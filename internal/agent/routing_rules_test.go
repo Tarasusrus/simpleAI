@@ -79,7 +79,7 @@ func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.
 	// лимит: разграничение читается как уточнение к ним, а не наоборот.
 	rateAt := strings.Index(rules, "КУРС БАТА")
 	displayAt := strings.Index(rules, "ВАЛЮТА КОНВЕРТОВ")
-	limitAt := strings.Index(rules, "Правка ЛИМИТА конверта")
+	limitAt := strings.Index(rules, "Правка ЛИМИТА категории")
 	if rateAt < 0 || displayAt < 0 || limitAt < 0 {
 		t.Fatalf("не найдены заголовки правил: курс=%d показ=%d лимит=%d", rateAt, displayAt, limitAt)
 	}
@@ -101,4 +101,20 @@ func rulesBlock(t *testing.T, prompt string) string {
 		t.Fatal("в промпте нет блока правил до списка инструментов")
 	}
 	return prompt[:at]
+}
+
+// ADR-017: действие start_envelope снято из ROUTING RULES; «разложи по конвертам» уходит в safe_to_spend без суммы.
+//
+// Мутация: вернуть start_envelope в router.go — тест краснеет.
+func TestBuildToolsSystemPrompt_StartEnvelopeRemoved(t *testing.T) {
+	prompt := buildToolsSystemPrompt([]plugin.Manifest{{ID: "budget", Description: "b"}, {ID: "safe_to_spend", Description: "s"}})
+	rules := rulesBlock(t, prompt)
+	if strings.Contains(prompt, "start_envelope") {
+		t.Error("в промпте остался start_envelope (ADR-017)")
+	}
+	for _, want := range []string{"разложи по конвертам", "skill=safe_to_spend, сумму НЕ передавать", "Конверты больше не заводятся"} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("в ROUTING RULES нет %q", want)
+		}
+	}
 }

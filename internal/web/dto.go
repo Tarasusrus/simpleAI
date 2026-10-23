@@ -30,6 +30,22 @@ type WindowView struct {
 	Categories []CategoryDTO `json:"categories"`
 	// Limits — лимиты категорий окна (ADR-011); [] если их нет.
 	Limits []LimitDTO `json:"limits"`
+	// Unplanned — категории без действующего лимита с тратами окна (ADR-015 §3); [] если их нет.
+	Unplanned []UnplannedDTO `json:"unplanned"`
+	// Hidden — то же по скрытым категориям («Скрытые · N»); [] если их нет.
+	Hidden []UnplannedDTO `json:"hidden"`
+	// LimitID — id только что созданного лимита (ответ POST /api/plan/limits); иначе поля нет.
+	// По нему тост «Отменить» удаляет лимит (ADR-015 §5).
+	LimitID string `json:"limitId,omitempty"`
+}
+
+// UnplannedDTO — категория без лимита и сколько в ней потрачено за окно.
+type UnplannedDTO struct {
+	Category string `json:"category"`
+	Spent    int64  `json:"spent"`
+	// Count — число трат в окне; Prefill — сумма по умолчанию для «Запланировать» (2 × spent).
+	Count   int   `json:"count"`
+	Prefill int64 `json:"prefill"`
 }
 
 type MetaDTO struct {
@@ -67,6 +83,8 @@ type KPIDTO struct {
 	// LimitHold — сумма остатков лимитов: отложена и уже вычтена из canSpend.
 	LimitHold        int64 `json:"limitHold"`
 	LimitsExceedFree bool  `json:"limitsExceedFree"`
+	// UnplannedSpent — часть spent в категориях без лимита; в canSpend отдельно не вычитается.
+	UnplannedSpent int64 `json:"unplannedSpent"`
 }
 
 type RowDTO struct {
@@ -148,12 +166,15 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
 			LimitHold: v.LimitHold, LimitsExceedFree: v.LimitsExceedFree,
+			UnplannedSpent: v.UnplannedSpent,
 		},
 		Timeline:   rows(v.Timeline),
 		Inbox:      rows(v.Undated.Items),
 		Later:      make([]MonthDTO, 0, len(v.Later)),
 		Categories: make([]CategoryDTO, 0, len(v.Categories)),
 		Limits:     limitDTOs(v.Limits),
+		Unplanned:  unplannedDTOs(v.Unplanned),
+		Hidden:     unplannedDTOs(v.Hidden),
 	}
 	if v.Window != nil {
 		out.Window = &WindowDTO{
@@ -173,6 +194,14 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 	}
 	for _, c := range v.Categories {
 		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Avg: c.Avg, Planned: c.Planned, Free: c.Free, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
+	}
+	return out
+}
+
+func unplannedDTOs(in []plan.UnplannedRow) []UnplannedDTO {
+	out := make([]UnplannedDTO, 0, len(in)) // пустой список — [], а не null
+	for _, r := range in {
+		out = append(out, UnplannedDTO{Category: r.Category, Spent: r.Spent, Count: r.Count, Prefill: r.Prefill})
 	}
 	return out
 }

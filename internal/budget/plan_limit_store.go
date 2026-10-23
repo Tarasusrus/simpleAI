@@ -122,14 +122,14 @@ func (s *Store) DeletePlanLimit(ctx context.Context, chatIDs []int64, id uuid.UU
 
 // PlanLimitHistory — траты расходов по категориям и ПОЛНЫМ календарным месяцам за всю
 // историю, без повторяющихся (recurring_id IS NULL): аренда и подписки лимитом не
-// являются. Текущий неполный месяц исключён, иначе он занижал бы среднее. Из этих
+// являются, и без трат без категории (иначе они склеивались бы с «Прочим»). Текущий неполный месяц исключён, иначе он занижал бы среднее. Из этих
 // строк считается подсказка суммы лимита (ADR-011).
 func (s *Store) PlanLimitHistory(ctx context.Context) ([]MonthlyCategoryExpense, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT COALESCE(c.name, 'Прочее'), COALESCE(NULLIF(c.icon, ''), '📦'), t.currency,
-		       date_trunc('month', t.transaction_date), SUM(t.amount)
+		SELECT c.name, COALESCE(NULLIF(c.icon, ''), '📦'), t.currency,
+		       date_trunc('month', t.transaction_date), SUM(t.amount), COUNT(*)
 		FROM budget_transaction t
-		LEFT JOIN budget_category c ON c.id = t.category_id
+		JOIN budget_category c ON c.id = t.category_id
 		WHERE t.type = 'expense'
 		  AND t.recurring_id IS NULL
 		  AND t.transaction_date < date_trunc('month', NOW())
@@ -141,7 +141,7 @@ func (s *Store) PlanLimitHistory(ctx context.Context) ([]MonthlyCategoryExpense,
 	var out []MonthlyCategoryExpense
 	for rows.Next() {
 		var r MonthlyCategoryExpense
-		if err := rows.Scan(&r.CategoryName, &r.Icon, &r.Currency, &r.Month, &r.Total); err != nil {
+		if err := rows.Scan(&r.CategoryName, &r.Icon, &r.Currency, &r.Month, &r.Total, &r.Count); err != nil {
 			return nil, fmt.Errorf("plan limit history scan: %w", err)
 		}
 		out = append(out, r)

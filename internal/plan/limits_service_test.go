@@ -255,3 +255,90 @@ func TestLimitService_PreviewRepeatToOneOffKeepsLimit(t *testing.T) {
 		t.Fatalf("pv=%+v: лимит пропал из окна", pv)
 	}
 }
+
+type fakeHider struct {
+	dismissed, restored []string
+	scopes              []Scope
+	err                 error
+}
+
+func (f *fakeHider) Dismiss(_ context.Context, sc Scope, c string) error {
+	f.dismissed = append(f.dismissed, c)
+	f.scopes = append(f.scopes, sc)
+	return f.err
+}
+
+func (f *fakeHider) Restore(_ context.Context, sc Scope, c string) error {
+	f.restored = append(f.restored, c)
+	f.scopes = append(f.scopes, sc)
+	return f.err
+}
+
+func TestHider_ServiceValidationAndScope(t *testing.T) {
+	ctx := context.Background()
+	if err := limSvc(baseSnap(), nil).DismissCategory(ctx, "Кафе"); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("без hider: %v", err)
+	}
+	if err := limSvc(baseSnap(), nil).RestoreCategory(ctx, "Кафе"); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("без hider, restore: %v", err)
+	}
+	h := &fakeHider{}
+	s := limSvc(baseSnap(), nil).WithCategoryHider(h)
+	for _, bad := range []string{"", "  ", UncategorizedName} {
+		if err := s.DismissCategory(ctx, bad); !errors.Is(err, ErrLimitCategory) {
+			t.Errorf("Dismiss(%q): %v", bad, err)
+		}
+	}
+	if len(h.dismissed) != 0 {
+		t.Fatalf("плохая категория дошла до порта: %v", h.dismissed)
+	}
+	if err := s.DismissCategory(ctx, "  Кафе "); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestoreCategory(ctx, "Кафе"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.dismissed) != 1 || h.dismissed[0] != "Кафе" || len(h.restored) != 1 || h.scopes[0].ChatIDs[0] != 42 {
+		t.Fatalf("dismissed=%v restored=%v scopes=%v", h.dismissed, h.restored, h.scopes)
+	}
+	if err := s.RestoreCategory(ctx, " "); !errors.Is(err, ErrLimitCategory) {
+		t.Errorf("Restore пустой: %v", err)
+	}
+}
+
+// Скрытые категории из снимка доходят до расчёта.
+func TestHider_SnapshotDismissedReachesView(t *testing.T) {
+	snap := baseSnap()
+	snap.Payments[0].Category = "Еда"
+	snap.Dismissed = []string{"еда"}
+	res, err := limSvc(snap, nil).View(context.Background(), CurRUB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.View.Unplanned) != 0 || len(res.View.Hidden) != 1 || res.View.Hidden[0].Category != "Еда" {
+		t.Fatalf("Unplanned=%+v Hidden=%+v", res.View.Unplanned, res.View.Hidden)
+	}
+}
+
+// ForScope меняет область только у копии: чтение и запись идут в чаты запроса, исходный сервис не тронут.
+//
+// Мутация: не присваивать scope в ForScope — тест краснеет.
+func TestService_ForScopeIsPerRequest(t *testing.T) {
+	w := &fakeLimitWriter{}
+	rd := &fakeReader{snap: baseSnap()}
+	base := NewService(rd, nil, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{42}}).WithLimitWriter(w)
+	other := base.ForScope(Scope{ChatIDs: []int64{7, 8}})
+	ctx := context.Background()
+	if _, err := other.AddLimit(ctx, AddLimitInput{Category: "Еда", Amount: *rub(1000)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.View(ctx, CurRUB); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.scopes) != 1 || len(w.scopes[0].ChatIDs) != 2 || w.scopes[0].ChatIDs[0] != 7 {
+		t.Fatalf("запись ушла в область %+v, ждали [7 8]", w.scopes)
+	}
+	if len(rd.got) != 2 || rd.got[0].ChatIDs[0] != 7 || rd.got[1].ChatIDs[0] != 42 {
+		t.Fatalf("чтение: области %+v, ждали [7 8] затем [42]", rd.got)
+	}
+}
