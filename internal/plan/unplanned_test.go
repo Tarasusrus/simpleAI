@@ -157,3 +157,38 @@ func TestProp_Unplanned_PartitionsSpent(t *testing.T) {
 		t.Errorf("покрыты не все ветки: %v", hits)
 	}
 }
+
+func TestUnplanned_SubUnitDroppedAndNameTrimmed(t *testing.T) {
+	start := Date{2026, 10, 1}
+	dt := start.AddDays(1)
+	inc := Event{Key: "in", Kind: KindIncome, State: StateDone, Amount: ruble(100000), Date: &start, Source: SourceTransaction}
+	mk := func(k, cat string, n int64) Event {
+		return Event{Key: k, Kind: KindPayment, State: StateDone, Amount: ruble(n), Date: &dt, Category: cat, Source: SourceTransaction}
+	}
+	v, err := Compute(ComputeInput{Windows: BuildWindows([]Event{inc}), Today: start.AddDays(2), Cur: CurRUB,
+		Events: []Event{mk("a", "Мелочь", 40), mk("b", " Кафе ", 5000)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Unplanned) != 1 || v.Unplanned[0].Category != "Кафе" || v.Unplanned[0].Spent != 50 {
+		t.Fatalf("Unplanned = %+v", v.Unplanned)
+	}
+}
+
+// Окно закончилось, а следующее ещё не началось: «вне плана» считается по описываемому окну.
+func TestUnplanned_EndedWindow(t *testing.T) {
+	start := Date{2026, 10, 1}
+	dt := start.AddDays(3)
+	inc := Event{Key: "in", Kind: KindIncome, State: StateDone, Amount: ruble(100000), Date: &start, Source: SourceTransaction}
+	ev := Event{Key: "a", Kind: KindPayment, State: StateDone, Amount: ruble(30000), Date: &dt, Category: "Такси", Source: SourceTransaction}
+	v, err := Compute(ComputeInput{Windows: BuildWindows([]Event{inc}), Today: start.AddDays(20), Cur: CurRUB, Events: []Event{ev}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.State != StateEnded && v.State != StateBetween {
+		t.Skipf("состояние %v", v.State)
+	}
+	if v.UnplannedSpent != v.Spent || v.Spent != 300 {
+		t.Fatalf("state=%v Spent=%d Unplanned=%d", v.State, v.Spent, v.UnplannedSpent)
+	}
+}

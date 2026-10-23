@@ -238,11 +238,14 @@ func (c calc) unplanned() (rows []UnplannedRow, total int64, err error) {
 		if cerr != nil {
 			return nil, 0, cerr
 		}
+		if n == 0 {
+			continue // копейки, округлённые до нуля: пустая строка «0 ₽» экрану не нужна
+		}
 		i, ok := idx[k]
 		if !ok {
 			i = len(rows)
 			idx[k] = i
-			rows = append(rows, UnplannedRow{Category: e.Category})
+			rows = append(rows, UnplannedRow{Category: strings.TrimSpace(e.Category)})
 		}
 		if rows[i].Spent, err = addI64(rows[i].Spent, n); err != nil {
 			return nil, 0, err
