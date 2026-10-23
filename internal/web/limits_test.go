@@ -250,6 +250,10 @@ func TestLimits_Suggest(t *testing.T) {
 		t.Fatalf("в подсказку ушло %v/%v", sg.cats, sg.days)
 	}
 	// мало данных: суммы нет, но месяцы видны
+	sg.sug = plan.LimitSuggestion{Enough: true, Months: 3, AmountTHBMinor: 420_000, AvgCount: 4}
+	if d := get("/api/plan/limits/suggest?category=Еда&cur=THB"); d.AvgCount != 4 {
+		t.Fatalf("avgCount не дошёл до ответа: %+v", d)
+	}
 	sg.sug = plan.LimitSuggestion{Enough: false, Months: 1}
 	if d := get("/api/plan/limits/suggest?category=Еда"); d.Enough || d.Amount != nil || d.Months != 1 {
 		t.Fatalf("мало данных: %+v", d)
@@ -272,7 +276,7 @@ func TestLimits_Suggest(t *testing.T) {
 // Старые поля ответа на месте, новые добавлены, пустые лимиты — [] а не null.
 func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true, UnplannedSpent: 70,
-		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70}},
+		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70, Count: 3, Prefill: 140}},
 		Limits:    []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
 	s, _ := newServer(t, &fakePlanner{res: res})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
@@ -287,7 +291,7 @@ func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	if kpi["unplannedSpent"] != float64(70) {
 		t.Fatalf("unplannedSpent: kpi=%v", kpi)
 	}
-	if up, ok := got["unplanned"].([]any); !ok || len(up) != 1 || asMap(t, up[0])["category"] != "Кафе" || asMap(t, up[0])["spent"] != float64(70) {
+	if up, ok := got["unplanned"].([]any); !ok || len(up) != 1 || asMap(t, up[0])["category"] != "Кафе" || asMap(t, up[0])["spent"] != float64(70) || asMap(t, up[0])["count"] != float64(3) || asMap(t, up[0])["prefill"] != float64(140) {
 		t.Fatalf("unplanned=%v", got["unplanned"])
 	}
 	ls, ok := got["limits"].([]any)

@@ -162,16 +162,29 @@ func TestPlanLimitHistory_ExcludesRecurringAndCurrentMonth(t *testing.T) {
 	ins(999, "2025-02-10", &rule) // повторяющаяся — исключена
 	ins(300, "2025-03-05", nil)
 	ins(777, time.Now().UTC().Format("2006-01-02"), nil) // текущий месяц — исключён
+	// трата без категории не должна склеиваться с «Прочим» и попадать в историю
+	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date)
+		VALUES (gen_random_uuid(), 'expense', 5, 'THB', NULL, 'plan-limit-test', '2025-01-12')`); err != nil {
+		t.Fatal(err)
+	}
 
 	rows, err := s.PlanLimitHistory(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := map[string]float64{}
+	counts := map[string]int{}
 	for _, r := range rows {
+		if r.CategoryName == "Прочее" && r.Total == 5 {
+			t.Fatalf("трата без категории попала в «Прочее»: %+v", r)
+		}
 		if r.CategoryName == limitCatName {
 			got[r.Month.Format("2006-01")] += r.Total
+			counts[r.Month.Format("2006-01")] += r.Count
 		}
+	}
+	if counts["2025-01"] != 2 || counts["2025-03"] != 1 {
+		t.Fatalf("Count=%v, ждали {2025-01:2 2025-03:1}", counts)
 	}
 	if len(got) != 2 || got["2025-01"] != 150 || got["2025-03"] != 300 {
 		t.Fatalf("история=%v, ждали {2025-01:150 2025-03:300}", got)

@@ -13,6 +13,10 @@ type LimitSuggestion struct {
 	Months int
 	// AmountTHBMinor — сатанги на окно длиной days.
 	AmountTHBMinor int64
+	// AvgCount — сколько трат категории обычно приходится на окно длиной days (округлено,
+	// не меньше 1, если история есть); 0 — истории меньше MinMonths. Нужен для текста
+	// «Это трата 1 из примерно N» (ADR-015 §4).
+	AvgCount int
 }
 
 // LimitSuggester считает подсказку суммы. Реализует internal/planrepo.

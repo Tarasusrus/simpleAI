@@ -215,6 +215,12 @@ func (c calc) limits() (views []LimitView, hold int64, err error) {
 type UnplannedRow struct {
 	Category string
 	Spent    int64
+	// Count — число оплаченных трат категории в окне (для «Это уже k-я, обычно N»).
+	Count int
+	// Prefill — сумма по умолчанию в форме «Запланировать» при малой истории: 2 × потрачено
+	// (ещё столько же на остаток окна). Равную потраченному предзаполнять нельзя: лимит L ≤ S
+	// даёт LimitHold = 0, и «Свободно после плана» не менялось бы (ADR-015 §4).
+	Prefill int64
 }
 
 // unplanned считает оплаченные траты окна в категориях без лимита, действующего на это окно
@@ -247,10 +253,16 @@ func (c calc) unplanned() (rows []UnplannedRow, total int64, err error) {
 			idx[k] = i
 			rows = append(rows, UnplannedRow{Category: strings.TrimSpace(e.Category)})
 		}
+		rows[i].Count++
 		if rows[i].Spent, err = addI64(rows[i].Spent, n); err != nil {
 			return nil, 0, err
 		}
 		if total, err = addI64(total, n); err != nil {
+			return nil, 0, err
+		}
+	}
+	for i := range rows {
+		if rows[i].Prefill, err = addI64(rows[i].Spent, rows[i].Spent); err != nil {
 			return nil, 0, err
 		}
 	}

@@ -831,6 +831,8 @@ type MonthlyCategoryExpense struct {
 	Currency     string
 	Month        time.Time
 	Total        float64
+	// Count — число трат в группе; заполняет только PlanLimitHistory (ADR-015 §4).
+	Count int
 }
 
 // GetForecastData возвращает прогноз трат по категориям, усреднённый по месяцам.

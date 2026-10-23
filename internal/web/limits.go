@@ -194,6 +194,8 @@ type SuggestDTO struct {
 	Amount *int64 `json:"amount"`
 	Cur    string `json:"cur"`
 	Days   int    `json:"days"`
+	// AvgCount — трат категории за окно в среднем; 0, если истории мало (ADR-015 §4).
+	AvgCount int `json:"avgCount"`
 }
 
 // handleSuggestLimit: GET /api/plan/limits/suggest?category=…&cur=… — среднее по категории
@@ -218,7 +220,7 @@ func (s *Server) handleSuggestLimit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Не удалось посчитать подсказку.")
 		return
 	}
-	out := SuggestDTO{Enough: false, Months: sug.Months, Cur: string(cur), Days: plan.WindowDays}
+	out := SuggestDTO{Enough: false, Months: sug.Months, Cur: string(cur), Days: plan.WindowDays, AvgCount: sug.AvgCount}
 	if sug.Enough {
 		amount, ok := s.suggestionIn(r, cur, sug.AmountTHBMinor)
 		if ok {

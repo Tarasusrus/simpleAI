@@ -41,6 +41,9 @@ type WindowView struct {
 type UnplannedDTO struct {
 	Category string `json:"category"`
 	Spent    int64  `json:"spent"`
+	// Count — число трат в окне; Prefill — сумма по умолчанию для «Запланировать» (2 × spent).
+	Count   int   `json:"count"`
+	Prefill int64 `json:"prefill"`
 }
 
 type MetaDTO struct {
@@ -195,7 +198,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 func unplannedDTOs(in []plan.UnplannedRow) []UnplannedDTO {
 	out := make([]UnplannedDTO, 0, len(in)) // пустой список — [], а не null
 	for _, r := range in {
-		out = append(out, UnplannedDTO{Category: r.Category, Spent: r.Spent})
+		out = append(out, UnplannedDTO{Category: r.Category, Spent: r.Spent, Count: r.Count, Prefill: r.Prefill})
 	}
 	return out
 }

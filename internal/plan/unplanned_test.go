@@ -37,9 +37,13 @@ func TestUnplanned_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []UnplannedRow{{"Кафе", 900}, {"Такси", 500}}
-	if len(v.Unplanned) != 2 || v.Unplanned[0] != want[0] || v.Unplanned[1].Spent != want[1].Spent {
+	want := []UnplannedRow{{Category: "Кафе", Spent: 900}, {Category: "Такси", Spent: 500}}
+	if len(v.Unplanned) != 2 || v.Unplanned[0].Category != want[0].Category || v.Unplanned[0].Spent != want[0].Spent || v.Unplanned[1].Spent != want[1].Spent {
 		t.Fatalf("Unplanned = %+v, want %+v", v.Unplanned, want)
+	}
+	// Count — число трат, Prefill — 2 × потрачено (ADR-015 §4)
+	if v.Unplanned[0].Count != 1 || v.Unplanned[1].Count != 2 || v.Unplanned[0].Prefill != 1800 || v.Unplanned[1].Prefill != 1000 {
+		t.Fatalf("Count/Prefill: %+v", v.Unplanned)
 	}
 	if v.UnplannedSpent != 1400 {
 		t.Fatalf("UnplannedSpent = %d, want 1400", v.UnplannedSpent)

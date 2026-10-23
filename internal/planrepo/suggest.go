@@ -47,6 +47,7 @@ func (s *LimitSuggester) Suggest(ctx context.Context, category string, days int)
 	key := budget.NormalizeName(category)
 	var first time.Time
 	var sum float64
+	var count int
 	for _, r := range rows {
 		if budget.NormalizeName(r.CategoryName) != key {
 			continue
@@ -54,6 +55,7 @@ func (s *LimitSuggester) Suggest(ctx context.Context, category string, days int)
 		if first.IsZero() || r.Month.Before(first) {
 			first = r.Month
 		}
+		count += r.Count
 		if thb, ok := budget.ToTHB(r.Total, r.Currency, rates); ok {
 			sum += thb
 		}
@@ -67,6 +69,10 @@ func (s *LimitSuggester) Suggest(ctx context.Context, category string, days int)
 	out := plan.LimitSuggestion{Months: max(span, 0)}
 	if span < MinSuggestMonths {
 		return out, nil
+	}
+	// Трат за окно: count/span в месяц, пересчёт days/30 с округлением; при непустой истории не 0.
+	if count > 0 {
+		out.AvgCount = max(int(float64(count)/float64(span)*float64(days)/30+0.5), 1)
 	}
 	fc := []budget.CategoryForecast{{CategoryName: category, Currency: "THB", ForecastAmount: sum / float64(span)}}
 	amount, ok := safetospend.WindowAmountTHBMinor(fc, category, days, rates)

@@ -26,6 +26,35 @@ func monthRow(cat string, m time.Month, total float64) budget.MonthlyCategoryExp
 	return budget.MonthlyCategoryExpense{CategoryName: cat, Currency: "THB", Month: time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC), Total: total}
 }
 
+func withCount(r budget.MonthlyCategoryExpense, n int) budget.MonthlyCategoryExpense {
+	r.Count = n
+	return r
+}
+
+// AvgCount — сколько трат категории приходится на окно: count/месяцев·days/30, округление, не меньше 1.
+func TestLimitSuggester_AvgCount(t *testing.T) {
+	rates := map[string]float64{"THB": 2.5, "RUB": 1}
+	rows := []budget.MonthlyCategoryExpense{
+		withCount(monthRow("Еда", 1, 8000), 6), withCount(monthRow("Еда", 2, 10000), 8), // 14 трат за 2 мес = 7/мес → 3,27 за 14 дн.
+		withCount(monthRow("Редкая", 1, 900), 1), withCount(monthRow("Редкая", 2, 900), 0), // 1/2 мес → 0,23 → не меньше 1
+		withCount(monthRow("Кафе", 2, 5000), 9), // один месяц — AvgCount нет
+	}
+	s := NewLimitSuggester(fakeSuggestSource{rows: rows, rates: rates})
+	s.now = func() time.Time { return time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC) }
+	if got := mustSuggest(t, s, "Еда", 14); got.AvgCount != 3 {
+		t.Fatalf("Еда: AvgCount=%d, ждали 3", got.AvgCount)
+	}
+	if got := mustSuggest(t, s, "Редкая", 14); got.AvgCount != 1 {
+		t.Fatalf("Редкая: AvgCount=%d, ждали 1", got.AvgCount)
+	}
+	if got := mustSuggest(t, s, "Кафе", 14); got.AvgCount != 0 || got.Enough {
+		t.Fatalf("Кафе: %+v — при одном месяце цифр нет", got)
+	}
+	if got := mustSuggest(t, s, "Еда", 28); got.AvgCount != 7 {
+		t.Fatalf("Еда, 28 дн.: AvgCount=%d, ждали 7", got.AvgCount)
+	}
+}
+
 func TestLimitSuggester(t *testing.T) {
 	rates := map[string]float64{"THB": 2.5, "RUB": 1}
 	rows := []budget.MonthlyCategoryExpense{
