@@ -50,13 +50,14 @@ func runPlanWeb(ctx context.Context, cfg config.Config, logger *slog.Logger, poo
 	svc := plan.NewService(reader, planrepo.NewWriter(store), func() plan.Date { return plan.DateOf(time.Now(), loc) }, plan.Scope{ChatIDs: chats},
 		plan.WithFactWriter(planrepo.NewFactWriter(store))).
 		WithLimitWriter(planrepo.NewLimitWriter(store)).
-		WithCategoryHider(planrepo.NewCategoryHider(store))
+		WithCategoryHider(planrepo.NewCategoryHider(store)).
+		WithTxLister(planrepo.NewTxLister(store))
 	srv, err := web.New(wc, svc, logger)
 	if err != nil {
 		logger.Warn("plan web not started: invalid config", "reason", err.Error())
 		return
 	}
-	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc)
+	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc).WithCategoryTransactions(svc)
 	if err := srv.Run(ctx); err != nil {
 		logger.Error("plan web stopped", "err", err)
 	}

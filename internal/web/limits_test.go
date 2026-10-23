@@ -90,6 +90,7 @@ var limRoutes = []struct{ method, target, body string }{
 	{"GET", "/api/plan/limits/suggest?category=Еда", ``},
 	{"POST", "/api/plan/categories/dismissed", `{"category":"Кафе"}`},
 	{"DELETE", "/api/plan/categories/dismissed?category=Кафе", ``},
+	{"GET", "/api/plan/categories/transactions?category=Кафе", ``},
 }
 
 // Без токена ни один маршрут лимитов не доходит до сервиса.
@@ -99,7 +100,7 @@ func TestLimits_RequireToken(t *testing.T) {
 	lp := &fakeLimitPlanner{}
 	for _, r := range limRoutes {
 		// отдельный сервер на маршрут: счётчик неудачных входов общий и иначе даёт 429 вместо 401
-		s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{}).WithCategoryHider(&fakeHider{})
+		s := limServer(t, &fakePlanner{}, lp, &fakeSuggester{}).WithCategoryHider(&fakeHider{}).WithCategoryTransactions(&fakeTxPlanner{})
 		for _, tok := range []string{"", "wrong"} {
 			if rec := send(s, r.method, r.target, r.body, tok); rec.Code != http.StatusUnauthorized {
 				t.Errorf("%s %s токен %q: %d, ждали 401", r.method, r.target, tok, rec.Code)
@@ -384,5 +385,74 @@ func TestHider_NotWired_404(t *testing.T) {
 	}
 	if rec := send(s, "DELETE", "/api/plan/categories/dismissed?category=Кафе", ``, goodToken); rec.Code != http.StatusNotFound {
 		t.Errorf("restore без hider: %d, ждали 404", rec.Code)
+	}
+}
+
+type fakeTxPlanner struct {
+	page plan.CategoryTxPage
+	err  error
+	cur  []plan.Currency
+	cat  []string
+	crs  []string
+}
+
+func (f *fakeTxPlanner) CategoryTransactions(_ context.Context, cur plan.Currency, cat, cursor string) (plan.CategoryTxPage, error) {
+	f.cur, f.cat, f.crs = append(f.cur, cur), append(f.cat, cat), append(f.crs, cursor)
+	return f.page, f.err
+}
+
+func TestCategoryTx_Endpoint(t *testing.T) {
+	dt := plan.Date{Year: 2026, Month: 3, Day: 12}
+	amt := int64(900)
+	f := &fakeTxPlanner{page: plan.CategoryTxPage{
+		Start: plan.Date{Year: 2026, Month: 3, Day: 5}, End: plan.Date{Year: 2026, Month: 3, Day: 18},
+		Rows:    []plan.TxRow{{Key: "transaction:x", Date: plan.Date{Year: 2026, Month: 3, Day: 9}, Name: "такси", Amount: 625}},
+		HasMore: true, Next: "2026-03-09|x",
+		Ahead: []plan.Row{{Key: "planned:a", Date: &dt, Name: "в аэропорт", Kind: plan.KindPayment, Amount: &amt}},
+	}}
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil).WithCategoryTransactions(f)
+	rec := send(s, "GET", "/api/plan/categories/transactions?category=%D0%A2%D0%B0%D0%BA%D1%81%D0%B8&cursor=c1&cur=THB", ``, goodToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d: %s", rec.Code, rec.Body.String())
+	}
+	if f.cat[0] != "Такси" || f.crs[0] != "c1" || f.cur[0] != plan.CurTHB {
+		t.Fatalf("в сервис ушло cat=%v cursor=%v cur=%v", f.cat, f.crs, f.cur)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	rows, ok1 := got["rows"].([]any)
+	ahead, ok2 := got["ahead"].([]any)
+	if !ok1 || !ok2 {
+		t.Fatalf("rows/ahead не списки: %v", got)
+	}
+	if got["category"] != "Такси" || got["start"] != "2026-03-05" || got["end"] != "2026-03-18" || got["hasMore"] != true || got["next"] != "2026-03-09|x" ||
+		len(rows) != 1 || asMap(t, rows[0])["amount"] != float64(625) || asMap(t, rows[0])["date"] != "2026-03-09" ||
+		len(ahead) != 1 || asMap(t, ahead[0])["name"] != "в аэропорт" {
+		t.Fatalf("ответ %v", got)
+	}
+	// ошибки: «Без категории» и плохой курсор — 400
+	for _, e := range []error{plan.ErrLimitCategory, plan.ErrBadCursor} {
+		f.err = e
+		if rec := send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d, ждали 400", e, rec.Code)
+		}
+	}
+	// пустая страница — [] а не null
+	f.err, f.page = nil, plan.CategoryTxPage{}
+	rec = send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken)
+	if !strings.Contains(rec.Body.String(), `"rows":[]`) || !strings.Contains(rec.Body.String(), `"ahead":[]`) {
+		t.Fatalf("пустая страница: %s", rec.Body.String())
+	}
+}
+
+func TestCategoryTx_NotWired_404(t *testing.T) {
+	s := limServer(t, &fakePlanner{}, &fakeLimitPlanner{}, nil)
+	if rec := send(s, "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("без читателя: %d, ждали 404", rec.Code)
+	}
+	if rec := send(limServer(t, &fakePlanner{}, nil, nil).WithCategoryTransactions(&fakeTxPlanner{}), "GET", "/api/plan/categories/transactions?category=x", ``, goodToken); rec.Code != http.StatusNotFound {
+		t.Errorf("без флага лимитов: %d, ждали 404", rec.Code)
 	}
 }

@@ -39,6 +39,17 @@ func (s *Server) WithCategoryHider(h CategoryHider) *Server {
 	return s
 }
 
+// CategoryTxPlanner — то, что вебу нужно от plan.Service для списка трат категории.
+type CategoryTxPlanner interface {
+	CategoryTransactions(ctx context.Context, cur plan.Currency, category, cursor string) (plan.CategoryTxPage, error)
+}
+
+// WithCategoryTransactions подключает список трат категории. Без него маршрут отвечает 404.
+func (s *Server) WithCategoryTransactions(p CategoryTxPlanner) *Server {
+	s.txs = p
+	return s
+}
+
 // LimitDTO — лимит окна в валюте показа; все числа готовы, фронт ничего не считает.
 type LimitDTO struct {
 	ID        string `json:"id"`
@@ -267,6 +278,8 @@ func (s *Server) writeLimitError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "На эту категорию в этом окне лимит уже есть. Измени его.")
 	case errors.Is(err, errLimitFields):
 		writeError(w, http.StatusBadRequest, "Нужны поля category (только при создании), amount, currency и repeat.")
+	case errors.Is(err, plan.ErrBadCursor):
+		writeError(w, http.StatusBadRequest, "Некорректный курсор страницы.")
 	case errors.Is(err, plan.ErrLimitCategory):
 		writeError(w, http.StatusBadRequest, "Выбери существующую категорию расходов (не «Без категории»).")
 	default:
@@ -321,7 +334,54 @@ func (s *Server) handleRestoreCategory(w http.ResponseWriter, r *http.Request) {
 	s.respondView(w, r, http.StatusOK)
 }
 
+// TxDTO — трата категории в валюте показа.
+type TxDTO struct {
+	Key    string `json:"key"`
+	Date   string `json:"date"`
+	Name   string `json:"name"`
+	Amount int64  `json:"amount"`
+}
+
+// CategoryTxDTO — страница трат категории окна. Окно определяет сервер.
+type CategoryTxDTO struct {
+	Category string  `json:"category"`
+	Start    string  `json:"start"`
+	End      string  `json:"end"`
+	Rows     []TxDTO `json:"rows"`
+	HasMore  bool    `json:"hasMore"`
+	Next     string  `json:"next"`
+	// Ahead — «Впереди в категории»: неоплаченные платежи окна; только на первой странице.
+	Ahead []RowDTO `json:"ahead"`
+}
+
+// handleCategoryTransactions: GET /api/plan/categories/transactions?category=…&cursor=…&cur=…
+func (s *Server) handleCategoryTransactions(w http.ResponseWriter, r *http.Request) {
+	if !s.limitsOn(w) {
+		return
+	}
+	if s.txs == nil {
+		writeError(w, http.StatusNotFound, "Траты категории не включены.")
+		return
+	}
+	cat := strings.TrimSpace(r.URL.Query().Get("category"))
+	cur := s.curFrom(r)
+	page, err := s.txs.CategoryTransactions(r.Context(), cur, cat, r.URL.Query().Get("cursor"))
+	if err != nil {
+		s.writeLimitError(w, err)
+		return
+	}
+	out := CategoryTxDTO{Category: cat, Rows: make([]TxDTO, 0, len(page.Rows)), HasMore: page.HasMore, Next: page.Next, Ahead: rows(page.Ahead)}
+	if page.Start != (plan.Date{}) {
+		out.Start, out.End = dateStr(page.Start), dateStr(page.End)
+	}
+	for _, t := range page.Rows {
+		out.Rows = append(out.Rows, TxDTO{Key: t.Key, Date: dateStr(t.Date), Name: t.Name, Amount: t.Amount})
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) registerLimitRoutes(mux *http.ServeMux) {
+	mux.Handle("GET /api/plan/categories/transactions", s.auth(http.HandlerFunc(s.handleCategoryTransactions)))
 	mux.Handle("POST /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleDismissCategory)))
 	mux.Handle("DELETE /api/plan/categories/dismissed", s.auth(http.HandlerFunc(s.handleRestoreCategory)))
 	mux.Handle("POST /api/plan/limits", s.auth(http.HandlerFunc(s.handleAddLimit)))
