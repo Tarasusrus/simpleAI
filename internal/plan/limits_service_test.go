@@ -319,3 +319,26 @@ func TestHider_SnapshotDismissedReachesView(t *testing.T) {
 		t.Fatalf("Unplanned=%+v Hidden=%+v", res.View.Unplanned, res.View.Hidden)
 	}
 }
+
+// ForScope меняет область только у копии: чтение и запись идут в чаты запроса, исходный сервис не тронут.
+//
+// Мутация: не присваивать scope в ForScope — тест краснеет.
+func TestService_ForScopeIsPerRequest(t *testing.T) {
+	w := &fakeLimitWriter{}
+	rd := &fakeReader{snap: baseSnap()}
+	base := NewService(rd, nil, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{42}}).WithLimitWriter(w)
+	other := base.ForScope(Scope{ChatIDs: []int64{7, 8}})
+	ctx := context.Background()
+	if _, err := other.AddLimit(ctx, AddLimitInput{Category: "Еда", Amount: *rub(1000)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.View(ctx, CurRUB); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.scopes) != 1 || len(w.scopes[0].ChatIDs) != 2 || w.scopes[0].ChatIDs[0] != 7 {
+		t.Fatalf("запись ушла в область %+v, ждали [7 8]", w.scopes)
+	}
+	if len(rd.got) != 2 || rd.got[0].ChatIDs[0] != 7 || rd.got[1].ChatIDs[0] != 42 {
+		t.Fatalf("чтение: области %+v, ждали [7 8] затем [42]", rd.got)
+	}
+}
