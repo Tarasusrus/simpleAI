@@ -106,7 +106,9 @@ func (c calc) blocks(v *View) error {
 			return err
 		}
 		if e.State == StateDone {
-			if e.Date != nil && c.inWindowByDate(*e.Date) {
+			// Лента смотрит вперёд: закрытое сегодня остаётся (можно вернуть в план),
+			// закрытое в прошлые дни — уже история.
+			if e.Date != nil && c.inWindowByDate(*e.Date) && e.Date.Compare(c.in.Today) >= 0 {
 				timeline = append(timeline, newItem(row, 1, 2))
 			}
 			continue
@@ -158,6 +160,9 @@ func (c calc) blocks(v *View) error {
 		}
 		r := rowOf(e, &n)
 		r.Expected = e.State == StatePlanned
+		if !r.Expected && e.Date.Compare(c.in.Today) < 0 {
+			continue // пришло в прошлые дни — история, не «ближайшее»
+		}
 		r.NotArrived = r.Expected && e.Date.Compare(c.in.Today) < 0
 		ord := 0
 		if r.Expected {

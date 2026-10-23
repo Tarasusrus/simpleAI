@@ -63,8 +63,9 @@ func TestTimeline_Order(t *testing.T) {
 	})
 	v := mustCompute(t, in(ws, ev, CurRUB, r25, Date{2026, 10, 11}, 0)) // сегодня 11.10: просрочены только 06.10 и 08.10
 	got := keysOf(v.Timeline)
-	// просроченные (06.10, 08.10) первыми по дате ↑; затем 05.10 факт; 12.10: факт, план, потом платежи (Альфа/альфа/бета); 16.10
-	want := []string{"over1", "over2", "fact", "fact12", "plan", "a-pay", "a-pay2", "b-pay", "z-late"}
+	// просроченные (06.10, 08.10) первыми по дате ↑; 05.10 факт — прошлое, в ленту не идёт;
+	// 12.10: факт, план, потом платежи (Альфа/альфа/бета); 16.10
+	want := []string{"over1", "over2", "fact12", "plan", "a-pay", "a-pay2", "b-pay", "z-late"}
 	if !sameKeys(got, want) {
 		t.Fatalf("порядок ленты:\n got  %v\n want %v", got, want)
 	}
@@ -90,11 +91,14 @@ func TestTimeline_RowFields(t *testing.T) {
 	for _, r := range v.Timeline {
 		rows[r.Key] = r
 	}
-	if !rows["b"].Expected || !rows["b"].NotArrived || !rows["c"].Expected || rows["c"].NotArrived || rows["a"].Expected {
-		t.Fatalf("флаги поступлений: a=%+v b=%+v c=%+v", rows["a"], rows["b"], rows["c"])
+	if !rows["b"].Expected || !rows["b"].NotArrived || !rows["c"].Expected || rows["c"].NotArrived {
+		t.Fatalf("флаги поступлений: b=%+v c=%+v", rows["b"], rows["c"])
 	}
-	if rows["a"].Kind != KindIncome {
+	if rows["b"].Kind != KindIncome {
 		t.Fatal("вид строки поступления")
+	}
+	if _, ok := rows["a"]; ok {
+		t.Fatal("пришедшее в прошлые дни не «ближайшее»")
 	}
 }
 
@@ -111,11 +115,16 @@ func TestTimeline_OverdueOnlyForOneOffPlanned(t *testing.T) {
 	}
 }
 
-// Оплаченные платежи (факты) — тоже в ленте окна, по дате.
-func TestTimeline_ContainsFactsInWindow(t *testing.T) {
-	v := tl(t, []Event{payDone("f", "Факт", 100_000, CurRUB, Date{2026, 10, 9}), payDone("out", "Вне окна", 100, CurRUB, Date{2026, 10, 25})}, Date{2026, 10, 14})
+// Лента «Ближайшие платежи» смотрит вперёд: оплаченное сегодня остаётся (можно вернуть
+// в план), оплаченное в прошлые дни и вне окна — нет.
+func TestTimeline_FactsOnlyTodayOnward(t *testing.T) {
+	v := tl(t, []Event{
+		payDone("today", "Сегодня", 100_000, CurRUB, Date{2026, 10, 14}),
+		payDone("past", "Вчера", 100_000, CurRUB, Date{2026, 10, 13}),
+		payDone("out", "Вне окна", 100, CurRUB, Date{2026, 10, 25}),
+	}, Date{2026, 10, 14})
 	k := keysOf(v.Timeline)
-	if !contains(k, "f") || contains(k, "out") {
+	if !contains(k, "today") || contains(k, "past") || contains(k, "out") {
 		t.Fatalf("лента: %v", k)
 	}
 }
