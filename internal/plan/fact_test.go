@@ -189,6 +189,8 @@ func TestView_RowsCarryActions(t *testing.T) {
 	snap := baseSnap()
 	settled := factEvent("transaction:settled", FactSettled, "")
 	ext := factEvent("transaction:ext", FactExternal, "")
+	// Закрытые в прошлые дни в ленту не идут: берём факты сегодняшнего числа.
+	settled.Date, ext.Date = dp(2026, 3, 10), dp(2026, 3, 10)
 	snap.Payments = append(snap.Payments, settled, ext)
 	res, err := NewService(&fakeReader{snap: snap}, nil, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{7}}).View(context.Background(), CurTHB)
 	if err != nil {

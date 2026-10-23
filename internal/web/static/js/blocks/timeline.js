@@ -7,7 +7,7 @@ export function render(view, cur, ctx) {
   const list = view.timeline || [];
   const card = h('div', { class: 'card' });
   if (!list.length) {
-    card.append(h('div', { class: 'empty' }, 'В этом окне платежей нет.'));
+    card.append(h('div', { class: 'empty' }, 'Ближайших платежей нет.'));
   } else {
     list.slice(0, SHOWN).forEach((r) => card.append(row(r, cur, ctx)));
     if (list.length > SHOWN) {
