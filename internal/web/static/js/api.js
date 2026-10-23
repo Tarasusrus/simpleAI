@@ -62,4 +62,9 @@ export const addLimit = (cur, body) => call('POST', '/api/plan/limits' + q(cur),
 export const editLimit = (cur, id, body) => call('PUT', '/api/plan/limits/' + encodeURIComponent(id) + q(cur), body);
 export const deleteLimit = (cur, id) => call('DELETE', '/api/plan/limits/' + encodeURIComponent(id) + q(cur));
 export const previewLimit = (cur, body) => call('POST', '/api/plan/limits/preview' + q(cur), body);
+// Траты вне плана (ADR-015): скрытие категории, возврат, список трат категории окна (страницами).
+export const dismissCategory = (cur, category) => call('POST', '/api/plan/categories/dismissed' + q(cur), { category });
+export const restoreCategory = (cur, category) => call('DELETE', '/api/plan/categories/dismissed' + q(cur) + '&category=' + encodeURIComponent(category));
+export const getCategoryTransactions = (cur, category, cursor) => call('GET', '/api/plan/categories/transactions' + q(cur)
+  + '&category=' + encodeURIComponent(category) + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
 export const suggestLimit = (cur, category) => call('GET', '/api/plan/limits/suggest' + q(cur) + '&category=' + encodeURIComponent(category));
