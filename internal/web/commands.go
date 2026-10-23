@@ -106,6 +106,11 @@ func (s *Server) viewFor(r *http.Request, cur plan.Currency) (plan.Result, error
 
 // respondView отдаёт обновлённый WindowView после команды.
 func (s *Server) respondView(w http.ResponseWriter, r *http.Request, status int) {
+	s.respondViewWith(w, r, status, nil)
+}
+
+// respondViewWith — то же, но с правкой готового ответа (например, id созданного лимита).
+func (s *Server) respondViewWith(w http.ResponseWriter, r *http.Request, status int, edit func(*WindowView)) {
 	cur := s.curFrom(r)
 	res, err := s.viewFor(r, cur)
 	if err != nil {
@@ -114,7 +119,11 @@ func (s *Server) respondView(w http.ResponseWriter, r *http.Request, status int)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(toWindowView(res, cur)) //nolint:errcheck // клиент мог уйти
+	v := toWindowView(res, cur)
+	if edit != nil {
+		edit(&v)
+	}
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // клиент мог уйти
 }
 
 // handleAddIncome: POST /api/plan/income — ожидаемое поступление.

@@ -32,6 +32,9 @@ type WindowView struct {
 	Limits []LimitDTO `json:"limits"`
 	// Unplanned — категории без действующего лимита с тратами окна (ADR-015 §3); [] если их нет.
 	Unplanned []UnplannedDTO `json:"unplanned"`
+	// LimitID — id только что созданного лимита (ответ POST /api/plan/limits); иначе поля нет.
+	// По нему тост «Отменить» удаляет лимит (ADR-015 §5).
+	LimitID string `json:"limitId,omitempty"`
 }
 
 // UnplannedDTO — категория без лимита и сколько в ней потрачено за окно.

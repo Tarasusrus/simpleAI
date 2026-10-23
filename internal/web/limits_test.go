@@ -125,6 +125,10 @@ func TestLimits_AddEditDelete(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("add %d: %s", rec.Code, rec.Body.String())
 	}
+	var added map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &added); err != nil || added["limitId"] != "lim-1" {
+		t.Fatalf("POST не вернул id созданного лимита: %v %s", err, rec.Body.String())
+	}
 	want := plan.AddLimitInput{Category: "Еда", Amount: plan.Money{Minor: 123450, Cur: plan.CurTHB}, Repeat: true}
 	if len(lp.added) != 1 || lp.added[0] != want {
 		t.Fatalf("added=%+v, ждали %+v", lp.added, want)
@@ -132,7 +136,8 @@ func TestLimits_AddEditDelete(t *testing.T) {
 	if len(p.curs) != 1 || p.curs[0] != plan.CurTHB {
 		t.Fatalf("ответ не перечитан в валюте показа: %v", p.curs)
 	}
-	if rec := send(s, "PUT", "/api/plan/limits/L9", `{"amount":50,"currency":"RUB","repeat":false}`, goodToken); rec.Code != http.StatusOK {
+	rec = send(s, "PUT", "/api/plan/limits/L9", `{"amount":50,"currency":"RUB","repeat":false}`, goodToken)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "limitId") {
 		t.Fatalf("edit %d: %s", rec.Code, rec.Body.String())
 	}
 	if e := lp.edited["L9"]; e.Amount != (plan.Money{Minor: 5000, Cur: plan.CurRUB}) || e.Repeat {
@@ -268,7 +273,7 @@ func TestLimits_Suggest(t *testing.T) {
 func TestWindow_LimitsFieldsAdditive(t *testing.T) {
 	res := plan.Result{View: plan.View{State: plan.StateCurrent, Window: &plan.WindowInfo{}, CanSpend: 100, LimitHold: 30, LimitsExceedFree: true, UnplannedSpent: 70,
 		Unplanned: []plan.UnplannedRow{{Category: "Кафе", Spent: 70}},
-		Limits: []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
+		Limits:    []plan.LimitView{{ID: "L1", Category: "Еда", Repeat: true, Amount: 50, Spent: 20, Left: 30, LeftPct: 60, Attention: true}}}}
 	s, _ := newServer(t, &fakePlanner{res: res})
 	rec := do(s, "GET", "/api/plan/window", goodToken)
 	var got map[string]any

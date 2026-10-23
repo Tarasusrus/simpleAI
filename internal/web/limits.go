@@ -101,7 +101,7 @@ func (s *Server) handleAddLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("plan web command", "command", "limit_add", "id", id, "added_by", "web")
-	s.respondView(w, r, http.StatusCreated)
+	s.respondViewWith(w, r, http.StatusCreated, func(v *WindowView) { v.LimitID = id })
 }
 
 // handleEditLimit: PUT /api/plan/limits/{id} — сумма, валюта и повтор (категория не меняется).
