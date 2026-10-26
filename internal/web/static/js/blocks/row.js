@@ -1,6 +1,7 @@
 import { h, togglePanel } from '../dom.js';
 import { money, shortDate, plural } from '../fmt.js';
 import { editable } from './edit.js';
+import { txLink } from '../txlink.js';
 import { statusMark } from './status.js';
 
 // Подпись к строке по флагам, которые выставил сервер.
@@ -23,7 +24,7 @@ export function row(r, cur, ctx) {
   const n = note(r);
   // Подпись и действия — отдельной строкой под названием: в колонке они не помещаются
   // (до четырёх действий), а на телефоне колонку приходилось прятать вместе с ними.
-  const extras = [n || null, movable(r, ctx), editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)].filter(Boolean);
+  const extras = [n || null, movable(r, ctx), txLink(r.key) || editable(r, cur, ctx), skippable(r, ctx), removable(r, ctx)].filter(Boolean);
   return h('div', { class: 'it st' + (r.noAmount ? ' dim' : '') },
     statusMark(r, cur, ctx),
     h('span', { class: 'd' }, shortDate(r.date)),

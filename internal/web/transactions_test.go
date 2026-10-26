@@ -205,3 +205,28 @@ func TestTx_PageRoute(t *testing.T) {
 		t.Error("страница не читает ?focus")
 	}
 }
+
+// Кнопки «изменить» у оплаченных фактов ведут на /transactions?focus=<id> из строки плана и из трат категории через
+// общий модуль txlink.js; плановые записи и повторы ссылку не получают (только ключ "transaction:").
+//
+// Мутация: убрать импорт txlink из row.js или cat-tx.js, поменять префикс или адрес в txlink.js — краснеет проверка.
+func TestStatic_TransactionLinks(t *testing.T) {
+	link, err := staticFS.ReadFile("static/js/txlink.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"'transaction:'", "/transactions?focus=", "encodeURIComponent"} {
+		if !strings.Contains(string(link), want) {
+			t.Errorf("txlink.js: нет %q", want)
+		}
+	}
+	for _, f := range []string{"static/js/blocks/row.js", "static/js/blocks/cat-tx.js"} {
+		b, err := staticFS.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "from '../txlink.js'") || !strings.Contains(string(b), "txLink(") {
+			t.Errorf("%s не использует общую ссылку на транзакцию", f)
+		}
+	}
+}

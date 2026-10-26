@@ -1,6 +1,7 @@
 import { h } from '../dom.js';
 import { getCategoryTransactions } from '../api.js';
 import { money, shortDate } from '../fmt.js';
+import { txLink } from '../txlink.js';
 
 // Раскрытие категории (ADR-015 §6): траты окна, «Показать все траты категории» и «Впереди в категории».
 // Окно определяет сервер; здесь только показ и подгрузка страниц по курсору.
@@ -11,7 +12,8 @@ function txRow(r, cur) {
   return h('div', { class: 'tr' },
     h('span', { class: 'td' }, shortDate(r.date)),
     h('span', { class: 'tn' }, r.name),
-    h('span', { class: 'ta' }, money(r.amount, cur)));
+    h('span', { class: 'ta' }, money(r.amount, cur)),
+    txLink(r.key));
 }
 
 function aheadRow(r, cur) {
