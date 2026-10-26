@@ -19,6 +19,7 @@ const (
 	msgReceiptUnknownFile   = "Это не похоже на фото или PDF — такой файл не принимаю."
 	msgReceiptUnsupported   = "Этот формат модель не принимает — пришли обычное фото чека."
 	msgReceiptNotReceipt    = "На фото не чек — расход не создан."
+	msgReceiptDuplicate     = "Этот чек уже записан — второй раз не записываю."
 	msgReceiptUnreadable    = "Не удалось распознать фото. Сними чек ещё раз, ровно и при хорошем свете."
 	msgReceiptNoCurrency    = "Не понял валюту чека — расход не создан. Можно ввести трату текстом."
 	msgReceiptNoTotal       = "Не нашёл итоговую сумму на чеке — расход не создан. Можно ввести трату текстом."
@@ -132,6 +133,8 @@ func receiptErrorMessage(err error) (msg string, known bool) {
 		return msgReceiptUnsupported, true
 	case errors.Is(err, receipt.ErrNotReceipt):
 		return msgReceiptNotReceipt, true
+	case errors.Is(err, receipt.ErrDuplicate):
+		return msgReceiptDuplicate, true
 	case errors.Is(err, receipt.ErrUnreadable):
 		return msgReceiptUnreadable, true
 	case errors.Is(err, receipt.ErrNoCurrency):
