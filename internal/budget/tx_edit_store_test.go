@@ -23,9 +23,9 @@ func TestEditTx(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		s.pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'plan-store-test%'`) //nolint:errcheck
-		s.pool.Exec(ctx, `DELETE FROM budget_transaction WHERE category_id = $1`, cat)                   //nolint:errcheck
-		s.pool.Exec(ctx, `DELETE FROM budget_category WHERE id = $1`, cat)                               //nolint:errcheck
+		s.pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'plan-store-test%'`) //nolint:errcheck // очистка после теста: ошибка не влияет на результат
+		s.pool.Exec(ctx, `DELETE FROM budget_transaction WHERE category_id = $1`, cat)                   //nolint:errcheck // очистка после теста: ошибка не влияет на результат
+		s.pool.Exec(ctx, `DELETE FROM budget_category WHERE id = $1`, cat)                               //nolint:errcheck // очистка после теста: ошибка не влияет на результат
 	})
 	for _, by := range []string{"bot", "web"} {
 		id := uuid.New()
@@ -79,7 +79,7 @@ func TestDeleteTx(t *testing.T) {
 	s, ctx := rateTestStore(t)
 	cleanPlanStore(t, s, ctx)
 	t.Cleanup(func() {
-		s.pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'plan-store-test%'`) //nolint:errcheck
+		s.pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'plan-store-test%'`) //nolint:errcheck // очистка после теста: ошибка не влияет на результат
 	})
 	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
 	planned, other := uuid.New(), uuid.New()
@@ -129,7 +129,10 @@ func TestDeleteTx(t *testing.T) {
 	}
 
 	// Транзакция без связи с планом удаляется тем же путём.
-	p, _ := s.GetTx(ctx, plain)
+	p, err := s.GetTx(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteTx(ctx, plain, p.UpdatedAt, TxSourceWeb); err != nil {
 		t.Fatalf("удаление без связи: %v", err)
 	}
