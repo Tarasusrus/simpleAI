@@ -106,6 +106,10 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	s.registerLimitRoutes(mux)
 	s.registerTxRoutes(mux)
 	files := http.FileServerFS(sub)
+	// Страница «Транзакции» (ADR-018): /transactions?focus=<id> отдаёт тот же HTML, фокус разбирает скрипт.
+	mux.HandleFunc("GET /transactions", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "transactions.html")
+	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.
 		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {

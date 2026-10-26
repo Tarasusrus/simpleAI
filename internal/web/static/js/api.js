@@ -68,3 +68,12 @@ export const restoreCategory = (cur, category) => call('DELETE', '/api/plan/cate
 export const getCategoryTransactions = (cur, category, cursor) => call('GET', '/api/plan/categories/transactions' + q(cur)
   + '&category=' + encodeURIComponent(category) + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
 export const suggestLimit = (cur, category) => call('GET', '/api/plan/limits/suggest' + q(cur) + '&category=' + encodeURIComponent(category));
+
+// Страница «Транзакции» (ADR-018). Суммы приходят и уходят десятичной строкой в валюте самой транзакции;
+// version — версия строки: сервер откажет в правке, если строку успели изменить.
+export const listTransactions = (params) => call('GET', '/api/plan/transactions?' + new URLSearchParams(
+  Object.entries(params || {}).filter(([, v]) => v !== '' && v != null)).toString());
+export const getTransaction = (id) => call('GET', '/api/plan/transactions/' + encodeURIComponent(id));
+export const editTransaction = (id, body) => call('PATCH', '/api/plan/transactions/' + encodeURIComponent(id), body);
+export const deleteTransaction = (id, version) => call('DELETE', '/api/plan/transactions/' + encodeURIComponent(id)
+  + '?version=' + encodeURIComponent(version));

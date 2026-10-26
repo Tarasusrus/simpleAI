@@ -176,3 +176,32 @@ func TestTx_Delete(t *testing.T) {
 		t.Errorf("конфликт: %d", rec.Code)
 	}
 }
+
+// /transactions отдаёт страницу (HTML со скриптом страницы), в том числе со ссылкой focus; скрипт и API-клиент
+// существуют, а клиент ходит ровно по маршрутам сервера.
+//
+// Мутация: убрать маршрут GET /transactions — краснеет код ответа (запрос уйдёт в файловый сервер и даст 404).
+func TestTx_PageRoute(t *testing.T) {
+	s := txServer(t, &fakeTxEditor{})
+	rec := send(s, http.MethodGet, "/transactions?focus=abc", "", goodToken)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "/js/transactions.js") ||
+		!strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("страница: %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	js, err := staticFS.ReadFile("static/js/transactions.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := staticFS.ReadFile("static/js/api.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/api/plan/transactions?", "/api/plan/transactions/", "'PATCH'", "'DELETE'", "version="} {
+		if !strings.Contains(string(api), want) {
+			t.Errorf("клиент API: нет %q", want)
+		}
+	}
+	if !strings.Contains(string(js), "focus") {
+		t.Error("страница не читает ?focus")
+	}
+}
