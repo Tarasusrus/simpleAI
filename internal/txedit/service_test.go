@@ -212,7 +212,7 @@ func TestAround_NextCursor(t *testing.T) {
 		t.Errorf("строка у верха: next=%q err=%v, ждали курсор дальше", page.Next, err)
 	}
 	st.rows = rows[:5] // старых меньше AroundAfter: список кончился
-	if page, _ := s.Around(context.Background(), focus.String()); page.Next != "" {
-		t.Errorf("конец списка: next=%q", page.Next)
+	if page, err := s.Around(context.Background(), focus.String()); err != nil || page.Next != "" {
+		t.Errorf("конец списка: next=%q err=%v", page.Next, err)
 	}
 }

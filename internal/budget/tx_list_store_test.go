@@ -13,7 +13,7 @@ import (
 func seedTxs(t *testing.T, s *Store, cat uuid.UUID, days []int) []uuid.UUID {
 	t.Helper()
 	ctx := t.Context()
-	var ids []uuid.UUID
+	ids := make([]uuid.UUID, 0, len(days))
 	for i, d := range days {
 		id := uuid.New()
 		if _, err := s.pool.Exec(ctx, `INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by)
@@ -79,12 +79,14 @@ func TestListTx(t *testing.T) {
 	if fmt.Sprint(txIDs(got)) != fmt.Sprint(txIDs(all)) {
 		t.Errorf("постраничный обход разошёлся с полным списком:\n%v\n%v", txIDs(got), txIDs(all))
 	}
-	if rows, _ := s.ListTx(ctx, TxListQuery{Text: "ШЛЕМ 3", Limit: 100}); len(rows) != 1 {
-		t.Errorf("поиск «ШЛЕМ 3» без учёта регистра: %d", len(rows))
+	byText, err := s.ListTx(ctx, TxListQuery{Text: "ШЛЕМ 3", Limit: 100})
+	if err != nil || len(byText) != 1 {
+		t.Errorf("поиск «ШЛЕМ 3» без учёта регистра: %d %v", len(byText), err)
 	}
 	from, to := time.Date(2099, 10, 3, 0, 0, 0, 0, time.UTC), time.Date(2099, 10, 4, 0, 0, 0, 0, time.UTC)
-	if rows, _ := s.ListTx(ctx, TxListQuery{Text: "plan-store-test", From: &from, To: &to, Limit: 100}); len(rows) != 2 {
-		t.Errorf("фильтр дат 3–4 октября: %d, ждали 2 (одна в A, одна в B)", len(rows))
+	byDate, err := s.ListTx(ctx, TxListQuery{Text: "plan-store-test", From: &from, To: &to, Limit: 100})
+	if err != nil || len(byDate) != 2 {
+		t.Errorf("фильтр дат 3–4 октября: %d %v, ждали 2 (одна в A, одна в B)", len(byDate), err)
 	}
 }
 

@@ -97,7 +97,9 @@ func TestTx_ListQuery(t *testing.T) {
 
 	f2 := &fakeTxEditor{page: txedit.Page{Rows: []txedit.Tx{{ID: "f"}}}}
 	rec = send(txServer(t, f2), http.MethodGet, "/api/plan/transactions?focus=f&text=игнор&from=2026-10-01", "", goodToken)
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
 	if rec.Code != http.StatusOK || !f2.focused || f2.around != "f" || f2.listed || out.Focus != "f" {
 		t.Errorf("focus: code=%d around=%q listed=%v focus=%q", rec.Code, f2.around, f2.listed, out.Focus)
 	}
