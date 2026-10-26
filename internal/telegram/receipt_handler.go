@@ -99,6 +99,8 @@ func NewHandleReceiptCallback(svc ReceiptService) Handler {
 			switch {
 			case errors.Is(err, receipt.ErrDraftNotFound):
 				return tctx.EditWithButtons(ctx, msgReceiptDraftGone, nil)
+			case errors.Is(err, receipt.ErrDuplicate):
+				return tctx.EditWithButtons(ctx, msgReceiptDuplicate, nil)
 			case err != nil:
 				if tctx.Logger != nil {
 					tctx.Logger.ErrorContext(ctx, "receipt confirm failed", "err", err)

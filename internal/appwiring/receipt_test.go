@@ -37,7 +37,7 @@ func registryWithBudget(t *testing.T) *plugin.Registry {
 // Выключенный сценарий должен давать nil-интерфейс: иначе WithReceiptPhotos
 // не увидит, что он не настроен, и вызовет методы nil-указателя.
 func TestBuildReceipt_WhenDisabled_FlowIsNilInterface(t *testing.T) {
-	got := BuildReceipt(context.Background(), config.ReceiptConfig{Model: "vision"}, registryWithBudget(t), noCategories{}, slog.New(slog.DiscardHandler))
+	got := BuildReceipt(context.Background(), config.ReceiptConfig{Model: "vision"}, registryWithBudget(t), noCategories{}, nil, slog.New(slog.DiscardHandler))
 	if got.Service != nil || got.Catalog != nil {
 		t.Fatalf("disabled config built %+v", got)
 	}
@@ -56,7 +56,7 @@ func TestBuildReceipt_WhenEnabled_LogsCatalog(t *testing.T) {
 	logs := &syncBuffer{}
 	cfg := config.ReceiptConfig{BaseURL: srv.URL, APIKey: "k", Model: "vision", MaxBytes: 1 << 20, Timeout: time.Second, CatalogTTL: time.Minute}
 
-	got := BuildReceipt(context.Background(), cfg, registryWithBudget(t), noCategories{}, slog.New(slog.NewTextHandler(logs, nil)))
+	got := BuildReceipt(context.Background(), cfg, registryWithBudget(t), noCategories{}, nil, slog.New(slog.NewTextHandler(logs, nil)))
 	if got.Service == nil || got.Flow() == nil || got.Catalog == nil {
 		t.Fatalf("enabled config not built: %+v", got)
 	}
@@ -78,7 +78,7 @@ func TestBuildReceipt_DoesNotWaitForSlowProxy(t *testing.T) {
 	cfg := config.ReceiptConfig{BaseURL: srv.URL, APIKey: "k", Model: "vision", MaxBytes: 1 << 20, Timeout: time.Second, CatalogTTL: time.Minute}
 
 	start := time.Now()
-	BuildReceipt(context.Background(), cfg, registryWithBudget(t), noCategories{}, slog.New(slog.DiscardHandler))
+	BuildReceipt(context.Background(), cfg, registryWithBudget(t), noCategories{}, nil, slog.New(slog.DiscardHandler))
 	if d := time.Since(start); d > time.Second {
 		t.Fatalf("BuildReceipt blocked %v on a hanging proxy", d)
 	}
@@ -103,7 +103,7 @@ func (b *syncBuffer) String() string {
 
 func TestBuildReceipt_WithoutBudgetSkill_IsDisabled(t *testing.T) {
 	cfg := config.ReceiptConfig{BaseURL: "http://x", APIKey: "k", Model: "vision"}
-	if got := BuildReceipt(context.Background(), cfg, plugin.NewRegistry(), noCategories{}, slog.New(slog.DiscardHandler)); got.Flow() != nil {
+	if got := BuildReceipt(context.Background(), cfg, plugin.NewRegistry(), noCategories{}, nil, slog.New(slog.DiscardHandler)); got.Flow() != nil {
 		t.Fatal("receipt flow built without budget skill")
 	}
 }

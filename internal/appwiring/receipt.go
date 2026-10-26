@@ -40,7 +40,7 @@ func (r Receipt) Flow() telegram.ReceiptService {
 // BuildReceipt собирает сценарий фото чека (ADR-014). Ошибки не фатальны:
 // без vision-прокси бот должен стартовать как раньше.
 func BuildReceipt(ctx context.Context, cfg config.ReceiptConfig, registry *plugin.Registry,
-	categories budgetadapter.CategorySource, logger *slog.Logger) Receipt {
+	categories budgetadapter.CategorySource, seen receipt.SeenStore, logger *slog.Logger) Receipt {
 	out := Receipt{Model: cfg.Model}
 	if !cfg.Enabled() {
 		logger.Info("receipt photos disabled: VISION_LLM_BASE_URL / VISION_LLM_API_KEY not set")
@@ -67,6 +67,7 @@ func BuildReceipt(ctx context.Context, cfg config.ReceiptConfig, registry *plugi
 		Categories: budgetadapter.NewCategories(categories),
 		Drafts:     memdraft.New(receiptDraftTTL),
 		Writer:     budgetadapter.NewSkillWriter(budgetSkill),
+		Seen:       seen,
 	})
 	// Прокси часто поднимается позже бота: лог не должен задерживать старт.
 	go func() {

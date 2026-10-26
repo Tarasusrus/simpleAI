@@ -19,7 +19,10 @@ type Receipt struct {
 	Total    float64
 	// Category — одна из существующих категорий расхода или пусто.
 	Category string
-	Items    []Item
+	// Reference — номер транзакции или платежа с подтверждения оплаты (приоритет у «Transaction ID»), приведённый
+	// NormalizeReference; пусто, если на фото его нет. По нему один и тот же чек в двух видах не пишется дважды.
+	Reference string
+	Items     []Item
 }
 
 type Item struct {
@@ -48,6 +51,17 @@ type Classifier interface {
 // Parser выбирает только из них, иначе запись создала бы новую категорию.
 type Parser interface {
 	Parse(ctx context.Context, f filecheck.File, categories []string) (Receipt, error)
+}
+
+// ErrDuplicate — чек с таким номером транзакции уже записан.
+var ErrDuplicate = errors.New("receipt: этот чек уже записан")
+
+// SeenStore помнит номера уже записанных чеков по чату. Claim атомарен: из двух одновременных подтверждений одного
+// чека true получит только одно. Release снимает отметку, когда запись расхода не удалась и чек можно прислать снова.
+type SeenStore interface {
+	Seen(ctx context.Context, chatID int64, reference string) (bool, error)
+	Claim(ctx context.Context, chatID int64, reference string) (bool, error)
+	Release(ctx context.Context, chatID int64, reference string) error
 }
 
 // ErrDraftNotFound — черновика нет: истёк, уже записан или отменён, бот

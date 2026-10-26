@@ -33,6 +33,7 @@ import (
 	"simpleAI/internal/observability"
 	"simpleAI/internal/plugin"
 	"simpleAI/internal/rates"
+	"simpleAI/internal/receipt/seenstore"
 	budgetskill "simpleAI/internal/skills/budget"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
@@ -85,7 +86,7 @@ func main() {
 	)
 	defer obsTracer.Close()
 
-	receiptApp := appwiring.BuildReceipt(ctx, cfg.Receipt, registry, budget.NewStore(pool), logger)
+	receiptApp := appwiring.BuildReceipt(ctx, cfg.Receipt, registry, budget.NewStore(pool), seenstore.New(pool), logger)
 
 	// --- Telegram бот ---
 	wg.Add(1)

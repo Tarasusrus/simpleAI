@@ -305,3 +305,13 @@ func TestReceiptCallback_WhenNotConfigured(t *testing.T) {
 		t.Fatalf("edit = %q", bot.lastEdit())
 	}
 }
+
+// Дубль чека — понятный отказ без записи в лог ошибок.
+//
+// Мутация: убрать ветку ErrDuplicate — сообщение станет общим «сбоем» и known=false.
+func TestReceiptErrorMessage_Duplicate(t *testing.T) {
+	msg, known := receiptErrorMessage(receipt.ErrDuplicate)
+	if !known || msg != msgReceiptDuplicate {
+		t.Errorf("дубль: %q known=%v", msg, known)
+	}
+}

@@ -37,6 +37,7 @@ type Service struct {
 	categories CategoryLister
 	drafts     DraftStore
 	writer     ExpenseWriter
+	seen       SeenStore
 }
 
 type Deps struct {
@@ -48,6 +49,8 @@ type Deps struct {
 	Categories CategoryLister
 	Drafts     DraftStore
 	Writer     ExpenseWriter
+	// Seen необязателен: nil — защиты от повторной записи по номеру транзакции нет.
+	Seen SeenStore
 }
 
 func NewService(d Deps) *Service {
@@ -60,6 +63,7 @@ func NewService(d Deps) *Service {
 		categories: d.Categories,
 		drafts:     d.Drafts,
 		writer:     d.Writer,
+		seen:       d.Seen,
 	}
 }
 
@@ -94,6 +98,17 @@ func (s *Service) Process(ctx context.Context, chatID int64, file io.Reader) (Dr
 		return Draft{}, err
 	}
 
+	// Уже записанный чек не доходит до черновика: пользователь сразу видит причину, а не после «Записать».
+	if r.Reference != "" && s.seen != nil {
+		dup, err := s.seen.Seen(ctx, chatID, r.Reference)
+		if err != nil {
+			return Draft{}, fmt.Errorf("receipt: проверка дубля: %w", err)
+		}
+		if dup {
+			return Draft{}, ErrDuplicate
+		}
+	}
+
 	id, err := s.drafts.Put(chatID, r)
 	if err != nil {
 		return Draft{}, err
@@ -109,7 +124,26 @@ func (s *Service) Confirm(ctx context.Context, chatID int64, draftID string) (st
 	if err != nil {
 		return "", err
 	}
-	return s.writer.WriteExpense(ctx, chatID, r)
+	if r.Reference == "" || s.seen == nil {
+		return s.writer.WriteExpense(ctx, chatID, r)
+	}
+	// Номер занимается до записи, атомарно: два подтверждения одного чека не дадут два расхода. Не записалось —
+	// отметка снимается, чтобы чек можно было прислать ещё раз.
+	claimed, err := s.seen.Claim(ctx, chatID, r.Reference)
+	if err != nil {
+		return "", fmt.Errorf("receipt: отметка чека: %w", err)
+	}
+	if !claimed {
+		return "", ErrDuplicate
+	}
+	reply, err := s.writer.WriteExpense(ctx, chatID, r)
+	if err != nil {
+		if rerr := s.seen.Release(ctx, chatID, r.Reference); rerr != nil {
+			return "", fmt.Errorf("%w (снять отметку чека не удалось: %v)", err, rerr)
+		}
+		return "", err
+	}
+	return reply, nil
 }
 
 // Cancel удаляет черновик без записи.
