@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -241,5 +242,21 @@ func TestStatic_MainPageLinksToTransactions(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `href="/transactions"`) {
 		t.Error("на главной нет ссылки на страницу «Транзакции»")
+	}
+}
+
+// Логика формы прихода (ADR-019) проверяется на чистых функциях в node: режимы по дате, обязательный выбор вне
+// окон, что уходит на сервер, подписи. Без node тест пропускается (это НЕ зелёный результат).
+//
+// Мутации: убрать обязательность выбора в canSubmit, отдать true вместо выбранного в opensWindowFor, сдвинуть границу
+// «внутри окна» — краснеют проверки в income_mode_test.mjs.
+func TestJS_IncomeFormMode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node не найден — JS-тест формы прихода пропущен")
+	}
+	out, err := exec.Command(node, "jstest/income_mode_test.mjs").CombinedOutput() //nolint:gosec // фиксированный скрипт из репозитория
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
 	}
 }

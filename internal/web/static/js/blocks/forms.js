@@ -1,6 +1,7 @@
 import { h, field } from '../dom.js';
 import { addIncome, addPayment, getCategories } from '../api.js';
 import { createForm } from './limit-form.js';
+import { incomeMode, opensWindowFor, canSubmit, caption } from './income-mode.js';
 
 // Кнопки «＋ Поступление» / «＋ Платёж» и форма под ними. Всё, что владелец
 // вводит, уходит на сервер как есть; проверку и расчёт делает сервер.
@@ -18,17 +19,39 @@ function incomeForm(view, cur, ctx, status) {
   const amount = h('input', { name: 'amount', type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: '0', required: true, class: 'md' });
   const currency = curSelect(cur);
   const date = h('input', { name: 'date', type: 'date', required: true, class: 'md' });
+  let choice; // true — зарплата/аванс (открывает окно), false — обычный приход; undefined — не выбрано
+  const salary = h('button', { type: 'button', 'data-opens': 'true' }, 'Зарплата или аванс (новое окно)');
+  const regular = h('button', { type: 'button', 'data-opens': 'false' }, 'Обычный приход (в текущее окно)');
+  const seg = h('div', { class: 'seg inc hide', role: 'group', 'aria-label': 'Вид поступления' }, salary, regular);
+  const note = h('div', { class: 'hint' });
+  const save = h('button', { type: 'submit' }, 'Добавить');
+  const refresh = () => {
+    const mode = incomeMode(view, date.value);
+    seg.classList.toggle('hide', mode !== 'ask');
+    salary.classList.toggle('on', choice === true);
+    regular.classList.toggle('on', choice === false);
+    note.textContent = caption(mode, choice, date.value, view);
+    save.disabled = !canSubmit(mode, choice);
+  };
+  salary.addEventListener('click', () => { choice = true; refresh(); });
+  regular.addEventListener('click', () => { choice = false; refresh(); });
+  date.addEventListener('input', refresh);
   const form = h('form', { class: 'top' },
     h('div', { class: 'row' }, h('b', null, 'Ожидаемое поступление')),
     h('div', { class: 'row' },
       field('Название', name, 'wide'), field('Сумма', amount), field('Валюта', currency), field('Когда придёт', date)),
-    h('div', { class: 'hint' }, 'Оно откроет окно на 14 дней с этой даты. Когда придёт — внесёшь факт как обычную транзакцию.'),
+    seg,
+    note,
     status,
-    h('div', { class: 'row' }, h('button', { type: 'submit' }, 'Добавить'), h('button', { type: 'button', class: 'ghost', onclick: () => { open = null; ctx.redraw(); } }, 'Закрыть')));
+    h('div', { class: 'row' }, save, h('button', { type: 'button', class: 'ghost', onclick: () => { open = null; ctx.redraw(); } }, 'Закрыть')));
+  refresh();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const mode = incomeMode(view, date.value);
+    if (!canSubmit(mode, choice)) return;
     await submit(status, () => addIncome(cur, {
       name: name.value, amount: amount.value, currency: currency.value, date: date.value,
+      opensWindow: opensWindowFor(mode, choice),
     }), ctx);
   });
   return form;

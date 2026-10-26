@@ -128,3 +128,6 @@ h2 .rt{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;fon
 .txed .row.top2{margin-top:8px}.txed .sp{flex:1}
 button.ghost.bad{color:var(--bad);border-color:var(--bad)}
 @media(max-width:600px){.tr.txr .td.txd{width:76px}}
+.seg.hide{display:none}
+.seg.inc{display:flex;flex-wrap:wrap;gap:8px}.seg.inc button{border-radius:9px;border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:not-allowed}
