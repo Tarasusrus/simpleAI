@@ -230,3 +230,16 @@ func TestStatic_TransactionLinks(t *testing.T) {
 		}
 	}
 }
+
+// С главной страницы плана есть ссылка на «Транзакции».
+//
+// Мутация: убрать ссылку из index.html — краснеет проверка.
+func TestStatic_MainPageLinksToTransactions(t *testing.T) {
+	b, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `href="/transactions"`) {
+		t.Error("на главной нет ссылки на страницу «Транзакции»")
+	}
+}
