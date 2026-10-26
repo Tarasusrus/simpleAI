@@ -60,6 +60,8 @@ type Server struct {
 	hider CategoryHider
 	// txs — траты категории окна (ADR-015 §6); nil — маршрут отвечает 404.
 	txs CategoryTxPlanner
+	// txEditor — страница «Транзакции» (ADR-018); nil — маршруты отвечают 404.
+	txEditor TxEditor
 }
 
 // New собирает сервер. Невалидный конфиг (в том числе слабый токен) — ошибка:
@@ -102,6 +104,7 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("GET /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleItem)))
 	mux.Handle("PATCH /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleEdit)))
 	s.registerLimitRoutes(mux)
+	s.registerTxRoutes(mux)
 	files := http.FileServerFS(sub)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.

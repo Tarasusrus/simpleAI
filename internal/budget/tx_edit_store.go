@@ -30,17 +30,18 @@ const (
 
 // TxRow — транзакция целиком, как её видит страница «Транзакции».
 type TxRow struct {
-	ID          uuid.UUID
-	Type        string
-	AmountMinor int64
-	Currency    string
-	CategoryID  *uuid.UUID
-	Description string
-	Date        time.Time
-	UpdatedAt   time.Time
-	PlannedID   *uuid.UUID
-	RecurringID *uuid.UUID
-	AddedBy     string
+	ID           uuid.UUID
+	Type         string
+	AmountMinor  int64
+	Currency     string
+	CategoryID   *uuid.UUID
+	CategoryName string // только в выборках с JOIN (GetTxView, ListTx, AroundTx)
+	Description  string
+	Date         time.Time
+	UpdatedAt    time.Time
+	PlannedID    *uuid.UUID
+	RecurringID  *uuid.UUID
+	AddedBy      string
 }
 
 // TxChange — новые значения. Все поля обязательны, кроме CategoryID: nil оставляет категорию как есть.

@@ -11,8 +11,10 @@ import (
 
 	"simpleAI/config"
 	"simpleAI/internal/budget"
+	"simpleAI/internal/categories"
 	"simpleAI/internal/plan"
 	"simpleAI/internal/planrepo"
+	"simpleAI/internal/txedit"
 	"simpleAI/internal/web"
 )
 
@@ -66,7 +68,8 @@ func runPlanWeb(ctx context.Context, cfg config.Config, logger *slog.Logger, poo
 		logger.Warn("plan web not started: invalid config", "reason", err.Error())
 		return
 	}
-	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc).WithCategoryTransactions(svc)
+	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc).WithCategoryTransactions(svc).
+		WithTransactions(txedit.NewService(store, categories.NewStore(pool)))
 	if err := srv.Run(ctx); err != nil {
 		logger.Error("plan web stopped", "err", err)
 	}
