@@ -62,3 +62,4 @@
 {"id":"r057","input":"1570 Бат шлем","expected":{"skill":"budget","action":"add_expense"},"tags":["short_form","no_verb","with_amount","ru"],"notes":"simpleAI-4w5t — 24.10 записалось «перевод 1570 бат» в переводы: «шлем» прочитан как «шлём»"}
 {"id":"r058","input":"шлем 1570 бат","expected":{"skill":"budget","action":"add_expense"},"tags":["short_form","no_verb","with_amount","ru"],"notes":"simpleAI-4w5t — тот же случай, предмет перед суммой"}
 {"id":"r059","input":"200 кофе","expected":{"skill":"budget","action":"add_expense"},"tags":["short_form","no_verb","with_amount","ru"],"notes":"simpleAI-4w5t — краткая запись без глагола не должна ломаться правилом 8"}
+{"id":"r060","input":"хочу блендер 3000","expected":{"skill":"advisor","action":"advice"},"tags":["short_form","future_purchase","with_amount","ru"],"notes":"simpleAI-4w5t — краткая запись не должна перехватывать будущую покупку"}
