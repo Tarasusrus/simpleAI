@@ -87,7 +87,7 @@ func Compute(in ComputeInput) (View, error) {
 }
 
 // checkWindows проверяет контракт окон: по возрастанию, без пересечений, с
-// корректным стартом, и только поступления внутри своего окна. Locate и
+// корректным стартом, и только открывающие поступления внутри своего окна. Locate и
 // ResolveWindow на других окнах молча дали бы неверное состояние.
 func checkWindows(ws []Window) error {
 	for i, w := range ws {
@@ -101,7 +101,8 @@ func checkWindows(ws []Window) error {
 			if e.Kind != KindIncome {
 				return fmt.Errorf("%w: в окне %d не поступление: %q", ErrInvalidEvent, i, e.Key)
 			}
-			if e.Date != nil && (e.Date.Compare(w.Start) < 0 || e.Date.Compare(w.End()) > 0) {
+			// Обычный приход (JoinsWindow) может лежать вне своего окна: он привязан к окну по дате (ADR-019).
+			if !e.JoinsWindow && e.Date != nil && (e.Date.Compare(w.Start) < 0 || e.Date.Compare(w.End()) > 0) {
 				return fmt.Errorf("%w: поступление %q вне окна %d", ErrInvalidEvent, e.Key, i)
 			}
 		}

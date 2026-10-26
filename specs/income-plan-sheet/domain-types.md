@@ -37,7 +37,7 @@ type Event struct {
   WindowStart *Date   // учитывается ТОЛЬКО при Date==nil
   Category    string  // пусто = «Без категории»
   Source      Source
-  OpensWindow bool    // только у Kind=income: true — зарплата/аванс, открывает окно; false — обычный приход, попадает в окно по дате (ADR-019). У старых строк и у бота true
+  JoinsWindow bool    // только у Kind=income: false (ноль) — зарплата/аванс, открывает окно; true — обычный приход, попадает в окно по дате (ADR-019). В базе колонка opens_window (= !JoinsWindow); поле инвертировано, чтобы нулевое значение оставалось прежним поведением
   RuleID      string  // пусто = разовое
   ScheduledFor *Date  // срок правила, к которому относится факт или плановое
 }
