@@ -260,3 +260,44 @@ func TestJS_IncomeFormMode(t *testing.T) {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 }
+
+// opensWindow в PATCH: false/true доходят до сервиса, нет поля — nil; ответ несёт opensWindow; вид у расхода — 400.
+//
+// Мутации: не разбирать поле, не отдавать его в DTO, не мапить ErrNotIncome — краснеют проверки.
+func TestTx_EditOpensWindow(t *testing.T) {
+	f := &fakeTxEditor{row: txedit.Tx{ID: "id1", Kind: "income", OpensWindow: false, Amount: plan.Money{Minor: 100, Cur: plan.CurRUB}}}
+	s := txServer(t, f)
+	body := strings.Replace(goodEdit, `"category":"Одежда"`, `"category":"","opensWindow":false`, 1)
+	rec := send(s, http.MethodPatch, "/api/plan/transactions/id1", body, goodToken)
+	if rec.Code != http.StatusOK || f.edit == nil || f.edit.OpensWindow == nil || *f.edit.OpensWindow {
+		t.Fatalf("false: код %d, вход %+v", rec.Code, f.edit)
+	}
+	var row TxRowDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil || row.OpensWindow {
+		t.Errorf("ответ: %+v %v", row, err)
+	}
+	f.row.OpensWindow = true
+	rec = send(s, http.MethodPatch, "/api/plan/transactions/id1", goodEdit, goodToken)
+	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil || !row.OpensWindow || f.edit.OpensWindow != nil {
+		t.Errorf("без поля: вход %v, ответ %+v %v", f.edit.OpensWindow, row, err)
+	}
+	f.err = txedit.ErrNotIncome
+	if rec := send(s, http.MethodPatch, "/api/plan/transactions/id1", body, goodToken); rec.Code != http.StatusBadRequest {
+		t.Errorf("вид у расхода: %d, ждали 400", rec.Code)
+	}
+}
+
+// Страница «Транзакции» показывает вид прихода бейджем и даёт его сменить с подтверждением (ADR-019).
+//
+// Мутация: убрать бейдж, поле opensWindow в теле или confirm — краснеет проверка.
+func TestStatic_TransactionsPageIncomeKind(t *testing.T) {
+	b, err := staticFS.ReadFile("static/js/transactions.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"открывает окно", "обычный приход", "body.opensWindow", "confirm(", "Вид прихода"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("transactions.js: нет %q", want)
+		}
+	}
+}

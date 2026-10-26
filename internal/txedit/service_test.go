@@ -216,3 +216,32 @@ func TestAround_NextCursor(t *testing.T) {
 		t.Errorf("конец списка: next=%q err=%v", page.Next, err)
 	}
 }
+
+// Вид прихода (ADR-019): передаётся хранилищу как есть, у расхода отклоняется до записи.
+//
+// Мутации: не передавать OpensWindow в TxChange; убрать проверку типа — краснеют проверки.
+func TestEdit_OpensWindow(t *testing.T) {
+	s, st, _ := setup()
+	f := false
+	in := valid("")
+	in.OpensWindow = &f
+	if _, err := s.Edit(context.Background(), in); !errors.Is(err, ErrNotIncome) || st.gotEdit != nil {
+		t.Fatalf("расход с видом прихода: %v, дошло до хранилища: %v", err, st.gotEdit != nil)
+	}
+	st.row.Type = "income"
+	if _, err := s.Edit(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if st.gotEdit == nil || st.gotEdit.OpensWindow == nil || *st.gotEdit.OpensWindow {
+		t.Errorf("вид прихода не дошёл до хранилища: %+v", st.gotEdit)
+	}
+	st.gotEdit = nil
+	in.OpensWindow = nil
+	if _, err := s.Edit(context.Background(), in); err != nil || st.gotEdit.OpensWindow != nil {
+		t.Errorf("без вида: err=%v %+v", err, st.gotEdit)
+	}
+	st.row.OpensWindow = true
+	if got, err := s.Get(context.Background(), uuid.New().String()); err != nil || !got.OpensWindow {
+		t.Errorf("Tx.OpensWindow не заполнен: %+v %v", got, err)
+	}
+}

@@ -44,6 +44,8 @@ type TxRowDTO struct {
 	Linked      bool   `json:"linked"`
 	FromRule    bool   `json:"fromRule"`
 	AddedBy     string `json:"addedBy"`
+	// OpensWindow — у прихода: открывает окно (зарплата, аванс) или нет (обычный приход, ADR-019); у расхода false.
+	OpensWindow bool `json:"opensWindow"`
 }
 
 // TxPageDTO — страница списка. Focus — id строки, на которую открыли страницу по ссылке (пусто — обычный список).
@@ -57,7 +59,7 @@ func txRow(t txedit.Tx) TxRowDTO {
 	return TxRowDTO{
 		ID: t.ID, Kind: t.Kind, Amount: decimal(t.Amount.Minor), Currency: string(t.Amount.Cur), Category: t.Category,
 		Description: t.Description, Date: dateStr(t.Date), Version: t.Version,
-		Linked: t.Linked, FromRule: t.FromRule, AddedBy: t.AddedBy,
+		Linked: t.Linked, FromRule: t.FromRule, AddedBy: t.AddedBy, OpensWindow: t.OpensWindow,
 	}
 }
 
@@ -142,6 +144,8 @@ type txEditBody struct {
 	Currency    string      `json:"currency"`
 	Date        string      `json:"date"`
 	Category    string      `json:"category"`
+	// OpensWindow — только у прихода; нет поля — вид не меняется.
+	OpensWindow *bool `json:"opensWindow"`
 }
 
 var errTxFields = errors.New("web: нужны version, description, amount, currency, date")
@@ -159,7 +163,7 @@ func (b txEditBody) input(id string) (txedit.Input, error) {
 		return txedit.Input{}, err
 	}
 	return txedit.Input{
-		ID: id, Version: b.Version, Description: b.Description, Category: b.Category,
+		ID: id, Version: b.Version, Description: b.Description, Category: b.Category, OpensWindow: b.OpensWindow,
 		Amount: plan.Money{Minor: minor, Cur: plan.Currency(strings.ToUpper(strings.TrimSpace(b.Currency)))}, Date: d,
 	}, nil
 }
@@ -213,6 +217,8 @@ func (s *Server) writeTxError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "Неверный id, версия или курсор.")
 	case errors.Is(err, txedit.ErrUnknownCategory):
 		writeError(w, http.StatusBadRequest, "Такой категории нет. Выберите из списка.")
+	case errors.Is(err, txedit.ErrNotIncome):
+		writeError(w, http.StatusBadRequest, "Вид «открывает окно» есть только у прихода.")
 	case errors.Is(err, txedit.ErrCategoryRetired):
 		writeError(w, http.StatusBadRequest, "Эта категория разделена на другие. Выберите одну из них.")
 	case errors.Is(err, errTxFields):

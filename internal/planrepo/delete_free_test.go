@@ -127,3 +127,61 @@ func tp(y int, m time.Month, d int) *time.Time {
 	t := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	return &t
 }
+
+// Смена вида прихода пересобирает окна (ADR-019): приход после конца окна как «зарплата» открывает второе окно,
+// как «обычный приход» входит в первое. Сквозной тест на БД: правка флага через EditTx → ридер → расчёт окна.
+//
+// Мутации: не писать opens_window в EditTx; читать флаг в ридере как всегда true — краснеют проверки.
+func TestEditOpensWindow_RebuildsWindows(t *testing.T) {
+	url := os.Getenv("BOTCLIENT_DATABASE_URL_RW")
+	if url == "" {
+		t.Skip("BOTCLIENT_DATABASE_URL_RW не задан — DB-тест пропущен (это НЕ зелёный результат)")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	store := budget.NewStore(pool)
+	today := plan.Date{Year: 2099, Month: 11, Day: 12}
+	svc := plan.NewService(
+		NewReader(store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithLimits(store).WithDismissed(store),
+		NewWriter(store), func() plan.Date { return today }, plan.Scope{ChatIDs: []int64{-880002}})
+	cleanup := func() {
+		pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'opens-test%'`) //nolint:errcheck // очистка после теста
+		pool.Exec(ctx, `DELETE FROM budget_transaction WHERE description LIKE 'opens-test%'`)     //nolint:errcheck // очистка после теста
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	salary, bike := uuid.New(), uuid.New()
+	for id, r := range map[uuid.UUID][2]string{salary: {"opens-test зарплата", "2099-10-05"}, bike: {"opens-test байк", "2099-11-10"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO budget_transaction (id, type, amount, currency, description, transaction_date, added_by)
+			VALUES ($1, 'income', 1000, 'RUB', $2, $3, 'bot')`, id, r[0], r[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := func() plan.Date {
+		t.Helper()
+		res, err := svc.ViewWith(ctx, plan.CurRUB, plan.ViewOptions{ShowPast: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.View.Window.Start
+	}
+	if got := start(); got != (plan.Date{Year: 2099, Month: 11, Day: 10}) {
+		t.Fatalf("оба прихода открывающие: текущее окно с %v, ждали 2099-11-10", got)
+	}
+	row, err := store.GetTx(ctx, bike)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := false
+	if _, err := store.EditTx(ctx, bike, row.UpdatedAt, budget.TxSourceWeb, budget.TxChange{
+		Description: row.Description, AmountMinor: row.AmountMinor, Currency: row.Currency, Date: row.Date, OpensWindow: &f}); err != nil {
+		t.Fatal(err)
+	}
+	if got := start(); got != (plan.Date{Year: 2099, Month: 10, Day: 5}) {
+		t.Errorf("байк стал обычным приходом: окно с %v, ждали 2099-10-05 (второе окно не открывается)", got)
+	}
+}

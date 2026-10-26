@@ -42,6 +42,7 @@ type TxRow struct {
 	PlannedID    *uuid.UUID
 	RecurringID  *uuid.UUID
 	AddedBy      string
+	OpensWindow  bool // приход открывает окно (ADR-019)
 }
 
 // TxChange — новые значения. Все поля обязательны, кроме CategoryID: nil оставляет категорию как есть.
@@ -51,15 +52,18 @@ type TxChange struct {
 	Currency    string
 	Date        time.Time
 	CategoryID  *uuid.UUID
+	// OpensWindow — вид прихода (ADR-019): true — зарплата/аванс, открывает окно; false — обычный приход; nil —
+	// не менять. У расходов значение не используется, но хранится как есть.
+	OpensWindow *bool
 }
 
 const txColumns = `id, type, ROUND(amount * 100)::bigint, currency, category_id, description, transaction_date,
-	updated_at, planned_id, recurring_id, COALESCE(added_by, '')`
+	updated_at, planned_id, recurring_id, COALESCE(added_by, ''), opens_window`
 
 func scanTx(row pgx.Row) (TxRow, error) {
 	var x TxRow
 	err := row.Scan(&x.ID, &x.Type, &x.AmountMinor, &x.Currency, &x.CategoryID, &x.Description, &x.Date,
-		&x.UpdatedAt, &x.PlannedID, &x.RecurringID, &x.AddedBy)
+		&x.UpdatedAt, &x.PlannedID, &x.RecurringID, &x.AddedBy, &x.OpensWindow)
 	return x, err
 }
 
@@ -129,12 +133,13 @@ func applyEdit(ctx context.Context, tx pgx.Tx, id uuid.UUID, source string, befo
 			    amount           = $3::bigint::numeric / 100,
 			    currency         = $4,
 			    transaction_date = $5,
-			    category_id      = COALESCE($6, category_id)
+			    category_id      = COALESCE($6, category_id),
+			    opens_window     = COALESCE($7, opens_window)
 			WHERE id = $1
 			RETURNING *
 		)
 		SELECT to_jsonb(upd) FROM upd`,
-		id, c.Description, c.AmountMinor, c.Currency, c.Date, c.CategoryID).Scan(&after)
+		id, c.Description, c.AmountMinor, c.Currency, c.Date, c.CategoryID, c.OpensWindow).Scan(&after)
 	if err != nil {
 		return fmt.Errorf("edit tx: update: %w", err)
 	}
