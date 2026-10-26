@@ -23,6 +23,20 @@ func TestMigration00028_TxEditLog(t *testing.T) {
 		t.Errorf("updated_at не заполнен по умолчанию: %d", n)
 	}
 
+	// Версия растёт при любом UPDATE, в том числе чужом (бот, воркер), а не только из кода страницы.
+	var before, after string
+	q := `SELECT updated_at::text FROM budget_transaction WHERE id='11111111-1111-1111-1111-111111111111'`
+	if err := conn.QueryRow(q).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, conn, `UPDATE budget_transaction SET description='x' WHERE id='11111111-1111-1111-1111-111111111111'`)
+	if err := conn.QueryRow(q).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Error("UPDATE не изменил updated_at: оптимистичная блокировка не увидит чужую правку")
+	}
+
 	ins := `INSERT INTO tx_edit_log (id, tx_id, action, before, after, source) VALUES (gen_random_uuid(), '11111111-1111-1111-1111-111111111111', $1, '{"amount":10}', $2::jsonb, 'web')`
 	mustExec(t, conn, ins, "edit", `{"amount":20}`)
 	if _, err := conn.Exec(ins, "rename", `{"amount":20}`); err == nil {
@@ -46,6 +60,9 @@ func TestMigration00028_TxEditLog(t *testing.T) {
 	}
 	if n := count(t, conn, `SELECT count(*) FROM information_schema.tables WHERE table_name='tx_edit_log'`); n != 0 {
 		t.Error("Down оставил таблицу")
+	}
+	if n := count(t, conn, `SELECT count(*) FROM pg_trigger WHERE tgname='trg_budget_transaction_touch'`); n != 0 {
+		t.Error("Down оставил триггер")
 	}
 	if n := count(t, conn, `SELECT count(*) FROM information_schema.columns WHERE table_name='budget_transaction' AND column_name='updated_at'`); n != 0 {
 		t.Error("Down оставил updated_at")

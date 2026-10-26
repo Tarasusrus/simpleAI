@@ -24,11 +24,27 @@ CREATE TABLE IF NOT EXISTS tx_edit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tx_edit_log_tx ON tx_edit_log (tx_id, created_at);
+
+-- Версия обязана расти при ЛЮБОМ UPDATE, а не только в коде страницы: бот и воркер повторов пишут в эту же
+-- таблицу своими запросами, и без триггера оптимистичная блокировка их правок не увидит.
+CREATE OR REPLACE FUNCTION budget_transaction_touch() RETURNS trigger AS $fn$
+BEGIN
+    NEW.updated_at := clock_timestamp();
+    RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_budget_transaction_touch ON budget_transaction;
+CREATE TRIGGER trg_budget_transaction_touch
+    BEFORE UPDATE ON budget_transaction
+    FOR EACH ROW EXECUTE FUNCTION budget_transaction_touch();
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 -- Откат теряет журнал: снимки удалённых транзакций пропадут вместе с таблицей. Сами транзакции не затрагиваются.
+DROP TRIGGER IF EXISTS trg_budget_transaction_touch ON budget_transaction;
+DROP FUNCTION IF EXISTS budget_transaction_touch();
 DROP INDEX IF EXISTS idx_tx_edit_log_tx;
 DROP TABLE IF EXISTS tx_edit_log;
 ALTER TABLE budget_transaction DROP COLUMN IF EXISTS updated_at;
