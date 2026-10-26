@@ -731,8 +731,8 @@ func (s *Store) CreateRecurringTransaction(ctx context.Context, t Transaction, r
 	}
 	if !exists {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO budget_transaction (id, recurring_id, type, amount, currency, category_id, description, transaction_date)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO budget_transaction (id, recurring_id, type, amount, currency, category_id, description, transaction_date, opens_window)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE((SELECT opens_window FROM budget_recurring WHERE id = $2), true))
 		`, t.ID, recurringID, t.Type, t.Amount, t.Currency, t.CategoryID, t.Description, t.Date); err != nil {
 			return fmt.Errorf("insert transaction: %w", err)
 		}

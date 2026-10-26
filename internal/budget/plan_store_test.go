@@ -354,3 +354,89 @@ func TestMovePlanItem(t *testing.T) {
 		t.Error("дата и окно вместе приняты")
 	}
 }
+
+// Признак «открывает окно» (ADR-019) сквозь хранилище: AddPlanItem пишет его, чтение видит, «пришло» копирует в факт,
+// факт правила прихода наследует флаг правила, строки без флага читаются как открывающие.
+//
+// Мутации: не писать opens_window в AddPlanItem (всё true), не копировать при Settle, не наследовать в
+// CreateRecurringTransaction, NOT $9 → $9 (инверсия) — краснеют соответствующие проверки.
+func TestOpensWindow_StoreRoundTrip(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	add := func(desc string, joins bool) uuid.UUID {
+		id, err := s.AddPlanItem(ctx, PlanItemInput{ChatID: planStoreChat, Direction: "income", Description: desc,
+			AmountMinor: ptrInt64(10000), Currency: "RUB", DueDate: &day, JoinsWindow: joins})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	salary, bike := add("plan-store-test зарплата", false), add("plan-store-test байк", true)
+	planned, err := s.PlanPlannedItems(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[uuid.UUID]bool{}
+	for _, p := range planned {
+		got[p.ID] = p.OpensWindow
+	}
+	if !got[salary] || got[bike] {
+		t.Errorf("плановые: зарплата opens=%v, байк opens=%v, ждали true/false", got[salary], got[bike])
+	}
+	for _, id := range []uuid.UUID{salary, bike} {
+		if ok, err := s.SettlePlanItem(ctx, []int64{planStoreChat}, id, nil, day); err != nil || !ok {
+			t.Fatalf("settle: %v %v", ok, err)
+		}
+	}
+	var openSalary, openBike bool
+	for id, dst := range map[uuid.UUID]*bool{salary: &openSalary, bike: &openBike} {
+		if err := s.pool.QueryRow(ctx, `SELECT opens_window FROM budget_transaction WHERE planned_id = $1`, id).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !openSalary || openBike {
+		t.Errorf("факты после «пришло»: зарплата opens=%v, байк opens=%v, ждали true/false", openSalary, openBike)
+	}
+
+	rule := uuid.New()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_recurring (id, chat_id, name, type, amount, recurrence_type, day_of_month, next_date, opens_window)
+		VALUES ($1, $2, 'plan-store-test rule', 'income', 1, 'monthly', 1, '2026-03-01', false)`, rule, planStoreChat); err != nil {
+		t.Fatal(err)
+	}
+	fact := Transaction{ID: uuid.New(), Type: "income", Amount: 5, Currency: "RUB", Description: "plan-store-test fact rule", Date: day}
+	if err := s.CreateRecurringTransaction(ctx, fact, rule, day.AddDate(0, 1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var ruleFactOpens bool
+	if err := s.pool.QueryRow(ctx, `SELECT opens_window FROM budget_transaction WHERE id = $1`, fact.ID).Scan(&ruleFactOpens); err != nil || ruleFactOpens {
+		t.Errorf("факт правила прихода не унаследовал false: %v %v", ruleFactOpens, err)
+	}
+	txs, err := s.PlanTransactions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen bool
+	for _, x := range txs {
+		if x.ID == fact.ID {
+			seen = true
+			if x.OpensWindow {
+				t.Error("PlanTransactions отдал факт правила как открывающий")
+			}
+		}
+	}
+	if !seen {
+		t.Error("факт правила не прочитан")
+	}
+	rules, err := s.PlanRecurringRules(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.ID == rule && r.OpensWindow {
+			t.Error("PlanRecurringRules отдал правило как открывающее")
+		}
+	}
+}
+
+func ptrInt64(n int64) *int64 { return &n }

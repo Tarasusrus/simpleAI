@@ -190,3 +190,62 @@ func TestRead_PlannedAndRules(t *testing.T) {
 		t.Errorf("Expand: %v", err)
 	}
 }
+
+// Флаг opens_window превращается в Event.JoinsWindow у фактов, плановых приходов и правил прихода; у расходов
+// он не используется (ADR-019).
+//
+// Мутации: убрать JoinsWindow в txEvent / plannedEvent / ruleEvent — краснеет соответствующая проверка;
+// не проверять Kind (флаг у расхода) — краснеет «расход».
+func TestRead_OpensWindowFlag(t *testing.T) {
+	id := uuid.New
+	f := &fakeSource{
+		txs: []budget.PlanTx{
+			{ID: id(), Type: "income", AmountMinor: 100, Currency: "RUB", Date: day(2026, 10, 5), OpensWindow: true},
+			{ID: id(), Type: "income", AmountMinor: 200, Currency: "RUB", Date: day(2026, 10, 6), OpensWindow: false},
+			{ID: id(), Type: "expense", AmountMinor: 300, Currency: "RUB", Date: day(2026, 10, 7), OpensWindow: false},
+		},
+		planned: []budget.PlanPlanned{
+			{ID: id(), Direction: "income", Description: "аванс", Currency: "RUB", AmountMinor: ptrI64(400), DueDate: ptrT(day(2026, 10, 20)), OpensWindow: true},
+			{ID: id(), Direction: "income", Description: "байк", Currency: "RUB", AmountMinor: ptrI64(500), DueDate: ptrT(day(2026, 10, 21)), OpensWindow: false},
+		},
+		rules: []budget.PlanRecurring{
+			{ID: id(), Name: "аренда жильцов", Type: "income", Currency: "RUB", AmountMinor: 600, IntervalN: 1, IntervalUnit: "month", Anchor: day(2026, 10, 1), OpensWindow: false},
+		},
+		rates: map[string]float64{"THB": 2.5},
+	}
+	snap, err := newReader(f).Read(context.Background(), plan.Scope{ChatIDs: []int64{1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joins := map[string]bool{}
+	for _, e := range snap.Incomes {
+		joins[e.Name] = e.JoinsWindow
+	}
+	if joins["аванс"] || !joins["байк"] {
+		t.Errorf("плановые приходы: аванс=%v байк=%v, ждали false/true", joins["аванс"], joins["байк"])
+	}
+	var factOpen, factJoin int
+	for _, e := range snap.Incomes {
+		if e.Source == plan.SourceTransaction {
+			if e.JoinsWindow {
+				factJoin++
+			} else {
+				factOpen++
+			}
+		}
+	}
+	if factOpen != 1 || factJoin != 1 {
+		t.Errorf("факты прихода: открывающих %d, обычных %d, ждали 1/1", factOpen, factJoin)
+	}
+	for _, e := range snap.Payments {
+		if e.JoinsWindow {
+			t.Errorf("у расхода %q выставлен JoinsWindow", e.Name)
+		}
+	}
+	if len(snap.Rules) != 1 || !snap.Rules[0].JoinsWindow {
+		t.Errorf("правило прихода: %+v", snap.Rules)
+	}
+}
+
+func ptrI64(n int64) *int64       { return &n }
+func ptrT(t time.Time) *time.Time { return &t }

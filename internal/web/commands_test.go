@@ -307,3 +307,25 @@ func TestMove(t *testing.T) {
 		t.Errorf("лог: %s", logs.String())
 	}
 }
+
+// opensWindow в теле прихода: false — обычный приход (JoinsWindow), нет поля или true — прежнее поведение.
+//
+// Мутации: игнорировать поле, инвертировать условие, трактовать отсутствие как false — краснеют кейсы.
+func TestAddIncome_OpensWindowFlag(t *testing.T) {
+	cases := map[string]bool{
+		`"opensWindow":false,`: true,
+		`"opensWindow":true,`:  false,
+		``:                     false,
+	}
+	for field, wantJoins := range cases {
+		p := &fakePlanner{}
+		s, _ := newServer(t, p)
+		body := `{` + field + `"name":"байк","amount":4000,"currency":"rub","date":"2026-03-20"}`
+		if rec := post(s, "/api/plan/income", "application/json", body, goodToken); rec.Code != http.StatusCreated {
+			t.Fatalf("%q: код %d: %s", field, rec.Code, rec.Body.String())
+		}
+		if len(p.incomes) != 1 || p.incomes[0].JoinsWindow != wantJoins {
+			t.Errorf("%q: JoinsWindow=%v, ждали %v", field, p.incomes[0].JoinsWindow, wantJoins)
+		}
+	}
+}
