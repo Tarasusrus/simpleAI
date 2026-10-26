@@ -19,6 +19,9 @@ type incomeBody struct {
 	Amount   json.Number `json:"amount"`
 	Currency string      `json:"currency"`
 	Date     string      `json:"date"`
+	// OpensWindow — зарплата/аванс открывают окно (true), обычный приход нет (false). Нет поля — true, как раньше:
+	// старые клиенты ведут себя прежне (ADR-019).
+	OpensWindow *bool `json:"opensWindow"`
 }
 
 type paymentBody struct {
@@ -142,7 +145,9 @@ func (s *Server) handleAddIncome(w http.ResponseWriter, r *http.Request) {
 		s.writeCommandError(w, plan.ErrIncomeNoDate)
 		return
 	}
-	id, err := s.planner.AddIncome(r.Context(), plan.AddIncomeInput{Name: b.Name, Amount: money, Date: date})
+	id, err := s.planner.AddIncome(r.Context(), plan.AddIncomeInput{
+		Name: b.Name, Amount: money, Date: date, JoinsWindow: b.OpensWindow != nil && !*b.OpensWindow,
+	})
 	if err != nil {
 		s.writeCommandError(w, err)
 		return

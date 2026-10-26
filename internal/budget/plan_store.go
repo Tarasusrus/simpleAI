@@ -37,6 +37,9 @@ type PlanTx struct {
 	AddedBy string
 	// PlannedID — плановая запись, которую закрыл факт; у старых строк и чужих NULL.
 	PlannedID *uuid.UUID
+	// OpensWindow — приход открывает окно (зарплата, аванс); false — обычный приход (ADR-019). Читает только
+	// PlanTransactions; у расходов значение не используется.
+	OpensWindow bool
 }
 
 // PlanRecurring — включённое повторяющееся правило в новом описании (шаг, якорь).
@@ -54,6 +57,7 @@ type PlanRecurring struct {
 	DayOfMonth   *int
 	Until        *time.Time
 	Skipped      []time.Time
+	OpensWindow  bool // правило прихода: порождённые факты и план наследуют (ADR-019)
 }
 
 // PlanPlanned — незакрытая плановая запись (расход или поступление).
@@ -67,6 +71,7 @@ type PlanPlanned struct {
 	AmountMinor *int64 // nil — сумма неизвестна («Права»)
 	DueDate     *time.Time
 	WindowStart *time.Time
+	OpensWindow bool // у поступления: открывает окно (ADR-019)
 }
 
 // PlanTransactions возвращает ВСЕ транзакции: поступления нужны с самого начала
@@ -76,7 +81,7 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id, t.type, ROUND(t.amount * 100)::bigint, t.currency, COALESCE(c.name, ''),
 		       t.description, t.transaction_date, t.recurring_id, t.scheduled_for,
-		       COALESCE(t.added_by, ''), t.planned_id
+		       COALESCE(t.added_by, ''), t.planned_id, t.opens_window
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		ORDER BY t.transaction_date, t.created_at, t.id`)
@@ -88,7 +93,7 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	for rows.Next() {
 		var x PlanTx
 		if err := rows.Scan(&x.ID, &x.Type, &x.AmountMinor, &x.Currency, &x.Category,
-			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor, &x.AddedBy, &x.PlannedID); err != nil {
+			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor, &x.AddedBy, &x.PlannedID, &x.OpensWindow); err != nil {
 			return nil, fmt.Errorf("plan transactions scan: %w", err)
 		}
 		out = append(out, x)
@@ -104,7 +109,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 		SELECT r.id, r.chat_id, r.name, r.type, COALESCE(c.name, ''), r.currency,
 		       ROUND(r.amount * 100)::bigint, r.interval_n,
 		       COALESCE(r.interval_unit, CASE r.recurrence_type WHEN 'weekly' THEN 'week' WHEN 'daily' THEN 'day' ELSE 'month' END),
-		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates
+		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates, r.opens_window
 		FROM budget_recurring r
 		LEFT JOIN budget_category c ON c.id = r.category_id
 		WHERE r.enabled AND r.chat_id = ANY($1)
@@ -117,7 +122,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 	for rows.Next() {
 		var x PlanRecurring
 		if err := rows.Scan(&x.ID, &x.ChatID, &x.Name, &x.Type, &x.Category, &x.Currency,
-			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped); err != nil {
+			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped, &x.OpensWindow); err != nil {
 			return nil, fmt.Errorf("plan recurring scan: %w", err)
 		}
 		out = append(out, x)
@@ -130,7 +135,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 func (s *Store) PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]PlanPlanned, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.chat_id, p.direction, p.description, p.currency, COALESCE(c.name, ''),
-		       ROUND(p.amount * 100)::bigint, p.due_date, p.window_start
+		       ROUND(p.amount * 100)::bigint, p.due_date, p.window_start, p.opens_window
 		FROM budget_planned_expense p
 		LEFT JOIN budget_category c ON c.id = p.category_id
 		WHERE NOT p.settled AND p.chat_id = ANY($1)
@@ -143,7 +148,7 @@ func (s *Store) PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]PlanPl
 	for rows.Next() {
 		var x PlanPlanned
 		if err := rows.Scan(&x.ID, &x.ChatID, &x.Direction, &x.Description, &x.Currency, &x.Category,
-			&x.AmountMinor, &x.DueDate, &x.WindowStart); err != nil {
+			&x.AmountMinor, &x.DueDate, &x.WindowStart, &x.OpensWindow); err != nil {
 			return nil, fmt.Errorf("plan planned scan: %w", err)
 		}
 		out = append(out, x)
@@ -190,6 +195,8 @@ type PlanItemInput struct {
 	Category    string // имя категории расходов; пусто — без категории
 	DueDate     *time.Time
 	WindowStart *time.Time
+	// JoinsWindow — обычный приход, окна не открывает (ADR-019). Ноль — прежнее поведение: открывает.
+	JoinsWindow bool
 }
 
 // AddPlanItem сохраняет плановую запись одной командой (одна транзакция БД).
@@ -203,13 +210,13 @@ func (s *Store) AddPlanItem(ctx context.Context, in PlanItemInput) (uuid.UUID, e
 	var id uuid.UUID
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO budget_planned_expense
-		    (chat_id, direction, description, amount, currency, due_date, window_start, category_id)
+		    (chat_id, direction, description, amount, currency, due_date, window_start, category_id, opens_window)
 		VALUES ($1, $2, $3,
 		        CASE WHEN $4::bigint IS NULL THEN NULL ELSE $4::bigint::numeric / 100 END,
 		        $5, $6, $7,
-		        $8::uuid)
+		        $8::uuid, NOT $9::boolean)
 		RETURNING id`,
-		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, catID).Scan(&id)
+		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, catID, in.JoinsWindow).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("add plan item: %w", err)
 	}
@@ -266,12 +273,13 @@ func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		direction, currency, description string
 		amount                           *int64
 		categoryID                       *uuid.UUID
+		opensWindow                      bool
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT direction, currency, description, ROUND(amount * 100)::bigint, category_id
+		SELECT direction, currency, description, ROUND(amount * 100)::bigint, category_id, opens_window
 		FROM budget_planned_expense
 		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled
-		FOR UPDATE`, id, chatIDs).Scan(&direction, &currency, &description, &amount, &categoryID)
+		FOR UPDATE`, id, chatIDs).Scan(&direction, &currency, &description, &amount, &categoryID, &opensWindow)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -285,9 +293,9 @@ func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		return false, fmt.Errorf("settle plan item: нет суммы")
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by, planned_id)
-		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, $8, $9)`,
-		uuid.New(), direction, *amount, currency, categoryID, description, date, AddedByWeb, id); err != nil {
+		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by, planned_id, opens_window)
+		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, $8, $9, $10)`,
+		uuid.New(), direction, *amount, currency, categoryID, description, date, AddedByWeb, id, opensWindow); err != nil {
 		return false, fmt.Errorf("settle plan item: transaction: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE budget_planned_expense SET settled = true WHERE id = $1`, id); err != nil {

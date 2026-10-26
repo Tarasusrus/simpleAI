@@ -418,3 +418,22 @@ func TestService_Move(t *testing.T) {
 		t.Errorf("без писателя: %v", err)
 	}
 }
+
+// Признак «обычный приход» доходит до писателя (ADR-019): без него приход открывает окно, как раньше.
+//
+// Мутация: не копировать JoinsWindow в NewItem — краснеет «обычный приход».
+func TestService_AddIncome_JoinsWindowReachesWriter(t *testing.T) {
+	w := &fakeWriter{}
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 3, 10))
+	for _, c := range []struct {
+		name  string
+		joins bool
+	}{{"зарплата", false}, {"байк", true}} {
+		if _, err := s.AddIncome(context.Background(), AddIncomeInput{Name: c.name, Amount: *rub(1000), Date: d(2026, 3, 20), JoinsWindow: c.joins}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(w.added) != 2 || w.added[0].JoinsWindow || !w.added[1].JoinsWindow {
+		t.Errorf("флаг у писателя: %+v", w.added)
+	}
+}

@@ -54,6 +54,8 @@ type NewItem struct {
 	Date        *Date
 	WindowStart *Date
 	Category    string // только у платежа; пусто = без категории
+	// JoinsWindow — только у поступления: обычный приход, окна не открывает (ADR-019).
+	JoinsWindow bool
 }
 
 // maxAmountMinor — потолок суммы записи: 1 000 000 000 в основных единицах. Без него

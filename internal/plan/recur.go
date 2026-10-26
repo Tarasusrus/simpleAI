@@ -41,6 +41,7 @@ type Rule struct {
 type RuleWithExceptions struct {
 	ID, Name, Category string
 	Kind               Kind
+	JoinsWindow        bool // у правила прихода: порождённые события не открывают окно (ADR-019)
 	Rule               Rule
 	Exceptions         []Date
 }
@@ -200,7 +201,7 @@ func Expand(rules []RuleWithExceptions, from, to Date) ([]Event, error) {
 				Key:  "recurring:" + re.ID + "@" + d.String(),
 				Kind: re.Kind, State: StatePlanned, Name: re.Name,
 				Amount: &amount, Date: &date, ScheduledFor: &sched,
-				Category: re.Category, Source: SourceRecurring, RuleID: re.ID,
+				Category: re.Category, Source: SourceRecurring, RuleID: re.ID, JoinsWindow: re.JoinsWindow,
 			})
 		}
 	}

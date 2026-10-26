@@ -276,6 +276,9 @@ type AddIncomeInput struct {
 	Name   string
 	Amount Money
 	Date   Date
+	// JoinsWindow — обычный приход (продажа вещи и т.п.): окно не открывает, попадает в окно по дате (ADR-019).
+	// Ноль — зарплата/аванс, открывает окно, как раньше.
+	JoinsWindow bool
 }
 
 // AddPaymentInput — плановый платёж: либо с датой, либо в выбранное окно, либо без
@@ -301,7 +304,7 @@ func (s *Service) AddIncome(ctx context.Context, in AddIncomeInput) (string, err
 		return "", err
 	}
 	amount, date := in.Amount, in.Date
-	n := NewItem{Kind: KindIncome, Name: in.Name, Amount: &amount, Date: &date}
+	n := NewItem{Kind: KindIncome, Name: in.Name, Amount: &amount, Date: &date, JoinsWindow: in.JoinsWindow}
 	if err := n.Validate(); err != nil {
 		return "", err
 	}

@@ -179,6 +179,8 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 		Category: t.Category,
 		Source:   plan.SourceTransaction,
 		Origin:   factOrigin(t),
+		// Обычный приход окна не открывает (ADR-019); у расходов флаг не используется.
+		JoinsWindow: kind == plan.KindIncome && !t.OpensWindow,
 	}
 	if t.RecurringID != nil {
 		ev.RuleID = t.RecurringID.String()
@@ -224,6 +226,7 @@ func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {
 		WindowStart: datePtr(p.WindowStart),
 		Category:    p.Category,
 		Source:      plan.SourcePlanned,
+		JoinsWindow: kind == plan.KindIncome && !p.OpensWindow,
 	}
 	if p.AmountMinor != nil {
 		m, ok := money(*p.AmountMinor, p.Currency)
@@ -265,7 +268,7 @@ func (r *Reader) ruleEvent(x budget.PlanRecurring) (plan.RuleWithExceptions, boo
 	}
 	return plan.RuleWithExceptions{
 		ID: x.ID.String(), Name: x.Name, Category: x.Category,
-		Kind: kind, Rule: rule, Exceptions: ex,
+		Kind: kind, Rule: rule, Exceptions: ex, JoinsWindow: kind == plan.KindIncome && !x.OpensWindow,
 	}, true
 }
 
