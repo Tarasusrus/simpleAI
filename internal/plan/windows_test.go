@@ -337,10 +337,10 @@ func TestBuildWindows_JoiningProperties(t *testing.T) {
 // Мутации: вернуть проверку диапазона для обычных приходов в checkWindows — Compute вернёт ошибку; не считать
 // приход в Income — краснеет «Свободно».
 func TestCompute_JoiningIncomeAfterEndedWindow(t *testing.T) {
-	base := []Event{inc("salary", Date{2026, 10, 5}, StateDone, 9_800_000)}
+	salary := inc("salary", Date{2026, 10, 5}, StateDone, 9_800_000)
 	today := Date{2026, 10, 25} // окно 05.10–18.10 закончилось
-	before := mustCompute(t, in(BuildWindows(base), nil, CurRUB, nil, today, 0))
-	with := mustCompute(t, in(BuildWindows(append(base, joins(inc("bike", today, StateDone, 3_000_000)))), nil, CurRUB, nil, today, 0))
+	before := mustCompute(t, in(BuildWindows([]Event{salary}), nil, CurRUB, nil, today, 0))
+	with := mustCompute(t, in(BuildWindows([]Event{salary, joins(inc("bike", today, StateDone, 3_000_000))}), nil, CurRUB, nil, today, 0))
 	if with.State != StateEnded || before.State != StateEnded {
 		t.Fatalf("состояние: %v / %v, ждали ended", before.State, with.State)
 	}
