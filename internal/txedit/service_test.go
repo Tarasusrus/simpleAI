@@ -191,3 +191,28 @@ func TestList_PagingAndBadInput(t *testing.T) {
 		t.Error("плохой вход дошёл до хранилища")
 	}
 }
+
+// Окно вокруг строки: курсор «дальше» есть, когда более старых строк набралось ровно AroundAfter, даже если строка у
+// верха списка и более новых меньше AroundBefore.
+//
+// Мутация: вернуть проверку по длине окна (n == AroundBefore+1+AroundAfter) — краснеет «строка у верха».
+func TestAround_NextCursor(t *testing.T) {
+	s, st, _ := setup()
+	mk := func(id uuid.UUID) budget.TxRow {
+		return budget.TxRow{ID: id, Type: "expense", Currency: "THB", AmountMinor: 100, Date: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC), UpdatedAt: testVersion}
+	}
+	focus := uuid.New()
+	rows := []budget.TxRow{mk(focus)} // у верха списка: новее нет
+	for i := 0; i < AroundAfter; i++ {
+		rows = append(rows, mk(uuid.New()))
+	}
+	st.rows = rows
+	page, err := s.Around(context.Background(), focus.String())
+	if err != nil || page.Next == "" {
+		t.Errorf("строка у верха: next=%q err=%v, ждали курсор дальше", page.Next, err)
+	}
+	st.rows = rows[:5] // старых меньше AroundAfter: список кончился
+	if page, _ := s.Around(context.Background(), focus.String()); page.Next != "" {
+		t.Errorf("конец списка: next=%q", page.Next)
+	}
+}

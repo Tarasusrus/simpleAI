@@ -165,9 +165,13 @@ func (s *Service) Around(ctx context.Context, id string) (Page, error) {
 	for _, r := range rows {
 		page.Rows = append(page.Rows, toTx(r))
 	}
-	if n := len(rows); n > 0 && n == AroundBefore+1+AroundAfter {
-		last := rows[n-1]
-		page.Next = formatCursor(last.Date, last.ID)
+	// Более старые строки продолжаются после окна, если их набралось ровно AroundAfter: считаем от самой строки,
+	// а не от длины окна, потому что у верха списка более новых строк меньше AroundBefore.
+	for i, r := range rows {
+		if r.ID == u && len(rows)-1-i == AroundAfter {
+			last := rows[len(rows)-1]
+			page.Next = formatCursor(last.Date, last.ID)
+		}
 	}
 	return page, nil
 }
