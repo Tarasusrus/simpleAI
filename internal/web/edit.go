@@ -26,6 +26,8 @@ type ItemDTO struct {
 	Date        *string   `json:"date"`
 	WindowStart *string   `json:"windowStart"`
 	Repeat      *RepeatDT `json:"repeat"`
+	// OpensWindow — у ожидаемого поступления: открывает окно (зарплата, аванс) или нет (ADR-019).
+	OpensWindow bool `json:"opensWindow"`
 }
 
 // RepeatDT — расписание правила, только для подписи («каждые 2 недели, до …»).
@@ -40,7 +42,7 @@ func decimal(minor int64) string { return fmt.Sprintf("%d.%02d", minor/100, mino
 func toItemDTO(it plan.EditableItem) ItemDTO {
 	out := ItemDTO{
 		Key: it.Key, Kind: string(it.Kind), Recurring: it.Recurring, Fact: it.Fact, Name: it.Name, Category: it.Category,
-		Date: datePtr(it.Date), WindowStart: datePtr(it.WindowStart),
+		Date: datePtr(it.Date), WindowStart: datePtr(it.WindowStart), OpensWindow: it.OpensWindow,
 	}
 	if it.Amount != nil {
 		a := decimal(it.Amount.Minor)
@@ -73,6 +75,8 @@ type editBody struct {
 	Category *string         `json:"category"`
 	Date     string          `json:"date"`
 	Window   string          `json:"window"`
+	// OpensWindow — вид ожидаемого поступления: нет поля — не менять (ADR-019).
+	OpensWindow *bool `json:"opensWindow"`
 }
 
 var errEditFields = errors.New("web: нет обязательных полей правки")
@@ -82,7 +86,7 @@ func (b editBody) editInput() (plan.EditInput, error) {
 	if b.Name == nil || b.Category == nil || len(b.Amount) == 0 {
 		return plan.EditInput{}, errEditFields
 	}
-	in := plan.EditInput{Name: *b.Name, Category: *b.Category}
+	in := plan.EditInput{Name: *b.Name, Category: *b.Category, OpensWindow: b.OpensWindow}
 	raw := strings.TrimSpace(string(b.Amount))
 	if raw != "null" && raw != `""` {
 		var n json.Number
@@ -160,6 +164,10 @@ func (s *Server) writeEditError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "Нужны поля name, amount (null — без суммы) и category.")
 	case errors.Is(err, plan.ErrNotEditable):
 		writeError(w, http.StatusBadRequest, "Изменить можно плановую запись, повторяющийся платёж или оплату, закрытую с этого экрана.")
+	case errors.Is(err, plan.ErrKindNotIncome):
+		writeError(w, http.StatusBadRequest, "Вид «открывает окно» есть только у поступления.")
+	case errors.Is(err, plan.ErrRuleKind):
+		writeError(w, http.StatusBadRequest, "У повторяющегося поступления вид пока не правится.")
 	case errors.Is(err, plan.ErrRuleSchedule):
 		writeError(w, http.StatusBadRequest, "У повторяющегося платежа дата не меняется. Чтобы пропустить один срок — «пропустить».")
 	default:

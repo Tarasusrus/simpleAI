@@ -301,3 +301,19 @@ func TestStatic_TransactionsPageIncomeKind(t *testing.T) {
 		}
 	}
 }
+
+// Форма «изменить» у ожидаемого прихода на главной даёт сменить вид с подтверждением и шлёт opensWindow только при
+// смене (ADR-019).
+//
+// Мутация: убрать поле вида, confirm или условие «только при смене» — краснеет проверка.
+func TestStatic_PlannedIncomeKindEditor(t *testing.T) {
+	b, err := staticFS.ReadFile("static/js/blocks/edit.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Вид прихода", "body.opensWindow", "confirm(", "!== item.opensWindow"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("edit.js: нет %q", want)
+		}
+	}
+}

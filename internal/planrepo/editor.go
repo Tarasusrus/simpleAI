@@ -40,6 +40,7 @@ func (w *Writer) UpdatePlanned(ctx context.Context, sc plan.Scope, id string, e 
 		SetPlace:    e.SetPlace,
 		DueDate:     dbDate(n.Date),
 		WindowStart: dbDate(n.WindowStart),
+		OpensWindow: e.OpensWindow,
 	}
 	if n.Amount != nil {
 		minor := n.Amount.Minor

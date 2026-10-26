@@ -240,3 +240,38 @@ func TestUpdatePlanItem_KeepsCategory(t *testing.T) {
 		t.Errorf("отказанная правка изменила запись: %+v", got)
 	}
 }
+
+// Вид ожидаемого прихода (ADR-019) правится в UpdatePlanItem: false/true пишутся, nil оставляет.
+//
+// Мутации: убрать opens_window из UPDATE; COALESCE($11, opens_window) → $11 — краснеют проверки.
+func TestUpdatePlanItem_OpensWindow(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	day := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	id, err := s.AddPlanItem(ctx, PlanItemInput{ChatID: planStoreChat, Direction: "income", Description: "plan-store-test байк",
+		AmountMinor: ptrInt64(10000), Currency: "RUB", DueDate: &day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opens := func() bool {
+		var b bool
+		if err := s.pool.QueryRow(ctx, `SELECT opens_window FROM budget_planned_expense WHERE id = $1`, id).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	edit := PlanItemEdit{Direction: "income", Description: "plan-store-test байк", AmountMinor: ptrInt64(10000), Currency: "RUB"}
+	f, tr := false, true
+	edit.OpensWindow = &f
+	if ok, err := s.UpdatePlanItem(ctx, []int64{planStoreChat}, id, edit); err != nil || !ok || opens() {
+		t.Fatalf("false: ok=%v err=%v opens=%v", ok, err, opens())
+	}
+	edit.OpensWindow = nil
+	if ok, err := s.UpdatePlanItem(ctx, []int64{planStoreChat}, id, edit); err != nil || !ok || opens() {
+		t.Errorf("nil затёр вид: ok=%v err=%v opens=%v", ok, err, opens())
+	}
+	edit.OpensWindow = &tr
+	if ok, err := s.UpdatePlanItem(ctx, []int64{planStoreChat}, id, edit); err != nil || !ok || !opens() {
+		t.Errorf("возврат в true: ok=%v err=%v opens=%v", ok, err, opens())
+	}
+}
