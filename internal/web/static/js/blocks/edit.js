@@ -71,6 +71,16 @@ function editor(item, cats, cur, ctx, box) {
     fields.push(field('Категория', category));
   }
 
+  // Вид ожидаемого прихода (ADR-019): у одноразового поступления, не у повтора и не у закрытой записи.
+  let kindSel = null;
+  if (item.kind === 'income' && !item.recurring && !item.fact) {
+    kindSel = h('select', { name: 'opensWindow' },
+      h('option', { value: 'true' }, 'Зарплата или аванс (открывает окно)'),
+      h('option', { value: 'false' }, 'Обычный приход (окно не открывает)'));
+    kindSel.value = String(item.opensWindow);
+    fields.push(field('Вид прихода', kindSel, 'wide'));
+  }
+
   let when = null;
   let date = null;
   const rows = [h('div', { class: 'row' }, fields)];
@@ -110,6 +120,10 @@ function editor(item, cats, cur, ctx, box) {
       body.date = date.value;
     } else if (when && when.value !== 'keep') {
       body.window = when.value;
+    }
+    if (kindSel && (kindSel.value === 'true') !== item.opensWindow) {
+      if (!confirm('Смена вида прихода пересоберёт окна: платежи и лимиты окон могут переехать. Продолжить?')) return;
+      body.opensWindow = kindSel.value === 'true';
     }
     status.textContent = '';
     status.classList.remove('err');

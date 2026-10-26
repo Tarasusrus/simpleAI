@@ -332,3 +332,37 @@ func TestService_EditRule_AppliesToUnexecutedTerms(t *testing.T) {
 		}
 	}
 }
+
+// Вид ожидаемого прихода (ADR-019): доходит до писателя как есть, nil — не менять; у расхода и у повтора отказ до
+// писателя; форма получает текущий вид.
+//
+// Мутации: не передавать OpensWindow в PlannedEdit; убрать проверку Kind — краснеют проверки.
+func TestService_EditPlanned_OpensWindow(t *testing.T) {
+	f := false
+	w := &editWriter{}
+	if err := editSvc(w).Edit(context.Background(), "planned:i1", EditInput{Name: "байк", Amount: rub(100), OpensWindow: &f}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.planned) != 1 || w.planned[0].e.OpensWindow == nil || *w.planned[0].e.OpensWindow {
+		t.Fatalf("вид не дошёл до писателя: %+v", w.planned)
+	}
+	w = &editWriter{}
+	if err := editSvc(w).Edit(context.Background(), "planned:i1", EditInput{Name: "аванс", Amount: rub(100)}); err != nil || w.planned[0].e.OpensWindow != nil {
+		t.Errorf("без вида: %v %+v", err, w.planned)
+	}
+	w = &editWriter{}
+	if err := editSvc(w).Edit(context.Background(), "planned:p1", EditInput{Name: "врач", OpensWindow: &f}); !errors.Is(err, ErrKindNotIncome) || len(w.planned) != 0 {
+		t.Errorf("расход с видом прихода: %v, вызовов %d", err, len(w.planned))
+	}
+	if it, err := editSvc(&editWriter{}).Item(context.Background(), "planned:i1"); err != nil || !it.OpensWindow {
+		t.Errorf("форма: OpensWindow=%v %v, ждали true (по умолчанию открывает)", it.OpensWindow, err)
+	}
+	// Обычный приход (JoinsWindow) в форме показывается как «не открывает окно».
+	snap := editSnap()
+	snap.Incomes = append(snap.Incomes, Event{Key: "planned:i9", Kind: KindIncome, State: StatePlanned, Name: "байк", Amount: rub(100),
+		Date: dp(2026, 3, 21), Source: SourcePlanned, JoinsWindow: true})
+	s2 := NewService(&fakeReader{snap: snap}, &editWriter{}, func() Date { return d(2026, 3, 10) }, Scope{ChatIDs: []int64{42}})
+	if it, err := s2.Item(context.Background(), "planned:i9"); err != nil || it.OpensWindow {
+		t.Errorf("обычный приход в форме: OpensWindow=%v %v, ждали false", it.OpensWindow, err)
+	}
+}

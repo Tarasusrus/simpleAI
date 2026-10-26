@@ -45,6 +45,8 @@ type PlanItemEdit struct {
 	SetPlace    bool
 	DueDate     *time.Time
 	WindowStart *time.Time
+	// OpensWindow — вид прихода (ADR-019): nil — не менять. У расхода не используется.
+	OpensWindow *bool
 }
 
 // UpdatePlanItem меняет незакрытую плановую запись из перечисленных чатов. false —
@@ -64,9 +66,10 @@ func (s *Store) UpdatePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		    currency     = $6,
 		    category_id  = `+keepCategorySQL("budget_planned_expense", "direction")+`,
 		    due_date     = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
-		    window_start = CASE WHEN $8::boolean THEN $10::date ELSE window_start END
+		    window_start = CASE WHEN $8::boolean THEN $10::date ELSE window_start END,
+		    opens_window = COALESCE($11::boolean, opens_window)
 		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled AND direction = $3`,
-		id, chatIDs, e.Direction, e.Description, e.AmountMinor, e.Currency, catID, e.SetPlace, e.DueDate, e.WindowStart)
+		id, chatIDs, e.Direction, e.Description, e.AmountMinor, e.Currency, catID, e.SetPlace, e.DueDate, e.WindowStart, e.OpensWindow)
 	if err != nil {
 		return false, fmt.Errorf("update plan item: %w", err)
 	}
