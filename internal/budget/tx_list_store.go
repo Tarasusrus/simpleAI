@@ -15,13 +15,13 @@ import (
 // Транзакции общие, без chat_id (ADR-009 §8), поэтому область чатов здесь не проверяется.
 
 const txViewSelect = `SELECT t.id, t.type, ROUND(t.amount * 100)::bigint, t.currency, t.category_id, COALESCE(c.name, ''),
-	t.description, t.transaction_date, t.updated_at, t.planned_id, t.recurring_id, COALESCE(t.added_by, '')
+	t.description, t.transaction_date, t.updated_at, t.planned_id, t.recurring_id, COALESCE(t.added_by, ''), t.opens_window
 	FROM budget_transaction t LEFT JOIN budget_category c ON c.id = t.category_id`
 
 func scanTxView(row pgx.Row) (TxRow, error) {
 	var x TxRow
 	err := row.Scan(&x.ID, &x.Type, &x.AmountMinor, &x.Currency, &x.CategoryID, &x.CategoryName, &x.Description,
-		&x.Date, &x.UpdatedAt, &x.PlannedID, &x.RecurringID, &x.AddedBy)
+		&x.Date, &x.UpdatedAt, &x.PlannedID, &x.RecurringID, &x.AddedBy, &x.OpensWindow)
 	return x, err
 }
 

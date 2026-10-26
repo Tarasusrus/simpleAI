@@ -28,6 +28,8 @@ var (
 	ErrBadID      = errors.New("txedit: неверный id транзакции")
 	ErrBadVersion = errors.New("txedit: неверная версия строки")
 	ErrBadCursor  = errors.New("txedit: неверный курсор")
+	// ErrNotIncome — вид «открывает окно» есть только у прихода.
+	ErrNotIncome = errors.New("txedit: вид «открывает окно» есть только у прихода")
 	// ErrNotFound и ErrConflict — транзакции нет / строку изменили после чтения (из хранилища).
 	ErrNotFound = budget.ErrTxNotFound
 	ErrConflict = budget.ErrTxConflict
@@ -69,6 +71,8 @@ type Tx struct {
 	Linked      bool // закрывает плановую запись: удаление откроет её заново
 	FromRule    bool // создана правилом повтора
 	AddedBy     string
+	// OpensWindow — только у прихода (Kind=income): зарплата/аванс открывают окно, обычный приход нет (ADR-019).
+	OpensWindow bool
 }
 
 // Page — страница списка. Next — курсор следующей (более старой) страницы, пусто — конец.
@@ -94,6 +98,8 @@ type Input struct {
 	Amount      plan.Money
 	Date        plan.Date
 	Category    string
+	// OpensWindow — вид прихода: nil — не менять. У расхода значение отклоняется: смысла у него нет.
+	OpensWindow *bool
 }
 
 // ListQuery — фильтры и продолжение списка.
@@ -189,6 +195,9 @@ func (s *Service) Edit(ctx context.Context, in Input) (Tx, error) {
 	if err != nil {
 		return Tx{}, err
 	}
+	if in.OpensWindow != nil && cur.Type != "income" {
+		return Tx{}, ErrNotIncome
+	}
 	var catID *uuid.UUID
 	if name := strings.TrimSpace(in.Category); name != "" {
 		c, err := s.pickCategory(ctx, name, cur.Type)
@@ -203,6 +212,7 @@ func (s *Service) Edit(ctx context.Context, in Input) (Tx, error) {
 		Currency:    string(in.Amount.Cur),
 		Date:        *dbDate(&in.Date),
 		CategoryID:  catID,
+		OpensWindow: in.OpensWindow,
 	}); err != nil {
 		return Tx{}, err
 	}
@@ -255,7 +265,7 @@ func toTx(r budget.TxRow) Tx {
 		Category: r.CategoryName, Description: r.Description,
 		Date:    plan.DateOf(r.Date, time.UTC),
 		Version: r.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		Linked:  r.PlannedID != nil, FromRule: r.RecurringID != nil, AddedBy: r.AddedBy,
+		Linked:  r.PlannedID != nil, FromRule: r.RecurringID != nil, AddedBy: r.AddedBy, OpensWindow: r.OpensWindow,
 	}
 }
 

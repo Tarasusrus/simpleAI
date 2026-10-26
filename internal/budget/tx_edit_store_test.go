@@ -140,3 +140,45 @@ func TestDeleteTx(t *testing.T) {
 		t.Errorf("удаление без связи тронуло плановую запись: settled=%v %v", settled, err)
 	}
 }
+
+// Правка вида прихода (ADR-019): false/true записываются, nil оставляет как есть, снимок «до» и значения «после» в
+// журнале содержат флаг.
+//
+// Мутации: убрать opens_window из UPDATE; COALESCE($7, opens_window) → $7 (nil затирает) — краснеют проверки.
+func TestEditTx_OpensWindow(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	t.Cleanup(func() {
+		s.pool.Exec(ctx, `DELETE FROM tx_edit_log WHERE before->>'description' LIKE 'plan-store-test%'`) //nolint:errcheck // очистка после теста
+	})
+	id := uuid.New()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_transaction (id, type, amount, currency, description, transaction_date, added_by)
+		VALUES ($1, 'income', 4000, 'RUB', 'plan-store-test байк', '2026-03-10', 'bot')`, id); err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.GetTxView(ctx, id)
+	if err != nil || !row.OpensWindow {
+		t.Fatalf("новая строка: opens=%v err=%v, ждали true", row.OpensWindow, err)
+	}
+	f := false
+	change := TxChange{Description: "plan-store-test байк", AmountMinor: 400000, Currency: "RUB", Date: row.Date, OpensWindow: &f}
+	got, err := s.EditTx(ctx, id, row.UpdatedAt, TxSourceWeb, change)
+	if err != nil || got.OpensWindow {
+		t.Fatalf("после правки: opens=%v err=%v, ждали false", got.OpensWindow, err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM tx_edit_log WHERE tx_id = $1 AND (before->>'opens_window')::boolean IS TRUE
+		AND (after->>'opens_window')::boolean IS FALSE`, id).Scan(&n); err != nil || n != 1 {
+		t.Errorf("в журнале снимок флага до/после: %d %v", n, err)
+	}
+	change.OpensWindow = nil
+	got, err = s.EditTx(ctx, id, got.UpdatedAt, TxSourceWeb, change)
+	if err != nil || got.OpensWindow {
+		t.Errorf("nil изменил флаг: opens=%v err=%v", got.OpensWindow, err)
+	}
+	tr := true
+	change.OpensWindow = &tr
+	if got, err = s.EditTx(ctx, id, got.UpdatedAt, TxSourceWeb, change); err != nil || !got.OpensWindow {
+		t.Errorf("возврат в true: opens=%v err=%v", got.OpensWindow, err)
+	}
+}

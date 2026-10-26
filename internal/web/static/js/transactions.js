@@ -48,7 +48,7 @@ function rowEl(t) {
   const line = h('div', { class: 'tr txr', 'data-id': t.id, tabindex: '0', role: 'button', title: 'Изменить' },
     h('span', { class: 'td txd' }, longDate(t.date)),
     h('span', { class: 'tn' }, t.description || '—', t.category ? h('span', { class: 'tag mut' }, t.category) : null,
-      t.kind === 'income' ? h('span', { class: 'tag ex' }, 'доход') : null,
+      t.kind === 'income' ? h('span', { class: 'tag ' + (t.opensWindow ? 'ex' : 'mut') }, t.opensWindow ? 'открывает окно' : 'обычный приход') : null,
       t.fromRule ? h('span', { class: 'tag rg' }, '↻') : null),
     h('span', { class: 'ta' }, showAmount(t.amount, t.currency)));
   const open = () => toggleEditor(line, t);
@@ -88,6 +88,11 @@ function editor(line, t) {
   const cat = h('select', null, ...names.map((c) => h('option', { value: c }, c)));
   cat.value = t.category;
   if (t.kind === 'income') cat.disabled = true; // категории дохода здесь не меняются
+  // Вид прихода (ADR-019): зарплата/аванс открывают окно, обычный приход входит в существующее.
+  const kindSel = h('select', null,
+    h('option', { value: 'true' }, 'Зарплата или аванс (открывает окно)'),
+    h('option', { value: 'false' }, 'Обычный приход (окно не открывает)'));
+  kindSel.value = String(t.opensWindow);
   const msg = h('div', { class: 'hint' });
   const warn = h('div', { class: 'hint' });
   const save = h('button', { type: 'button' }, 'Сохранить');
@@ -124,6 +129,10 @@ function editor(line, t) {
       currency: currency.value, date: date.value,
     };
     if (t.kind !== 'income') body.category = cat.value;
+    if (t.kind === 'income' && (kindSel.value === 'true') !== t.opensWindow) {
+      if (!confirm('Смена вида прихода пересоберёт окна: платежи и лимиты окон могут переехать. Продолжить?')) return;
+      body.opensWindow = kindSel.value === 'true';
+    }
     replaceRow(line, await editTransaction(t.id, body));
   }));
   let armed = false;
@@ -146,7 +155,7 @@ function editor(line, t) {
 
   const box = h('div', { class: 'txed' },
     h('div', { class: 'row' }, field('Название', name, 'wide'), field('Сумма', amount), field('Валюта', currency), field('Дата', date),
-      field('Категория', cat)),
+      field('Категория', cat), t.kind === 'income' ? field('Вид прихода', kindSel, 'wide') : null),
     warn, msg,
     h('div', { class: 'row top2' }, save, cancel, h('span', { class: 'sp' }), del),
     t.linked ? h('div', { class: 'hint' }, 'Эта оплата закрывала плановый платёж: при удалении платёж снова откроется в плане.') : null);
