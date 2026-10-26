@@ -118,3 +118,25 @@ func TestBuildToolsSystemPrompt_StartEnvelopeRemoved(t *testing.T) {
 		}
 	}
 }
+
+// Краткая запись «1570 бат шлем» (simpleAI-4w5t): без глагола правило 8 отбрасывало
+// её, а слово «шлем» модель читала как «шлём» и записывала перевод. Тест держит, что
+// правило про запись без глагола есть, стоит в блоке правил и называет оба пути
+// ошибки; что модель ему следует, доказывают golden-кейсы r057-r059 на боевой модели.
+func TestBuildToolsSystemPrompt_ShortFormExpenseWithoutVerb(t *testing.T) {
+	prompt := buildToolsSystemPrompt([]plugin.Manifest{{ID: "budget", Description: "budget tracker"}})
+	rules := rulesBlock(t, prompt)
+
+	mustContain := map[string]string{
+		"1570 бат шлем":     "нет примера краткой записи — именно он ушёл в переводы",
+		"НАЗВАНИЕ траты":    "нет указания, что слово после суммы — название, а не глагол",
+		"не сочиняй":        "нет запрета придумывать description («перевод»)",
+		"краткая запись из": "правило 8 не отсылает краткую запись к правилу 2",
+		"«курс 2,7», «пришло 127000», «на еду хватит 15000», «хочу блендер 3000» — не траты": "краткая запись не уступает правилам 1, 3, 4, 7",
+	}
+	for marker, why := range mustContain {
+		if !strings.Contains(rules, marker) {
+			t.Errorf("%s: в ROUTING RULES нет %q", why, marker)
+		}
+	}
+}
