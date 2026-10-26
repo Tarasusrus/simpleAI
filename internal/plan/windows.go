@@ -23,18 +23,49 @@ func (w Window) AnchorPlanned() bool {
 
 // BuildWindows строит окна из поступлений (платежи и события без даты пропускает).
 //
-// Окно открывает самое раннее ещё не покрытое поступление; поступление внутри окна
-// добавляется к нему, позже конца — открывает новое. Сортировка (дата, факт раньше
-// плана, ключ) делает результат независимым от порядка входа. Вызывающий отдаёт ВСЕ
+// Проход 1: цепочку окон строят только открывающие поступления (JoinsWindow=false): окно открывает самое раннее
+// ещё не покрытое, поступление внутри окна добавляется к нему, позже конца — открывает новое. Проход 2 (ADR-019):
+// обычные приходы (JoinsWindow=true) окон не создают и не двигают, а кладутся в окно по дате: внутри окна — в него,
+// в зазоре — в следующее, после последнего — в последнее, до первого — в первое. Если открывающих нет вовсе, первый
+// обычный приход открывает окно: иначе деньги исчезли бы с экрана. Обычные добавляются после открывающих, поэтому
+// Incomes[0] остаётся якорем окна.
+//
+// Сортировка (дата, факт раньше плана, ключ) делает результат независимым от порядка входа. Вызывающий отдаёт ВСЕ
 // поступления с начала: цепочка окон зависит от точки отсечки истории.
 func BuildWindows(incomes []Event) []Window {
 	ws := []Window{}
-	var src []Event
+	var opening, joining []Event
 	for _, e := range incomes {
-		if e.Kind == KindIncome && e.Date != nil {
-			src = append(src, e)
+		if e.Kind != KindIncome || e.Date == nil {
+			continue
+		}
+		if e.JoinsWindow {
+			joining = append(joining, e)
+		} else {
+			opening = append(opening, e)
 		}
 	}
+	sortIncomes(opening)
+	sortIncomes(joining)
+	for _, e := range opening {
+		if n := len(ws); n > 0 && e.Date.Compare(ws[n-1].End()) <= 0 {
+			ws[n-1].Incomes = append(ws[n-1].Incomes, e)
+			continue
+		}
+		ws = append(ws, Window{Start: *e.Date, Incomes: []Event{e}})
+	}
+	if len(ws) == 0 && len(joining) > 0 {
+		ws = append(ws, Window{Start: *joining[0].Date, Incomes: []Event{joining[0]}})
+		joining = joining[1:]
+	}
+	for _, e := range joining {
+		i := windowIndexFor(ws, *e.Date)
+		ws[i].Incomes = append(ws[i].Incomes, e)
+	}
+	return ws
+}
+
+func sortIncomes(src []Event) {
 	sort.SliceStable(src, func(i, j int) bool {
 		if c := src[i].Date.Compare(*src[j].Date); c != 0 {
 			return c < 0
@@ -44,14 +75,20 @@ func BuildWindows(incomes []Event) []Window {
 		}
 		return src[i].Key < src[j].Key
 	})
-	for _, e := range src {
-		if n := len(ws); n > 0 && e.Date.Compare(ws[n-1].End()) <= 0 {
-			ws[n-1].Incomes = append(ws[n-1].Incomes, e)
-			continue
+}
+
+// windowIndexFor — окно для обычного прихода с датой d (ws непусто): содержащее d; в зазоре — следующее; после
+// последнего — последнее; до первого — первое.
+func windowIndexFor(ws []Window, d Date) int {
+	for i, w := range ws {
+		if d.Compare(w.Start) < 0 {
+			return i // до первого окна или в зазоре перед окном i
 		}
-		ws = append(ws, Window{Start: *e.Date, Incomes: []Event{e}})
+		if d.Compare(w.End()) <= 0 {
+			return i
+		}
 	}
-	return ws
+	return len(ws) - 1
 }
 
 // StateKind — положение «сегодня» относительно окон.

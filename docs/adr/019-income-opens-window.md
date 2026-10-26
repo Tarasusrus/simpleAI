@@ -17,8 +17,8 @@
 ## Решение
 
 ### 1. Признак `OpensWindow`
-Явное поле `Event.OpensWindow` (только у `Kind=income`). `true` — зарплата/аванс, открывает окно; `false` — обычный
-приход. Хранение: колонка `opens_window BOOLEAN NOT NULL DEFAULT true` в `budget_transaction`, `budget_planned_expense`
+Явный признак у поступления: в базе `opens_window` (`true` — зарплата/аванс, открывает окно; `false` — обычный приход), в
+домене `Event.JoinsWindow = !opens_window` (инвертировано, чтобы нулевое значение Go оставалось прежним поведением). Хранение: колонка `opens_window BOOLEAN NOT NULL DEFAULT true` в `budget_transaction`, `budget_planned_expense`
 (`direction='income'`) и `budget_recurring` (`type='income'`). Правило повтора хранит флаг; порождённые факты и план
 наследуют его; факт, закрывший плановый приход, наследует флаг плана. **Старые строки и бот: `true`**, поэтому
 раскатка поведения не меняет.
