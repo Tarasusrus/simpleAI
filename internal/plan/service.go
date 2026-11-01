@@ -51,6 +51,7 @@ type Service struct {
 	limits LimitWriter   // nil — запись лимитов отключена (WithLimitWriter)
 	txs    TxLister      // nil — список трат категории отключён (WithTxLister)
 	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
+	rules  RuleLister    // nil — список правил отключён (WithRuleLister)
 	today  Clock
 	scope  Scope
 }
