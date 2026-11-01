@@ -17,6 +17,7 @@ import (
 type Source interface {
 	PlanTransactions(ctx context.Context) ([]budget.PlanTx, error)
 	PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]budget.PlanRecurring, error)
+	PlanRecurringRulesAll(ctx context.Context, chatIDs []int64) ([]budget.PlanRecurring, error)
 	PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]budget.PlanPlanned, error)
 	PlanReservePct(ctx context.Context) (int, error)
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)
@@ -240,11 +241,17 @@ func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {
 }
 
 func (r *Reader) ruleEvent(x budget.PlanRecurring) (plan.RuleWithExceptions, bool) {
-	m, ok := money(x.AmountMinor, x.Currency)
-	if !ok {
+	if _, ok := money(x.AmountMinor, x.Currency); !ok {
 		r.skip("повторяющееся правило", x.ID.String(), x.Currency)
 		return plan.RuleWithExceptions{}, false
 	}
+	return ruleOf(x), true
+}
+
+// ruleOf переводит строку базы в правило домена без проверки валюты: список
+// регулярных платежей показывает и такие правила (с пометкой Invalid).
+func ruleOf(x budget.PlanRecurring) plan.RuleWithExceptions {
+	m := plan.Money{Minor: x.AmountMinor, Cur: plan.Currency(x.Currency)}
 	kind := plan.KindPayment
 	if x.Type == "income" {
 		kind = plan.KindIncome
@@ -269,7 +276,29 @@ func (r *Reader) ruleEvent(x budget.PlanRecurring) (plan.RuleWithExceptions, boo
 	return plan.RuleWithExceptions{
 		ID: x.ID.String(), Name: x.Name, Category: x.Category,
 		Kind: kind, Rule: rule, Exceptions: ex, JoinsWindow: kind == plan.KindIncome && !x.OpensWindow,
-	}, true
+	}
+}
+
+var _ plan.RuleLister = (*Reader)(nil)
+
+// ListRules отдаёт все правила области, включая приостановленные, и курс для
+// пересчёта «в месяц».
+func (r *Reader) ListRules(ctx context.Context, sc plan.Scope) (plan.RuleList, error) {
+	if len(sc.ChatIDs) == 0 {
+		return plan.RuleList{}, fmt.Errorf("planrepo: пустая область чатов")
+	}
+	rows, err := r.src.PlanRecurringRulesAll(ctx, sc.ChatIDs)
+	if err != nil {
+		return plan.RuleList{}, err
+	}
+	list := plan.RuleList{Rules: make([]plan.RuleRecord, 0, len(rows))}
+	for _, x := range rows {
+		list.Rules = append(list.Rules, plan.RuleRecord{RuleWithExceptions: ruleOf(x), Paused: !x.Enabled})
+	}
+	if list.Rate, _, err = r.rate(ctx); err != nil {
+		return plan.RuleList{}, err
+	}
+	return list, nil
 }
 
 func firstNonEmpty(ss ...string) string {

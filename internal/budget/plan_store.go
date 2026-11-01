@@ -58,6 +58,7 @@ type PlanRecurring struct {
 	Until        *time.Time
 	Skipped      []time.Time
 	OpensWindow  bool // правило прихода: порождённые факты и план наследуют (ADR-019)
+	Enabled      bool // false — правило на паузе (читает только PlanRecurringRulesAll)
 }
 
 // PlanPlanned — незакрытая плановая запись (расход или поступление).
@@ -105,15 +106,25 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 // заведённые до миграции 00021 или откатившимся бинарём, имеют NULL в новых
 // колонках — тогда берётся то, что выводится из старых (recurrence_type, next_date).
 func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]PlanRecurring, error) {
+	return s.planRecurring(ctx, chatIDs, true)
+}
+
+// PlanRecurringRulesAll — то же, но и приостановленные правила (для списка
+// регулярных платежей); пауза видна в поле Enabled.
+func (s *Store) PlanRecurringRulesAll(ctx context.Context, chatIDs []int64) ([]PlanRecurring, error) {
+	return s.planRecurring(ctx, chatIDs, false)
+}
+
+func (s *Store) planRecurring(ctx context.Context, chatIDs []int64, onlyEnabled bool) ([]PlanRecurring, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.chat_id, r.name, r.type, COALESCE(c.name, ''), r.currency,
 		       ROUND(r.amount * 100)::bigint, r.interval_n,
 		       COALESCE(r.interval_unit, CASE r.recurrence_type WHEN 'weekly' THEN 'week' WHEN 'daily' THEN 'day' ELSE 'month' END),
-		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates, r.opens_window
+		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates, r.opens_window, r.enabled
 		FROM budget_recurring r
 		LEFT JOIN budget_category c ON c.id = r.category_id
-		WHERE r.enabled AND r.chat_id = ANY($1)
-		ORDER BY r.created_at, r.id`, chatIDs)
+		WHERE (r.enabled OR NOT $2) AND r.chat_id = ANY($1)
+		ORDER BY r.created_at, r.id`, chatIDs, onlyEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("plan recurring: %w", err)
 	}
@@ -122,7 +133,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 	for rows.Next() {
 		var x PlanRecurring
 		if err := rows.Scan(&x.ID, &x.ChatID, &x.Name, &x.Type, &x.Category, &x.Currency,
-			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped, &x.OpensWindow); err != nil {
+			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped, &x.OpensWindow, &x.Enabled); err != nil {
 			return nil, fmt.Errorf("plan recurring scan: %w", err)
 		}
 		out = append(out, x)
