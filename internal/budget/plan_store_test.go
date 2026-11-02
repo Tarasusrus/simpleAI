@@ -440,3 +440,49 @@ func TestOpensWindow_StoreRoundTrip(t *testing.T) {
 }
 
 func ptrInt64(n int64) *int64 { return &n }
+
+// PlanRecurringRulesAll отдаёт и приостановленные правила (Enabled=false), но не
+// чужой чат; PlanRecurringRules по-прежнему только включённые.
+//
+// Мутация: убрать `OR NOT $2` из условия или поле Enabled из Scan — тест краснеет.
+func TestPlanRecurringRulesAll_IncludesPaused(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	on, off, foreign := uuid.New(), uuid.New(), uuid.New()
+	for _, r := range []struct {
+		id      uuid.UUID
+		chat    int64
+		enabled bool
+	}{{on, planStoreChat, true}, {off, planStoreChat, false}, {foreign, planStoreChat - 1, false}} {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO budget_recurring (id, chat_id, name, amount, recurrence_type, next_date, enabled)
+			VALUES ($1, $2, 'правило', 10, 'monthly', '2026-03-12', $3)`, r.id, r.chat, r.enabled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := s.PlanRecurringRulesAll(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, x := range all {
+		seen[x.ID] = x.Enabled
+	}
+	if v, ok := seen[on]; !ok || !v {
+		t.Errorf("включённое правило: %v %v", v, ok)
+	}
+	if v, ok := seen[off]; !ok || v {
+		t.Errorf("приостановленное должно быть в списке с Enabled=false: %v %v", v, ok)
+	}
+	if _, ok := seen[foreign]; ok {
+		t.Error("чужой чат попал в список")
+	}
+	enabledOnly, err := s.PlanRecurringRules(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range enabledOnly {
+		if x.ID == off {
+			t.Error("PlanRecurringRules отдал приостановленное правило")
+		}
+	}
+}

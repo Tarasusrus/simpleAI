@@ -39,6 +39,12 @@ func (f *fakeSource) PlanRecurringRules(_ context.Context, ids []int64) ([]budge
 	return f.rules, nil
 }
 
+func (f *fakeSource) PlanRecurringRulesAll(_ context.Context, ids []int64) ([]budget.PlanRecurring, error) {
+	f.calls++
+	f.gotRules = append(f.gotRules, ids)
+	return f.rules, nil
+}
+
 func (f *fakeSource) PlanPlannedItems(_ context.Context, ids []int64) ([]budget.PlanPlanned, error) {
 	f.calls++
 	f.gotPlan = append(f.gotPlan, ids)
@@ -249,3 +255,30 @@ func TestRead_OpensWindowFlag(t *testing.T) {
 
 func ptrI64(n int64) *int64       { return &n }
 func ptrT(t time.Time) *time.Time { return &t }
+
+func TestListRules_PausedAndUnsupportedCurrencyKept(t *testing.T) {
+	src := &fakeSource{
+		rules: []budget.PlanRecurring{
+			{ID: uuid.New(), Name: "аренда", Type: "expense", Currency: "THB", AmountMinor: 1800000, IntervalN: 1, IntervalUnit: "month", Anchor: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Enabled: true},
+			{ID: uuid.New(), Name: "зал", Type: "expense", Currency: "USD", AmountMinor: 5000, IntervalN: 1, IntervalUnit: "month", Anchor: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Enabled: false},
+		},
+		rates: map[string]float64{"THB": 2.5},
+	}
+	r := NewReader(src, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	list, err := r.ListRules(context.Background(), plan.Scope{ChatIDs: []int64{7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Rules) != 2 || list.Rules[0].Paused || !list.Rules[1].Paused || list.Rules[1].Rule.Amount.Cur != "USD" {
+		t.Fatalf("rules=%+v", list.Rules)
+	}
+	if list.Rate == nil || !reflect.DeepEqual(src.gotRules, [][]int64{{7}}) {
+		t.Fatalf("rate=%v got=%v", list.Rate, src.gotRules)
+	}
+}
+
+func TestListRules_EmptyScope(t *testing.T) {
+	if _, err := NewReader(&fakeSource{}, nil).ListRules(context.Background(), plan.Scope{}); err == nil {
+		t.Fatal("пустая область должна быть ошибкой")
+	}
+}
