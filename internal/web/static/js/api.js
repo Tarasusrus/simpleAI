@@ -57,6 +57,9 @@ export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + en
 export const reopenItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/reopen' + q(cur));
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));
 
+// Регулярные платежи: список правил повтора, включая приостановленные.
+export const getRecurring = (cur) => call('GET', '/api/plan/recurring' + q(cur));
+
 // Лимиты категорий (ADR-011). Эффект лимита (предпросмотр) и подсказку суммы считает сервер.
 export const addLimit = (cur, body) => call('POST', '/api/plan/limits' + q(cur), body);
 export const editLimit = (cur, id, body) => call('PUT', '/api/plan/limits/' + encodeURIComponent(id) + q(cur), body);

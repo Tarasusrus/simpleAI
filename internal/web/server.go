@@ -62,6 +62,8 @@ type Server struct {
 	txs CategoryTxPlanner
 	// txEditor — страница «Транзакции» (ADR-018); nil — маршруты отвечают 404.
 	txEditor TxEditor
+	// ruleView — список регулярных платежей; nil — маршрут отвечает 404.
+	ruleView RuleViewer
 }
 
 // New собирает сервер. Невалидный конфиг (в том числе слабый токен) — ошибка:
@@ -105,10 +107,14 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("PATCH /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleEdit)))
 	s.registerLimitRoutes(mux)
 	s.registerTxRoutes(mux)
+	s.registerRuleRoutes(mux)
 	files := http.FileServerFS(sub)
 	// Страница «Транзакции» (ADR-018): /transactions?focus=<id> отдаёт тот же HTML, фокус разбирает скрипт.
 	mux.HandleFunc("GET /transactions", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, sub, "transactions.html")
+	})
+	mux.HandleFunc("GET /recurring", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "recurring.html")
 	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.

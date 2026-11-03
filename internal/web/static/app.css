@@ -131,3 +131,4 @@ button.ghost.bad{color:var(--bad);border-color:var(--bad)}
 .seg.hide{display:none}
 .seg.inc{display:flex;flex-wrap:wrap;gap:8px}.seg.inc button{border-radius:9px;border:1px solid var(--line)}
 button:disabled{opacity:.5;cursor:not-allowed}
+.rsum{padding:12px 14px;margin-bottom:10px}.rtot{font-size:24px;font-weight:700}
