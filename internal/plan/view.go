@@ -49,9 +49,11 @@ type WindowInfo struct {
 	Start, End    Date
 	DaysLeft      int
 	AnchorPlanned bool
-	// Days — длина окна; Adjusted — длина поправлена владельцем и не равна 14 (ADR-020).
+	// Days — длина окна; Adjusted — длина не равна 14 (поправлена или выросла сама, ADR-020/022).
 	Days     int
 	Adjusted bool
+	// Ongoing — окно закончилось, а зарплаты нет: идёт до следующего поступления (ADR-022).
+	Ongoing bool
 }
 
 // Row — строка ленты, «без даты», следующего окна и деталей категории.

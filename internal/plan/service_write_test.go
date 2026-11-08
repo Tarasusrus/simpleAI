@@ -155,12 +155,22 @@ func TestService_AddPayment_WindowChoice(t *testing.T) {
 	}
 }
 
-// Нет открытого окна (последнее закончилось) — «в окно» невозможно.
-func TestService_AddPayment_NoWindow(t *testing.T) {
+// Окно закончилось, зарплаты нет (ADR-022): окно идёт дальше, «в это окно» ставит платёж в него, а «в следующее»
+// ждёт следующего окна — не попадает в растущее текущее.
+func TestService_AddPayment_OngoingWindow(t *testing.T) {
 	w := &fakeWriter{}
-	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 6, 1)) // окно закончилось 18.03
-	if _, err := s.AddPayment(context.Background(), AddPaymentInput{Name: "x", Window: WindowCurrent}); !errors.Is(err, ErrNoWindow) {
-		t.Errorf("ждали ErrNoWindow: %v", err)
+	s := wsvc(&fakeReader{snap: baseSnap()}, w, d(2026, 6, 1)) // окно 05–18.03 закончилось давно
+	if _, err := s.AddPayment(context.Background(), AddPaymentInput{Name: "x", Window: WindowCurrent}); err != nil {
+		t.Fatalf("в идущее окно: %v", err)
+	}
+	if ws := w.added[0].WindowStart; ws == nil || *ws != d(2026, 3, 5) {
+		t.Fatalf("«в это окно»: %v, ждали 05.03", ws)
+	}
+	if _, err := s.AddPayment(context.Background(), AddPaymentInput{Name: "y", Window: WindowNext}); err != nil {
+		t.Fatal(err)
+	}
+	if ws := w.added[1].WindowStart; ws == nil || *ws != d(2026, 3, 19) {
+		t.Fatalf("«в следующее» от заданного конца 18.03: %v", ws)
 	}
 	snap := baseSnap()
 	snap.Incomes = nil
@@ -168,46 +178,47 @@ func TestService_AddPayment_NoWindow(t *testing.T) {
 	if _, err := s.AddPayment(context.Background(), AddPaymentInput{Name: "x", Window: WindowNext}); !errors.Is(err, ErrNoWindow) {
 		t.Errorf("без поступлений ждали ErrNoWindow: %v", err)
 	}
-	if len(w.added) != 0 {
-		t.Error("при отказе запись всё равно ушла писателю")
+}
+
+// Платёж «в следующее» в идущем окне не считается в нём, а ждёт следующего окна.
+func TestService_NextWindowPaymentNotInOngoing(t *testing.T) {
+	snap := baseSnap()
+	snap.Payments = append(snap.Payments, Event{Key: "planned:n", Kind: KindPayment, State: StatePlanned, Name: "потом",
+		Amount: rub(7000), WindowStart: dp(2026, 3, 19), Source: SourcePlanned})
+	res, err := svc(&fakeReader{snap: snap}, d(2026, 6, 1)).View(context.Background(), CurRUB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res.View.Timeline {
+		if r.Key == "planned:n" {
+			t.Fatalf("платёж «в следующее» попал в идущее окно: %+v", r)
+		}
 	}
 }
 
-// Сценарий владельца: окно закончилось, он вносит ожидаемое поступление на будущую
-// дату — экран переходит на это окно, и расходы можно планировать в него.
-//
-// Мутация: убрать ветку StateBetween из View — тест краснеет.
-func TestService_View_BetweenFocusesNextWindow(t *testing.T) {
+// Окно закончилось, владелец вносит ожидаемую зарплату на будущую дату (ADR-022): прошлое окно дотягивается до дня
+// перед ней, «в это окно» — по-прежнему оно, а «в следующее» — окно от зарплаты.
+func TestService_View_GapGrowsCurrentUntilNextIncome(t *testing.T) {
 	snap := baseSnap()
 	snap.Incomes = append(snap.Incomes, Event{
 		Key: "planned:p1", Kind: KindIncome, State: StatePlanned, Name: "зарплата", Amount: rub(120000),
 		Date: dp(2026, 3, 25), Source: SourcePlanned,
 	})
-	snap.Payments = append(snap.Payments, Event{
-		Key: "planned:r1", Kind: KindPayment, State: StatePlanned, Name: "тоник", Amount: rub(1000),
-		WindowStart: dp(2026, 3, 25), Source: SourcePlanned,
-	})
-	res, err := svc(&fakeReader{snap: snap}, d(2026, 3, 22)).View(context.Background(), CurRUB) // окно 05–18.03 закончилось
+	res, err := svc(&fakeReader{snap: snap}, d(2026, 3, 22)).View(context.Background(), CurRUB) // окно 05–18.03
 	if err != nil {
 		t.Fatal(err)
 	}
 	v := res.View
-	if v.State != StateUpcoming || v.Window == nil || v.Window.Start != d(2026, 3, 25) || !v.Window.AnchorPlanned {
-		t.Fatalf("экран должен показывать будущее окно от 25.03: %+v %+v", v.State, v.Window)
+	if v.State != StateCurrent || v.Window == nil || v.Window.Start != d(2026, 3, 5) || v.Window.End != d(2026, 3, 24) ||
+		v.Window.DaysLeft != 3 || v.Window.Ongoing {
+		t.Fatalf("окно до дня перед зарплатой: %+v %+v", v.State, v.Window)
 	}
-	if v.Income.Expected != 120000 || v.Payments < 1000 {
-		t.Errorf("ожидаемое %d (ждали 120000), платежи %d (ждали ≥1000, тоник в этом окне)", v.Income.Expected, v.Payments)
-	}
-	if res.Meta.Today != d(2026, 3, 22) {
-		t.Errorf("Meta.Today должен остаться настоящим: %v", res.Meta.Today)
-	}
-	// «В это окно» теперь — это окно от 25.03.
 	w := &fakeWriter{}
-	if _, err := wsvc(&fakeReader{snap: snap}, w, d(2026, 3, 22)).AddPayment(context.Background(), AddPaymentInput{Name: "ещё", Window: WindowCurrent}); err != nil {
+	if _, err := wsvc(&fakeReader{snap: snap}, w, d(2026, 3, 22)).AddPayment(context.Background(), AddPaymentInput{Name: "ещё", Window: WindowNext}); err != nil {
 		t.Fatal(err)
 	}
 	if ws := w.added[0].WindowStart; ws == nil || *ws != d(2026, 3, 25) {
-		t.Errorf("«в это окно» в зазоре: %v, ждали 25.03", ws)
+		t.Errorf("«в следующее»: %v, ждали 25.03", ws)
 	}
 }
 

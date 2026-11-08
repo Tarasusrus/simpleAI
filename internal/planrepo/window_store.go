@@ -33,15 +33,15 @@ func (r *Reader) readWindows(ctx context.Context, sc plan.Scope) ([]plan.StoredW
 	}
 	out := make([]plan.StoredWindow, 0, len(rows))
 	for _, x := range rows {
-		out = append(out, plan.StoredWindow{ID: x.ID.String(), Start: date(x.Start), End: date(x.End), Deleted: x.Deleted})
+		out = append(out, plan.StoredWindow{ID: x.ID.String(), Start: date(x.Start), End: date(x.End), Deleted: x.Deleted, FixedEnd: x.EndFixed})
 	}
 	return out, nil
 }
 
 // WindowSink — то, что хранилищу окон нужно от budget.Store.
 type WindowSink interface {
-	CreatePlanWindow(ctx context.Context, chatID int64, start, end time.Time) (uuid.UUID, error)
-	UpdatePlanWindow(ctx context.Context, chatIDs []int64, id uuid.UUID, start, end time.Time) error
+	CreatePlanWindow(ctx context.Context, chatID int64, start, end time.Time, endFixed bool) (uuid.UUID, error)
+	UpdatePlanWindow(ctx context.Context, chatIDs []int64, id uuid.UUID, start, end time.Time, endFixed bool) error
 	DeletePlanWindow(ctx context.Context, chatIDs []int64, id uuid.UUID) error
 }
 
@@ -55,11 +55,11 @@ var _ plan.WindowStore = (*WindowStore)(nil)
 var errEmptyScope = errors.New("planrepo: пустая область чатов")
 
 // CreateWindow пишет окно в чат владельца — первый в области (как лимиты и скрытие категорий).
-func (w *WindowStore) CreateWindow(ctx context.Context, sc plan.Scope, start, end plan.Date) (string, error) {
+func (w *WindowStore) CreateWindow(ctx context.Context, sc plan.Scope, start, end plan.Date, fixedEnd bool) (string, error) {
 	if len(sc.ChatIDs) == 0 {
 		return "", errEmptyScope
 	}
-	id, err := w.sink.CreatePlanWindow(ctx, sc.ChatIDs[0], *dbDate(&start), *dbDate(&end))
+	id, err := w.sink.CreatePlanWindow(ctx, sc.ChatIDs[0], *dbDate(&start), *dbDate(&end), fixedEnd)
 	if err != nil {
 		return "", err
 	}
@@ -67,12 +67,12 @@ func (w *WindowStore) CreateWindow(ctx context.Context, sc plan.Scope, start, en
 }
 
 // UpdateWindow меняет даты окна в области.
-func (w *WindowStore) UpdateWindow(ctx context.Context, sc plan.Scope, id string, start, end plan.Date) error {
+func (w *WindowStore) UpdateWindow(ctx context.Context, sc plan.Scope, id string, start, end plan.Date, fixedEnd bool) error {
 	u, err := windowID(sc, id)
 	if err != nil {
 		return err
 	}
-	return mapWindowErr(w.sink.UpdatePlanWindow(ctx, sc.ChatIDs, u, *dbDate(&start), *dbDate(&end)))
+	return mapWindowErr(w.sink.UpdatePlanWindow(ctx, sc.ChatIDs, u, *dbDate(&start), *dbDate(&end), fixedEnd))
 }
 
 // DeleteWindow помечает окно удалённым.

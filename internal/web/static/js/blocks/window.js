@@ -6,9 +6,10 @@ export function canEditWindow(view) {
   return !!view && !!view.window && ['current', 'upcoming', 'between'].includes(view.state);
 }
 
-// Подпись длины: стандартное окно молчит, поправленное говорит, сколько в нём дней.
+// Подпись длины: стандартное окно молчит, поправленное говорит, сколько в нём дней. Идущее окно (закончилось, а
+// зарплаты нет) про длину не говорит: она растёт каждый день (ADR-022).
 export function lengthNote(w) {
-  if (!w || !w.adjusted || !w.days) return '';
+  if (!w || w.ongoing || !w.adjusted || !w.days) return '';
   return 'окно ' + w.days + ' ' + plural(w.days, 'день', 'дня', 'дней') + ' (изменено)';
 }
 
@@ -26,7 +27,8 @@ function editControls(w, ctx) {
   end.addEventListener('change', () => { if (dateReady(end.value, w.end)) ctx.onWindowEnd(end.value); });
   const btn = (label, title, run) => h('button', { type: 'button', class: 'x', title, onclick: run }, label);
   return h('div', { class: 'win-edit' },
-    btn('−1 день', 'Сократить окно на день', () => ctx.onWindowResize(-1)),
+    // У идущего окна конец — сегодня: сократить его некуда.
+    w.ongoing ? null : btn('−1 день', 'Сократить окно на день', () => ctx.onWindowResize(-1)),
     btn('+1 день', 'Продлить окно на день', () => ctx.onWindowResize(1)),
     h('label', null, 'с ', start),
     h('label', null, 'до ', end),
@@ -47,7 +49,7 @@ export function render(view, cur, ctx) {
   const w = view.window;
   const left = w.daysLeft + ' ' + plural(w.daysLeft, 'день', 'дня', 'дней');
   const state = {
-    current: 'осталось ' + left,
+    current: w.ongoing ? 'идёт до следующего поступления' : 'осталось ' + left,
     upcoming: 'окно ещё не началось',
     between: 'окно закончилось, следующее ещё не открыто',
     ended: 'окно закончилось',

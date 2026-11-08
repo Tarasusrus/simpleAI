@@ -15,7 +15,7 @@ type memWindows struct {
 	n int
 }
 
-func (m *memWindows) CreateWindow(_ context.Context, _ plan.Scope, start, end plan.Date) (string, error) {
+func (m *memWindows) CreateWindow(_ context.Context, _ plan.Scope, start, end plan.Date, fixed bool) (string, error) {
 	for _, w := range m.r.snap.Windows {
 		if !w.Deleted && w.Start == start {
 			return w.ID, nil
@@ -23,14 +23,14 @@ func (m *memWindows) CreateWindow(_ context.Context, _ plan.Scope, start, end pl
 	}
 	m.n++
 	id := string(rune('a' + m.n))
-	m.r.snap.Windows = append(m.r.snap.Windows, plan.StoredWindow{ID: id, Start: start, End: end})
+	m.r.snap.Windows = append(m.r.snap.Windows, plan.StoredWindow{ID: id, Start: start, End: end, FixedEnd: fixed})
 	return id, nil
 }
 
-func (m *memWindows) UpdateWindow(_ context.Context, _ plan.Scope, id string, start, end plan.Date) error {
+func (m *memWindows) UpdateWindow(_ context.Context, _ plan.Scope, id string, start, end plan.Date, fixed bool) error {
 	for i, w := range m.r.snap.Windows {
 		if w.ID == id {
-			m.r.snap.Windows[i].Start, m.r.snap.Windows[i].End = start, end
+			m.r.snap.Windows[i].Start, m.r.snap.Windows[i].End, m.r.snap.Windows[i].FixedEnd = start, end, fixed
 			return nil
 		}
 	}

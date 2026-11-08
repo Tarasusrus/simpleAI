@@ -19,6 +19,8 @@ type Window struct {
 	Days       int
 	DaysLeft   int
 	Adjusted   bool
+	// Ongoing — окно закончилось, а зарплаты нет: идёт до следующего поступления (ADR-022).
+	Ongoing bool
 }
 
 // MinWindowDays и MaxWindowDays — допустимая длина окна (как в ядре плана).
@@ -103,5 +105,5 @@ func (p *Plan) window(chatID int64, run func(*plan.Service) (plan.WindowFrame, e
 	if f == (plan.WindowFrame{}) {
 		return Window{}, true, nil // после удаления окна на экране нет
 	}
-	return Window{Start: day(f.Start), End: day(f.End), Days: f.Days, DaysLeft: f.DaysLeft, Adjusted: f.Adjusted}, true, nil
+	return Window{Start: day(f.Start), End: day(f.End), Days: f.Days, DaysLeft: f.DaysLeft, Adjusted: f.Adjusted, Ongoing: f.Ongoing}, true, nil
 }
