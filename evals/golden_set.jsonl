@@ -63,3 +63,7 @@
 {"id":"r058","input":"шлем 1570 бат","expected":{"skill":"budget","action":"add_expense"},"tags":["short_form","no_verb","with_amount","ru"],"notes":"simpleAI-4w5t — тот же случай, предмет перед суммой"}
 {"id":"r059","input":"200 кофе","expected":{"skill":"budget","action":"add_expense"},"tags":["short_form","no_verb","with_amount","ru"],"notes":"simpleAI-4w5t — краткая запись без глагола не должна ломаться правилом 8"}
 {"id":"r060","input":"хочу блендер 3000","expected":{"skill":"advisor","action":"advice"},"tags":["short_form","future_purchase","with_amount","ru"],"notes":"simpleAI-4w5t — краткая запись не должна перехватывать будущую покупку"}
+{"id":"r061","input":"добавь день","expected":{"skill":"plan_window","action":"extend"},"tags":["plan_window","ru"],"notes":"ADR-020 — краткая команда владельца: день окна, не трата"}
+{"id":"r062","input":"продли окно на 3 дня","expected":{"skill":"plan_window","action":"extend"},"tags":["plan_window","ru"],"notes":"ADR-020 — продление окна на N дней"}
+{"id":"r063","input":"сократи окно на 2 дня","expected":{"skill":"plan_window","action":"shrink"},"tags":["plan_window","ru"],"notes":"ADR-020 — сокращение окна"}
+{"id":"r064","input":"поправь окно до 25.10","expected":{"skill":"plan_window","action":"set_end"},"tags":["plan_window","ru"],"notes":"ADR-020 — последний день окна датой"}

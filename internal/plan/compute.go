@@ -217,7 +217,7 @@ func (c calc) core() (View, error) {
 	v := View{
 		State: c.st.Kind,
 		Window: &WindowInfo{Start: c.w.Start, End: c.w.End(), DaysLeft: c.st.DaysLeft,
-			AnchorPlanned: c.w.AnchorPlanned()},
+			AnchorPlanned: c.w.AnchorPlanned(), Days: c.w.Days(), Adjusted: c.w.Adjusted()},
 	}
 	var err error
 	for i := range c.w.Incomes {

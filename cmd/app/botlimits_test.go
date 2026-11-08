@@ -58,3 +58,19 @@ type planReaderStub struct{}
 func (planReaderStub) Snapshot(context.Context, int64, string) (botlimits.Snapshot, bool, error) {
 	return botlimits.Snapshot{}, false, nil
 }
+
+// Правка окна (ADR-020) подключается всякий раз, когда план есть, независимо от флагов лимитов.
+//
+// Мутация: вернуть ранний выход `if b.reader == nil { return nil }` в options — без флагов навыка окна нет.
+func TestBotLimits_OptionsWindowWithoutFlags(t *testing.T) {
+	var w botlimits.WindowEditor = botlimits.NewPlan(nil, botlimits.ScopeOfChats(nil))
+	if got := len((botLimits{windows: w}).options()); got != 1 {
+		t.Fatalf("без флагов: %d опций, ждали 1 (навык окна)", got)
+	}
+	if got := len((botLimits{reader: planReaderStub{}, windows: w}).options()); got != 2 {
+		t.Fatalf("с флагом: %d опций, ждали 2", got)
+	}
+	if got := len((botLimits{}).options()); got != 0 {
+		t.Fatalf("плана нет: %d опций", got)
+	}
+}

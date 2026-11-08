@@ -6,15 +6,28 @@ import "sort"
 // приходят примерно раз в две недели, и окно должно быть одинаковым всегда.
 const windowDays = 14
 
-// Window — 14 календарных дней от даты поступления. Хранит только поступления:
-// платежи по окнам раскладывает Compute.
+// Window — календарные дни от даты поступления (по умолчанию 14, владелец может поправить длину,
+// ADR-020). Хранит только поступления: платежи по окнам раскладывает Compute.
 type Window struct {
 	Start   Date
 	Incomes []Event
+	// Length — длина в днях; 0 — по умолчанию (windowDays). Задаётся правкой окна (WindowLength).
+	Length int
 }
 
-// End — последний день окна включительно (Start + 13).
-func (w Window) End() Date { return w.Start.AddDays(windowDays - 1) }
+// Days — длина окна в днях.
+func (w Window) Days() int {
+	if w.Length > 0 {
+		return w.Length
+	}
+	return windowDays
+}
+
+// Adjusted — длина окна поправлена владельцем и отличается от стандартной.
+func (w Window) Adjusted() bool { return w.Days() != windowDays }
+
+// End — последний день окна включительно (Start + Days − 1).
+func (w Window) End() Date { return w.Start.AddDays(w.Days() - 1) }
 
 // AnchorPlanned — окно открыто ожидаемым, а не пришедшим поступлением.
 func (w Window) AnchorPlanned() bool {
@@ -30,9 +43,20 @@ func (w Window) AnchorPlanned() bool {
 // обычный приход открывает окно: иначе деньги исчезли бы с экрана. Обычные добавляются после открывающих, поэтому
 // Incomes[0] остаётся якорем окна.
 //
+// Длина окна — по умолчанию 14 дней; правка (lengths, ключ — дата начала окна, ADR-020) меняет конец окна, и
+// цепочка строится уже от него: продлённое окно забирает открывающее поступление в себя, сокращённое оставляет зазор.
+// Правка для даты, с которой окно не начинается, ничего не меняет.
+//
 // Сортировка (дата, факт раньше плана, ключ) делает результат независимым от порядка входа. Вызывающий отдаёт ВСЕ
 // поступления с начала: цепочка окон зависит от точки отсечки истории.
-func BuildWindows(incomes []Event) []Window {
+func BuildWindows(incomes []Event, lengths ...WindowLength) []Window {
+	byStart := make(map[Date]int, len(lengths))
+	for _, l := range lengths {
+		byStart[l.Start] = l.Days
+	}
+	open := func(e Event) Window {
+		return Window{Start: *e.Date, Incomes: []Event{e}, Length: byStart[*e.Date]}
+	}
 	ws := []Window{}
 	var opening, joining []Event
 	for _, e := range incomes {
@@ -52,10 +76,10 @@ func BuildWindows(incomes []Event) []Window {
 			ws[n-1].Incomes = append(ws[n-1].Incomes, e)
 			continue
 		}
-		ws = append(ws, Window{Start: *e.Date, Incomes: []Event{e}})
+		ws = append(ws, open(e))
 	}
 	if len(ws) == 0 && len(joining) > 0 {
-		ws = append(ws, Window{Start: *joining[0].Date, Incomes: []Event{joining[0]}})
+		ws = append(ws, open(joining[0]))
 		joining = joining[1:]
 	}
 	for _, e := range joining {
@@ -118,7 +142,7 @@ func Locate(ws []Window, today Date) WindowState {
 		return WindowState{StateNone, -1, 0}
 	}
 	if today.Compare(ws[0].Start) < 0 {
-		return WindowState{StateUpcoming, 0, windowDays}
+		return WindowState{StateUpcoming, 0, ws[0].Days()}
 	}
 	last := len(ws) - 1
 	for i, w := range ws {

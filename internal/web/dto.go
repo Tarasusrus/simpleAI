@@ -65,6 +65,10 @@ type WindowDTO struct {
 	End           string `json:"end"`
 	DaysLeft      int    `json:"daysLeft"`
 	AnchorPlanned bool   `json:"anchorPlanned"`
+	// Days — длина окна; Adjusted — длина поправлена (ADR-020). Поля добавлены без смены версии: старый фронт их
+	// просто не читает.
+	Days     int  `json:"days"`
+	Adjusted bool `json:"adjusted"`
 }
 
 type KPIDTO struct {
@@ -180,6 +184,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		out.Window = &WindowDTO{
 			Start: dateStr(v.Window.Start), End: dateStr(v.Window.End),
 			DaysLeft: v.Window.DaysLeft, AnchorPlanned: v.Window.AnchorPlanned,
+			Days: v.Window.Days, Adjusted: v.Window.Adjusted,
 		}
 	}
 	out.AvgDays = v.AvgDays

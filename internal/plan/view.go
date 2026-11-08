@@ -49,6 +49,9 @@ type WindowInfo struct {
 	Start, End    Date
 	DaysLeft      int
 	AnchorPlanned bool
+	// Days — длина окна; Adjusted — длина поправлена владельцем и не равна 14 (ADR-020).
+	Days     int
+	Adjusted bool
 }
 
 // Row — строка ленты, «без даты», следующего окна и деталей категории.

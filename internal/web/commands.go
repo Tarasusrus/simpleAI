@@ -348,6 +348,8 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrNoWindow:            "Открытого окна нет: сначала добавь ожидаемое поступление с датой.",
 		plan.ErrInvalidEvent:        "Укажи либо дату, либо окно, а не оба сразу.",
 		plan.ErrUnknownCategory:     "Такой категории нет. Выбери из списка или оставь поле пустым.",
+		plan.ErrBadWindowLength:     "Окно: от 1 до 62 дней, конец не раньше начала.",
+		plan.ErrWindowEndPast:       "Конец окна не может быть раньше сегодня.",
 	}
 	for target, msg := range bad {
 		if errors.Is(err, target) {

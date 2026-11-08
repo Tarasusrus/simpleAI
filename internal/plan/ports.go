@@ -37,6 +37,8 @@ type Snapshot struct {
 	Limits []Limit
 	// Dismissed — названия категорий, скрытых из блока «Не запланировано» (ADR-015 §3).
 	Dismissed []string
+	// WindowLengths — поправленные владельцем длины окон (ADR-020); у остальных окон 14 дней.
+	WindowLengths []WindowLength
 }
 
 // Reader читает данные для плана. Реализует internal/planrepo.

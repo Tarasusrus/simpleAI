@@ -27,4 +27,6 @@ var (
 	ErrLimitExists         = errors.New("plan: лимит на эту категорию в этом окне уже есть")
 	ErrUnknownCategory     = errors.New("plan: такой категории расходов нет")
 	ErrLimitCategory       = errors.New("plan: у лимита должна быть категория расходов (не «Без категории»)")
+	ErrBadWindowLength     = errors.New("plan: длина окна вне 1..62 дней")
+	ErrWindowEndPast       = errors.New("plan: конец окна раньше сегодня")
 )
