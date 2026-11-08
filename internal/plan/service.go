@@ -100,6 +100,11 @@ func (s *Service) load(ctx context.Context) (state, error) {
 		return state{}, fmt.Errorf("%w: сегодня %v", ErrBadDate, today)
 	}
 	from := today.AddDays(-lookbackDays)
+	// Последнее окно может идти дольше горизонта догона (давно без зарплаты, ADR-022): сроки повторов разворачиваются
+	// с его начала, иначе ранние платежи окна пропали бы из расчёта.
+	if s := lastStoredStart(snap.Windows); s != nil && s.Compare(from) < 0 {
+		from = *s
+	}
 	to := Date{today.Year, today.Month, 1}.AddMonths(horizonMonths).AddDays(-1)
 	expanded, err := Expand(snap.Rules, from, to)
 	if err != nil {
@@ -117,11 +122,24 @@ func (s *Service) load(ctx context.Context) (state, error) {
 			payments = append(payments, e)
 		}
 	}
-	ws := BuildWindows(incomes, snap.Windows...)
+	ws := BuildGrowingWindows(incomes, snap.Windows...)
 	if err := s.materialize(ctx, ws, today); err != nil {
 		return state{}, err
 	}
+	ExtendLast(ws, today)
 	return state{snap: snap, today: today, windows: ws, events: payments, incomes: incomes, limits: snap.Limits, st: Locate(ws, today)}, nil
+}
+
+// lastStoredStart — начало последнего действующего сохранённого окна; nil, если таких нет.
+func lastStoredStart(ws []StoredWindow) *Date {
+	var last *Date
+	for _, w := range ws {
+		if !w.Deleted && (last == nil || w.Start.Compare(*last) > 0) {
+			start := w.Start
+			last = &start
+		}
+	}
+	return last
 }
 
 // focus — окно, которое описывает экран, и «сегодня» для его расчёта. В зазоре
@@ -402,7 +420,9 @@ func (st state) chosenWindowStart(c WindowChoice) (Date, error) {
 	if idx+1 < len(st.windows) {
 		return st.windows[idx+1].Start, nil
 	}
-	return st.windows[idx].End().AddDays(1), nil
+	// От заданного конца, а не от выросшего: иначе день «после конца» оказался бы внутри растущего окна, и платёж
+	// «в следующее» тихо попал бы в текущее (ADR-022).
+	return st.windows[idx].BaseEnd().AddDays(1), nil
 }
 
 // Delete удаляет плановую запись по ключу вида "planned:<id>" или по самому id.

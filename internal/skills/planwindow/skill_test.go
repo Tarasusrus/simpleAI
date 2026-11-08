@@ -169,6 +169,14 @@ func TestRun_Delete(t *testing.T) {
 	}
 }
 
+func TestRun_ShowOngoing(t *testing.T) {
+	f := &fakeWindows{cur: botlimits.Window{Start: utc(2026, 10, 5), End: utc(2026, 10, 25), Days: 21, DaysLeft: 1, Adjusted: true, Ongoing: true}}
+	out, err := New(f, nil).Run(chatCtx(), `{"action":"show"}`)
+	if err != nil || !strings.Contains(out, "идёт до следующего поступления") || strings.Contains(out, "осталось") {
+		t.Fatalf("идущее окно: %q err=%v", out, err)
+	}
+}
+
 func TestRun_Show(t *testing.T) {
 	f := &fakeWindows{cur: botlimits.Window{Start: utc(2026, 10, 5), End: utc(2026, 10, 18), Days: 14, DaysLeft: 9}}
 	out, err := New(f, nil).Run(chatCtx(), `{"action":"show"}`)

@@ -227,13 +227,17 @@ func (s *Skill) reply(ctx context.Context, chatID int64, in input, w botlimits.W
 		}
 		b.WriteString("Окно удалено. Теперь на экране: ")
 	}
-	fmt.Fprintf(&b, "Окно %s — %s (%d %s", w.Start.Format("02.01"), w.End.Format("02.01"), w.Days, safetospend.PluralDays(w.Days))
-	if w.Adjusted {
-		b.WriteString(", изменено")
-	}
-	b.WriteString(")")
-	if w.DaysLeft > 0 {
-		fmt.Fprintf(&b, ", осталось %d %s", w.DaysLeft, safetospend.PluralDays(w.DaysLeft))
+	if w.Ongoing {
+		fmt.Fprintf(&b, "Окно с %s идёт до следующего поступления: зарплаты пока нет, окно растёт каждый день", w.Start.Format("02.01"))
+	} else {
+		fmt.Fprintf(&b, "Окно %s — %s (%d %s", w.Start.Format("02.01"), w.End.Format("02.01"), w.Days, safetospend.PluralDays(w.Days))
+		if w.Adjusted {
+			b.WriteString(", изменено")
+		}
+		b.WriteString(")")
+		if w.DaysLeft > 0 {
+			fmt.Fprintf(&b, ", осталось %d %s", w.DaysLeft, safetospend.PluralDays(w.DaysLeft))
+		}
 	}
 	b.WriteString(".")
 	if line := s.numbersLine(ctx, chatID); line != "" {

@@ -14,20 +14,33 @@ type Window struct {
 	ID      string
 	Start   Date
 	Incomes []Event
-	// Length — длина в днях; 0 — по умолчанию (windowDays).
+	// Length — заданная длина в днях (сохранённая или стандартная); 0 — по умолчанию (windowDays).
 	Length int
+	// FixedEnd — конец поставил владелец: окно само не растёт в зазор до следующего (ADR-022).
+	FixedEnd bool
+	// Extra — на сколько дней окно само выросло до следующего поступления (ADR-022).
+	Extra int
+	// Ongoing — последнее окно закончилось, а новой зарплаты нет: окно идёт и растёт до сегодня (ADR-022).
+	Ongoing bool
 }
 
-// Days — длина окна в днях.
-func (w Window) Days() int {
+// baseDays — заданная длина без автоматического роста.
+func (w Window) baseDays() int {
 	if w.Length > 0 {
 		return w.Length
 	}
 	return windowDays
 }
 
-// Adjusted — длина окна отличается от стандартной.
-func (w Window) Adjusted() bool { return w.Days() != windowDays }
+// Days — длина окна в днях вместе с автоматическим ростом.
+func (w Window) Days() int { return w.baseDays() + w.Extra }
+
+// BaseEnd — заданный конец окна, без автоматического роста: его хранит база и его правит владелец.
+func (w Window) BaseEnd() Date { return w.Start.AddDays(w.baseDays() - 1) }
+
+// Adjusted — заданная длина окна отличается от стандартной: её поправил владелец. Окно, которое просто выросло
+// само до следующего поступления, поправленным не считается.
+func (w Window) Adjusted() bool { return w.baseDays() != windowDays }
 
 // Stored — окно сохранено в базе.
 func (w Window) Stored() bool { return w.ID != "" }
@@ -46,6 +59,8 @@ type StoredWindow struct {
 	ID         string
 	Start, End Date
 	Deleted    bool
+	// FixedEnd — конец поставил владелец (ADR-022).
+	FixedEnd bool
 }
 
 func (sw StoredWindow) contains(d Date) bool {
@@ -69,6 +84,16 @@ func (sw StoredWindow) contains(d Date) bool {
 // Сортировка (дата, факт раньше плана, ключ) делает результат независимым от порядка входа. Вызывающий отдаёт ВСЕ
 // поступления с начала: цепочка расчётных окон зависит от точки отсечки истории.
 func BuildWindows(incomes []Event, stored ...StoredWindow) []Window {
+	return buildWindows(incomes, stored, false)
+}
+
+// BuildGrowingWindows — то же, что BuildWindows, но окна сами дотягиваются до следующего (growIntoGaps, ADR-022).
+// Так строит окна сервис; BuildWindows без роста остаётся основой расчёта и его тестов.
+func BuildGrowingWindows(incomes []Event, stored ...StoredWindow) []Window {
+	return buildWindows(incomes, stored, true)
+}
+
+func buildWindows(incomes []Event, stored []StoredWindow, grow bool) []Window {
 	var active, deleted []StoredWindow
 	for _, sw := range stored {
 		if sw.Deleted {
@@ -84,7 +109,7 @@ func BuildWindows(incomes []Event, stored ...StoredWindow) []Window {
 		if lastEnd != nil && sw.Start.Compare(*lastEnd) <= 0 {
 			continue // пересекающиеся окна разных чатов области: оставляем раннее, расчёт не падает
 		}
-		ws = append(ws, Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1})
+		ws = append(ws, Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1, FixedEnd: sw.FixedEnd})
 		end := sw.End
 		lastEnd = &end
 	}
@@ -137,11 +162,43 @@ func BuildWindows(incomes []Event, stored ...StoredWindow) []Window {
 	if len(ws) == 0 {
 		return ws // все окна удалены: поступлениям некуда встать, экран покажет «окон нет»
 	}
+	if grow {
+		growIntoGaps(ws)
+	}
 	for _, e := range joining {
 		i := windowIndexFor(ws, *e.Date)
 		ws[i].Incomes = append(ws[i].Incomes, e)
 	}
 	return ws
+}
+
+// growIntoGaps — окно само дотягивается до дня перед следующим окном (ADR-022): зарплата пришла позже конца окна
+// (конец на выходных, деньги в понедельник), и дни между ними — всё ещё это окно. Окно, конец которого поставил
+// владелец, не растёт. Рост считается до раскладки обычных приходов: приход в бывшем зазоре идёт в выросшее окно.
+func growIntoGaps(ws []Window) {
+	for i := 0; i+1 < len(ws); i++ {
+		if ws[i].FixedEnd {
+			continue
+		}
+		if gap := DaysBetween(ws[i].End(), ws[i+1].Start) - 1; gap > 0 {
+			ws[i].Extra += gap
+		}
+	}
+}
+
+// ExtendLast — последнее окно закончилось, а новой зарплаты нет: окно идёт дальше и растёт до сегодня (ADR-022).
+// Свободные деньги остаются в нём, и в него можно вносить. Как только появится зарплата (пришедшая или ожидаемая),
+// окно встанет до дня перед ней (growIntoGaps). Действует и при конце, поставленном владельцем: иначе на экране не
+// было бы окна вовсе.
+func ExtendLast(ws []Window, today Date) {
+	if len(ws) == 0 {
+		return
+	}
+	last := &ws[len(ws)-1]
+	if d := DaysBetween(last.End(), today); d > 0 {
+		last.Extra += d
+		last.Ongoing = true
+	}
 }
 
 func inAny(ws []Window, d Date) bool {
@@ -256,11 +313,11 @@ func Locate(ws []Window, today Date) WindowState {
 }
 
 // ResolveWindow — окно для платежа, у которого владелец выбрал «в это/следующее
-// окно»: первое окно, чей конец не раньше выбранной даты. ok=false, если такого
-// окна ещё нет.
+// окно»: первое окно, чей заданный конец (без автоматического роста, ADR-022) не раньше
+// выбранной даты. ok=false, если такого окна ещё нет.
 func ResolveWindow(ws []Window, windowStart Date) (int, bool) {
 	for i, w := range ws {
-		if w.End().Compare(windowStart) >= 0 {
+		if w.BaseEnd().Compare(windowStart) >= 0 {
 			return i, true
 		}
 	}

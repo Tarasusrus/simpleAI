@@ -21,10 +21,11 @@ const (
 // таблицей. Запись идёт в первый чат области, правка и удаление — по всей области. Реализует internal/planrepo.
 type WindowStore interface {
 	// CreateWindow сохраняет окно и возвращает его id. Окно с тем же началом уже есть — возвращает его id
-	// (повтор безопасен: окно может сохранить и экран, и бот одновременно).
-	CreateWindow(ctx context.Context, sc Scope, start, end Date) (string, error)
+	// (повтор безопасен: окно может сохранить и экран, и бот одновременно). fixedEnd — конец поставил владелец:
+	// окно само не растёт до следующего (ADR-022).
+	CreateWindow(ctx context.Context, sc Scope, start, end Date, fixedEnd bool) (string, error)
 	// UpdateWindow меняет даты окна. Нет окна в области — ErrNotFound.
-	UpdateWindow(ctx context.Context, sc Scope, id string, start, end Date) error
+	UpdateWindow(ctx context.Context, sc Scope, id string, start, end Date, fixedEnd bool) error
 	// DeleteWindow помечает окно удалённым. Нет окна в области — ErrNotFound.
 	DeleteWindow(ctx context.Context, sc Scope, id string) error
 }
@@ -35,6 +36,8 @@ type WindowFrame struct {
 	Days       int
 	DaysLeft   int
 	Adjusted   bool
+	// Ongoing — окно закончилось, а зарплаты нет: оно идёт до следующего поступления (ADR-022).
+	Ongoing bool
 }
 
 // WithWindowStore подключает хранение окон и возвращает сервис. Без него окна только считаются (как до ADR-021),
@@ -58,12 +61,13 @@ func (s *Service) CurrentWindow(ctx context.Context) (WindowFrame, error) {
 	return ld.frameOf(w.Start)
 }
 
-// ResizeWindow продлевает (days > 0) или сокращает (days < 0) окно на экране, двигая его конец.
+// ResizeWindow продлевает (days > 0) или сокращает (days < 0) окно на экране, двигая его конец. Конец считается
+// от того, что видно на экране (с автоматическим ростом), и дальше считается поставленным владельцем.
 func (s *Service) ResizeWindow(ctx context.Context, days int) (WindowFrame, error) {
 	if days == 0 {
 		return WindowFrame{}, fmt.Errorf("%w: изменение на 0 дней", ErrBadWindowLength)
 	}
-	return s.editWindow(ctx, func(w Window) (Date, Date) { return w.Start, w.End().AddDays(days) })
+	return s.editWindow(ctx, func(w Window) (Date, Date, bool) { return w.Start, w.End().AddDays(days), true })
 }
 
 // SetWindowEnd ставит окну на экране последний день end (включительно).
@@ -71,16 +75,28 @@ func (s *Service) SetWindowEnd(ctx context.Context, end Date) (WindowFrame, erro
 	if !end.Valid() {
 		return WindowFrame{}, fmt.Errorf("%w: %v", ErrBadDate, end)
 	}
-	return s.editWindow(ctx, func(w Window) (Date, Date) { return w.Start, end })
+	return s.editWindow(ctx, func(w Window) (Date, Date, bool) { return w.Start, end, true })
 }
 
 // SetWindowStart ставит окну на экране первый день start. Поступления, оказавшиеся вне окна, попадают в соседние
-// окна по дате.
+// окна по дате. Заданный конец и признак «конец поставил владелец» не меняются: окно, которое росло само, растёт и
+// дальше.
 func (s *Service) SetWindowStart(ctx context.Context, start Date) (WindowFrame, error) {
 	if !start.Valid() {
 		return WindowFrame{}, fmt.Errorf("%w: %v", ErrBadDate, start)
 	}
-	return s.editWindow(ctx, func(w Window) (Date, Date) { return start, w.End() })
+	return s.editWindow(ctx, func(w Window) (Date, Date, bool) {
+		// У растущего окна заданный конец может быть уже в прошлом (окно идёт или выросло в зазор): он остаётся, а рост
+		// досчитается сам. Начало позже видимого конца — длина меньше дня, checkBounds откажет.
+		if start.Compare(w.End()) > 0 {
+			return start, w.End(), w.FixedEnd
+		}
+		end := w.BaseEnd()
+		if !w.FixedEnd && end.Compare(start) < 0 {
+			end = start
+		}
+		return start, end, w.FixedEnd
+	})
 }
 
 // DeleteWindow удаляет окно на экране. Нельзя удалить окно, если после этого на экране не останется окна (единственное
@@ -121,16 +137,18 @@ func (st state) screenAfterDelete(w Window) bool {
 	}
 	for _, o := range st.windows {
 		if o.Stored() || o.Start == w.Start {
-			stored = append(stored, StoredWindow{ID: o.ID, Start: o.Start, End: o.End(), Deleted: o.Start == w.Start})
+			stored = append(stored, StoredWindow{ID: o.ID, Start: o.Start, End: o.BaseEnd(), FixedEnd: o.FixedEnd, Deleted: o.Start == w.Start})
 		}
 	}
-	k := Locate(BuildWindows(st.incomes, stored...), st.today).Kind
+	ws := BuildGrowingWindows(st.incomes, stored...)
+	ExtendLast(ws, st.today)
+	k := Locate(ws, st.today).Kind
 	return k != StateEnded && k != StateNone
 }
 
 // editWindow — общий путь правки дат: найти окно на экране, посчитать новые границы, проверить, сохранить (окно,
 // ещё не сохранённое, сохраняется), перечитать.
-func (s *Service) editWindow(ctx context.Context, bounds func(Window) (Date, Date)) (WindowFrame, error) {
+func (s *Service) editWindow(ctx context.Context, bounds func(Window) (start, end Date, fixedEnd bool)) (WindowFrame, error) {
 	if s.windows == nil {
 		return WindowFrame{}, ErrReadOnly
 	}
@@ -142,17 +160,20 @@ func (s *Service) editWindow(ctx context.Context, bounds func(Window) (Date, Dat
 	if err != nil {
 		return WindowFrame{}, err
 	}
-	start, end := bounds(w)
-	if err := ld.checkBounds(w, start, end); err != nil {
+	start, end, fixed := bounds(w)
+	if err := ld.checkBounds(w, start, end, fixed); err != nil {
 		return WindowFrame{}, err
 	}
-	// Расчётное окно сохраняется сразу с новыми датами — одной записью, без промежуточного состояния.
-	if w.Stored() {
-		err = s.windows.UpdateWindow(ctx, s.scope, w.ID, start, end)
-	} else {
-		_, err = s.windows.CreateWindow(ctx, s.scope, start, end)
+	// Расчётное окно сохраняется и сразу получает новые даты. Правка идёт отдельной записью даже после создания:
+	// если окно с тем же началом успели сохранить параллельно (экран и бот), создание вернёт его id, и правка не
+	// потеряется.
+	id := w.ID
+	if !w.Stored() {
+		if id, err = s.windows.CreateWindow(ctx, s.scope, start, end, fixed); err != nil {
+			return WindowFrame{}, err
+		}
 	}
-	if err != nil {
+	if err := s.windows.UpdateWindow(ctx, s.scope, id, start, end, fixed); err != nil {
 		return WindowFrame{}, err
 	}
 	ld, err = s.load(ctx)
@@ -164,21 +185,25 @@ func (s *Service) editWindow(ctx context.Context, bounds func(Window) (Date, Dat
 
 // checkBounds — правила дат окна: длина 1..62 дня; конец не раньше сегодня (иначе окно пропало бы с экрана,
 // следующая команда правила бы уже другое окно, и правку нельзя было бы откатить); не пересекаться с другими
-// сохранёнными окнами (расчётные соседи пересчитаются сами).
-func (st state) checkBounds(w Window, start, end Date) error {
+// сохранёнными окнами по их заданным датам (автоматический рост соседа не мешает: он пересчитается сам; расчётные
+// соседи тоже пересчитаются).
+func (st state) checkBounds(w Window, start, end Date, fixed bool) error {
 	days := DaysBetween(start, end) + 1
-	if days < MinWindowDays || days > MaxWindowDays {
+	// Окно, которое само выросло длиннее предела (долго без зарплаты), можно сокращать; удлинять сверх предела — нет.
+	if days < MinWindowDays || days > MaxWindowDays && days > w.Days() {
 		return fmt.Errorf("%w: %d", ErrBadWindowLength, days)
 	}
-	if end.Compare(st.today) < 0 {
+	// Растущему окну (конец не владельца) заданный конец в прошлом не страшен: рост дотянет окно до следующего
+	// поступления или до сегодня (ADR-022).
+	if fixed && end.Compare(st.today) < 0 {
 		return fmt.Errorf("%w: конец окна раньше сегодня", ErrWindowEndPast)
 	}
 	for _, o := range st.windows {
 		if !o.Stored() || o.Start == w.Start {
 			continue
 		}
-		if start.Compare(o.End()) <= 0 && end.Compare(o.Start) >= 0 {
-			return fmt.Errorf("%w: окно %v–%v", ErrWindowOverlap, o.Start, o.End())
+		if start.Compare(o.BaseEnd()) <= 0 && end.Compare(o.Start) >= 0 {
+			return fmt.Errorf("%w: окно %v–%v", ErrWindowOverlap, o.Start, o.BaseEnd())
 		}
 	}
 	return nil
@@ -189,7 +214,7 @@ func (s *Service) ensureStored(ctx context.Context, w Window) (string, error) {
 	if w.Stored() {
 		return w.ID, nil
 	}
-	return s.windows.CreateWindow(ctx, s.scope, w.Start, w.End())
+	return s.windows.CreateWindow(ctx, s.scope, w.Start, w.BaseEnd(), w.FixedEnd)
 }
 
 // materialize сохраняет начавшиеся расчётные окна (ADR-021): с первого дня окно живёт само и от поступлений больше
@@ -203,7 +228,7 @@ func (s *Service) materialize(ctx context.Context, ws []Window, today Date) erro
 		if ws[i].Stored() || ws[i].Start.Compare(today) > 0 {
 			continue
 		}
-		id, err := s.windows.CreateWindow(ctx, s.scope, ws[i].Start, ws[i].End())
+		id, err := s.windows.CreateWindow(ctx, s.scope, ws[i].Start, ws[i].BaseEnd(), false) // рост не храним
 		if err != nil {
 			return fmt.Errorf("plan: сохранить окно %v: %w", ws[i].Start, err)
 		}
@@ -228,7 +253,7 @@ func (st state) frameOf(start Date) (WindowFrame, error) {
 		if w.Start != start {
 			continue
 		}
-		f := WindowFrame{Start: w.Start, End: w.End(), Days: w.Days(), Adjusted: w.Adjusted()}
+		f := WindowFrame{Start: w.Start, End: w.End(), Days: w.Days(), Adjusted: w.Adjusted(), Ongoing: w.Ongoing}
 		switch {
 		case st.today.Compare(w.Start) < 0:
 			f.DaysLeft = w.Days()

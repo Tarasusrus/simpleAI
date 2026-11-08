@@ -69,6 +69,8 @@ type WindowDTO struct {
 	// просто не читает.
 	Days     int  `json:"days"`
 	Adjusted bool `json:"adjusted"`
+	// Ongoing — окно закончилось, а зарплаты нет: идёт до следующего поступления (ADR-022).
+	Ongoing bool `json:"ongoing"`
 }
 
 type KPIDTO struct {
@@ -184,7 +186,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		out.Window = &WindowDTO{
 			Start: dateStr(v.Window.Start), End: dateStr(v.Window.End),
 			DaysLeft: v.Window.DaysLeft, AnchorPlanned: v.Window.AnchorPlanned,
-			Days: v.Window.Days, Adjusted: v.Window.Adjusted,
+			Days: v.Window.Days, Adjusted: v.Window.Adjusted, Ongoing: v.Window.Ongoing,
 		}
 	}
 	out.AvgDays = v.AvgDays

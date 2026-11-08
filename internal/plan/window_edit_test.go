@@ -21,7 +21,7 @@ type memWindows struct {
 	n       int
 }
 
-func (m *memWindows) CreateWindow(_ context.Context, sc Scope, start, end Date) (string, error) {
+func (m *memWindows) CreateWindow(_ context.Context, sc Scope, start, end Date, fixed bool) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
@@ -32,20 +32,20 @@ func (m *memWindows) CreateWindow(_ context.Context, sc Scope, start, end Date) 
 		}
 	}
 	m.n++
-	w := StoredWindow{ID: fmt.Sprintf("w%d", m.n), Start: start, End: end}
+	w := StoredWindow{ID: fmt.Sprintf("w%d", m.n), Start: start, End: end, FixedEnd: fixed}
 	m.creates = append(m.creates, w)
 	m.r.snap.Windows = append(m.r.snap.Windows, w)
 	return w.ID, nil
 }
 
-func (m *memWindows) UpdateWindow(_ context.Context, sc Scope, id string, start, end Date) error {
+func (m *memWindows) UpdateWindow(_ context.Context, sc Scope, id string, start, end Date, fixed bool) error {
 	if m.err != nil {
 		return m.err
 	}
 	m.scopes = append(m.scopes, sc)
 	for i, w := range m.r.snap.Windows {
 		if w.ID == id && !w.Deleted {
-			m.r.snap.Windows[i].Start, m.r.snap.Windows[i].End = start, end
+			m.r.snap.Windows[i].Start, m.r.snap.Windows[i].End, m.r.snap.Windows[i].FixedEnd = start, end, fixed
 			m.updates = append(m.updates, m.r.snap.Windows[i])
 			return nil
 		}
@@ -295,10 +295,11 @@ func TestService_DeleteWindow(t *testing.T) {
 			t.Fatalf("удалённое окно появилось снова: %+v", m.r.snap.Windows)
 		}
 	}
-	// Остальные окна закончились: после удаления на экране не осталось бы окна.
+	// Остальные окна закончились: после удаления прошлое окно само продолжится до сегодня (ADR-022).
 	ended, me := wsvc2(d(2026, 10, 20), salary("a", d(2026, 10, 1)), salary("b", d(2026, 10, 15)))
-	if _, err := ended.DeleteWindow(ctx); !errors.Is(err, ErrLastWindow) || len(me.deletes) != 0 {
-		t.Fatalf("прошлое окно не спасает экран: %v deletes=%v", err, me.deletes)
+	f, err = ended.DeleteWindow(ctx)
+	if err != nil || len(me.deletes) != 1 || f.Start != d(2026, 10, 1) || !f.Ongoing || f.End != d(2026, 10, 20) {
+		t.Fatalf("прошлое окно продолжилось: %+v err=%v deletes=%v", f, err, me.deletes)
 	}
 	only, _ := wsvc2(d(2026, 10, 10), salary("a", d(2026, 10, 5)))
 	if _, err := only.DeleteWindow(ctx); !errors.Is(err, ErrLastWindow) {
@@ -340,10 +341,16 @@ func TestBuildWindows_PreHistoryOnlyWholeWindows(t *testing.T) {
 	}
 }
 
-func TestService_EditNoWindow(t *testing.T) {
-	ended, _ := wsvc2(d(2026, 11, 30), salary("a", d(2026, 10, 5)))
-	if _, err := ended.ResizeWindow(context.Background(), 1); !errors.Is(err, ErrNoWindow) {
-		t.Fatalf("последнее окно закончилось: %v", err)
+// Последнее окно закончилось, зарплаты нет: окно идёт до сегодня, и его можно править.
+func TestService_EditOngoingWindow(t *testing.T) {
+	ongoing, m := wsvc2(d(2026, 10, 25), salary("a", d(2026, 10, 5)))
+	cur, err := ongoing.CurrentWindow(context.Background())
+	if err != nil || !cur.Ongoing || cur.End != d(2026, 10, 25) || cur.DaysLeft != 1 {
+		t.Fatalf("идущее окно: %+v err=%v", cur, err)
+	}
+	f, err := ongoing.ResizeWindow(context.Background(), 3)
+	if err != nil || f.Ongoing || f.End != d(2026, 10, 28) || !m.updates[0].FixedEnd {
+		t.Fatalf("+3 к идущему окну: %+v err=%v updates=%+v", f, err, m.updates)
 	}
 	none, _ := wsvc2(d(2026, 10, 10))
 	if _, err := none.CurrentWindow(context.Background()); !errors.Is(err, ErrNoWindow) {
@@ -403,5 +410,117 @@ func TestBuildWindows_AllDeletedNoPanic(t *testing.T) {
 	ws := BuildWindows([]Event{inc("a", d(2026, 10, 5), StateDone, 1)}, StoredWindow{ID: "w", Start: d(2026, 10, 5), End: d(2026, 10, 18), Deleted: true})
 	if len(ws) != 0 {
 		t.Fatalf("окна: %+v", ws)
+	}
+}
+
+// Зарплата пришла позже конца окна (конец на выходных, деньги в понедельник): окно дотягивается до дня перед ней,
+// приход в бывшем зазоре — в выросшее окно. Окно с концом, поставленным владельцем, не растёт.
+func TestBuildGrowingWindows_FillsGapUnlessFixed(t *testing.T) {
+	a := inc("a", d(2026, 10, 1), StateDone, 1)  // окно 01–14.10, 14.10 — суббота
+	b := inc("b", d(2026, 10, 16), StateDone, 1) // зарплата в понедельник
+	sale := Event{Key: "sale", Kind: KindIncome, State: StateDone, Name: "байк", Amount: &Money{100, CurRUB}, Date: dp(2026, 10, 15), JoinsWindow: true}
+	ws := BuildGrowingWindows([]Event{a, b, sale})
+	if len(ws) != 2 || ws[0].End() != d(2026, 10, 15) || ws[0].Extra != 1 || ws[0].BaseEnd() != d(2026, 10, 14) || len(ws[0].Incomes) != 2 {
+		t.Fatalf("окно до 15.10 с продажей внутри: %+v", ws)
+	}
+	if err := checkWindows(ws); err != nil {
+		t.Fatal(err)
+	}
+	fixed := BuildGrowingWindows([]Event{a, b}, StoredWindow{ID: "w", Start: d(2026, 10, 1), End: d(2026, 10, 12), FixedEnd: true})
+	if fixed[0].End() != d(2026, 10, 12) || fixed[0].Extra != 0 {
+		t.Fatalf("конец владельца не растёт: %+v", fixed[0])
+	}
+	if plain := BuildWindows([]Event{a, b}); plain[0].End() != d(2026, 10, 14) {
+		t.Fatalf("BuildWindows без роста: %+v", plain[0])
+	}
+}
+
+func TestExtendLast(t *testing.T) {
+	ws := BuildGrowingWindows([]Event{inc("a", d(2026, 10, 1), StateDone, 1)})
+	ExtendLast(ws, d(2026, 10, 10))
+	if ws[0].Ongoing || ws[0].Extra != 0 {
+		t.Fatalf("окно ещё идёт само: %+v", ws[0])
+	}
+	ExtendLast(ws, d(2026, 10, 20))
+	if !ws[0].Ongoing || ws[0].End() != d(2026, 10, 20) || ws[0].BaseEnd() != d(2026, 10, 14) {
+		t.Fatalf("закончившееся окно идёт до сегодня: %+v", ws[0])
+	}
+	ExtendLast(nil, d(2026, 10, 20)) // без окон — без паники
+}
+
+// Сохраняется заданный конец, а не выросший: рост пересчитывается каждый раз.
+func TestService_MaterializeStoresBaseEnd(t *testing.T) {
+	s, m := wsvc2(d(2026, 10, 20), salary("a", d(2026, 10, 1)))
+	if _, err := s.View(context.Background(), CurRUB); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.creates) != 1 || m.creates[0].End != d(2026, 10, 14) || m.creates[0].FixedEnd {
+		t.Fatalf("сохранено %+v", m.creates)
+	}
+}
+
+// Начало сдвигается у растущего окна — оно растёт и дальше; правка конца делает конец «владельца».
+func TestService_SetStartKeepsGrowth(t *testing.T) {
+	ctx := context.Background()
+	s, m := wsvc2(d(2026, 10, 10), salary("a", d(2026, 10, 5)), expected("b", d(2026, 10, 25)))
+	f, err := s.SetWindowStart(ctx, d(2026, 10, 4))
+	if err != nil || f.End != d(2026, 10, 24) || m.updates[0].FixedEnd || m.updates[0].End != d(2026, 10, 18) {
+		t.Fatalf("frame=%+v updates=%+v err=%v", f, m.updates, err)
+	}
+	if f, err = s.SetWindowEnd(ctx, d(2026, 10, 20)); err != nil || f.End != d(2026, 10, 20) || !m.updates[1].FixedEnd {
+		t.Fatalf("конец владельца: frame=%+v updates=%+v err=%v", f, m.updates, err)
+	}
+}
+
+// Правка выросшего окна (ADR-022): сдвиг начала у идущего окна работает, сокращение окна длиннее предела — тоже,
+// а удлинение сверх предела — нет.
+func TestService_EditGrownWindow(t *testing.T) {
+	ctx := context.Background()
+	s, m := wsvc2(d(2026, 10, 25), salary("a", d(2026, 10, 5))) // окно 05–18.10 идёт до 25.10
+	f, err := s.SetWindowStart(ctx, d(2026, 10, 3))
+	if err != nil || f.Start != d(2026, 10, 3) || f.End != d(2026, 10, 25) || !f.Ongoing || m.updates[0].FixedEnd ||
+		m.updates[0].End != d(2026, 10, 18) {
+		t.Fatalf("начало у идущего окна: %+v err=%v updates=%+v", f, err, m.updates)
+	}
+	long, _ := wsvc2(d(2026, 12, 31), salary("a", d(2026, 10, 1))) // идёт 92 дня
+	if f, err := long.ResizeWindow(ctx, -10); err != nil || f.End != d(2026, 12, 21) {
+		// конец 21.12 раньше сегодня — честный отказ про конец, а не про длину
+		if !errors.Is(err, ErrWindowEndPast) {
+			t.Fatalf("сокращение длинного окна упёрлось в длину: %+v err=%v", f, err)
+		}
+	}
+	if _, err := long.ResizeWindow(ctx, 1); !errors.Is(err, ErrBadWindowLength) {
+		t.Fatalf("удлинение сверх предела: %v", err)
+	}
+	if _, err := long.SetWindowStart(ctx, d(2026, 11, 15)); err != nil {
+		t.Fatalf("сокращение длинного окна сдвигом начала: %v", err)
+	}
+}
+
+// Самовыросшее окно не «изменено»; изменено — только поправленное владельцем.
+func TestWindow_AdjustedOnlyByOwner(t *testing.T) {
+	grown := BuildGrowingWindows([]Event{inc("a", d(2026, 10, 1), StateDone, 1), inc("b", d(2026, 10, 18), StateDone, 1)})
+	if grown[0].Days() != 17 || grown[0].Adjusted() {
+		t.Fatalf("выросшее окно: %+v", grown[0])
+	}
+}
+
+// Долгое идущее окно видит сроки повторов с самого начала, а не только за 62 дня.
+func TestService_LongOngoingWindowKeepsEarlyTerms(t *testing.T) {
+	r := &fakeReader{snap: Snapshot{
+		Incomes: []Event{salary("a", d(2026, 1, 1))},
+		Rules: []RuleWithExceptions{{ID: "r", Name: "связь", Kind: KindPayment,
+			Rule: Rule{Anchor: d(2026, 1, 3), N: 1, Unit: UnitMonth, Amount: *rub(100)}}},
+	}}
+	s := svc(r, d(2026, 4, 1)).WithWindowStore(&memWindows{r: r})
+	if _, err := s.View(context.Background(), CurRUB); err != nil { // сохраняет окно 01.01
+		t.Fatal(err)
+	}
+	res, err := s.View(context.Background(), CurRUB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.View.Payments != 300 { // сроки 03.01, 03.02, 03.03
+		t.Fatalf("платежи окна %d, ждали 300 (сроки с начала окна)", res.View.Payments)
 	}
 }

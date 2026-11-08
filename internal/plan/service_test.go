@@ -185,34 +185,19 @@ func TestService_View_PastTermInWindowWithoutFactStillCounts(t *testing.T) {
 	}
 }
 
-// Последнее окно закончилось, нового нет: по умолчанию экран не показывает прошлые
-// траты (окна нет, есть дата конца), а ViewPast отдаёт закончившееся окно как есть.
-//
-// Мутация: убрать windows = nil в Service.view — Window не nil, тест краснеет.
-func TestService_View_EndedHidesPastWindowByDefault(t *testing.T) {
-	f := &fakeReader{snap: baseSnap()}
-	s := svc(f, d(2026, 4, 20)) // окно 5–18 марта давно закончилось
-	res, err := s.View(context.Background(), CurRUB)
+// Последнее окно закончилось, новой зарплаты нет (ADR-022): окно идёт дальше до сегодня, свободные деньги остаются в
+// нём, «в день» — на сегодня.
+func TestService_View_EndedWindowKeepsGoing(t *testing.T) {
+	res, err := svc(&fakeReader{snap: baseSnap()}, d(2026, 4, 20)).View(context.Background(), CurRUB) // окно 5–18 марта
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.View.State != StateEnded || res.View.Window != nil {
-		t.Fatalf("по умолчанию: state=%s window=%+v", res.View.State, res.View.Window)
+	w := res.View.Window
+	if res.View.State != StateCurrent || w == nil || !w.Ongoing || w.Start != d(2026, 3, 5) || w.End != d(2026, 4, 20) || w.DaysLeft != 1 {
+		t.Fatalf("идущее окно: state=%s window=%+v", res.View.State, w)
 	}
-	if res.View.Spent != 0 {
-		t.Errorf("траты прошлого окна просочились в итог: spent=%d", res.View.Spent)
-	}
-	if lw := res.View.LastWindow; lw == nil || lw.Start != d(2026, 3, 5) || lw.End != d(2026, 3, 18) {
-		t.Errorf("подпись «Прошлого окна»: %+v", lw)
-	}
-	if res.Meta.LastEnd == nil || *res.Meta.LastEnd != d(2026, 3, 18) {
-		t.Errorf("конец прошлого окна: %v", res.Meta.LastEnd)
-	}
-	past, err := s.ViewPast(context.Background(), CurRUB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if past.View.State != StateEnded || past.View.Window == nil || past.View.Spent != 5000 || past.Meta.LastEnd != nil {
-		t.Errorf("ViewPast: state=%s window=%v spent=%d lastEnd=%v", past.View.State, past.View.Window, past.View.Spent, past.Meta.LastEnd)
+	// Окно выросло и забрало сроки аренды 15.03 и 15.04 (по 45 000): обязательства за всё время без зарплаты.
+	if res.View.Spent != 5000 || res.View.Payments != 90000 || res.View.CanSpend != -5000 || res.View.PerDay != nil {
+		t.Fatalf("траты %d, платежи %d, свободно %d, в день %v", res.View.Spent, res.View.Payments, res.View.CanSpend, res.View.PerDay)
 	}
 }

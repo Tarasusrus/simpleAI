@@ -13,6 +13,7 @@ assert.equal(canEditWindow({ state: 'none' }), false);
 assert.equal(lengthNote(w), 'окно 16 дней (изменено)');
 assert.equal(lengthNote({ days: 21, adjusted: true }), 'окно 21 день (изменено)');
 assert.equal(lengthNote({ days: 14, adjusted: false }), '');
+assert.equal(lengthNote({ days: 40, adjusted: true, ongoing: true }), '', 'у идущего окна длина растёт каждый день');
 // Неполный год, пока его набирают, и та же дата не отправляются.
 assert.equal(dateReady('0002-10-25', '2026-10-20'), false);
 assert.equal(dateReady('0202-10-25', '2026-10-20'), false);

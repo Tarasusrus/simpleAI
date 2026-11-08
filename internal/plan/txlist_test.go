@@ -162,12 +162,12 @@ func TestCategoryTx_NoWindow_EmptyPage(t *testing.T) {
 	}
 }
 
-// Окно закончилось и экран его скрывает: страницы нет и в источник не ходим.
-func TestCategoryTx_EndedWindow_EmptyPage(t *testing.T) {
-	f := &fakeTxLister{items: []TxItem{{ID: "x"}}}
+// Окно закончилось, но идёт до следующей зарплаты (ADR-022): траты категории читаются, как в любом текущем окне.
+func TestCategoryTx_OngoingWindow_Queries(t *testing.T) {
+	f := &fakeTxLister{}
 	s := NewService(&fakeReader{snap: baseSnap()}, nil, func() Date { return d(2026, 6, 1) }, Scope{ChatIDs: []int64{42}}).WithTxLister(f)
 	page, err := s.CategoryTransactions(context.Background(), CurRUB, "Такси", "")
-	if err != nil || len(page.Rows) != 0 || len(f.got) != 0 {
+	if err != nil || len(f.got) != 1 || page.Start != d(2026, 3, 5) || page.End != d(2026, 6, 1) {
 		t.Fatalf("page=%+v err=%v запросов=%d", page, err, len(f.got))
 	}
 }
