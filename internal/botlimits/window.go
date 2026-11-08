@@ -42,8 +42,6 @@ type WindowEditor interface {
 	ResizeWindow(ctx context.Context, chatID int64, days int) (w Window, ok bool, err error)
 	// SetWindowEnd ставит последний день окна (дата без времени).
 	SetWindowEnd(ctx context.Context, chatID int64, end time.Time) (w Window, ok bool, err error)
-	// ResetWindow возвращает окну стандартные 14 дней.
-	ResetWindow(ctx context.Context, chatID int64) (w Window, ok bool, err error)
 }
 
 var _ WindowEditor = (*Plan)(nil)
@@ -59,10 +57,6 @@ func (p *Plan) ResizeWindow(ctx context.Context, chatID int64, days int) (Window
 func (p *Plan) SetWindowEnd(ctx context.Context, chatID int64, end time.Time) (Window, bool, error) {
 	d := plan.Date{Year: end.Year(), Month: int(end.Month()), Day: end.Day()}
 	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) { return s.SetWindowEnd(ctx, d) })
-}
-
-func (p *Plan) ResetWindow(ctx context.Context, chatID int64) (Window, bool, error) {
-	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) { return s.ResetWindow(ctx) })
 }
 
 // window — общий путь: область чата, вызов ядра, перевод ответа и ошибок в типы бота.

@@ -75,7 +75,8 @@ func TestWindowLengthWriter_ScopeRouting(t *testing.T) {
 	}
 }
 
-// Сквозной путь сервис → адаптер → база: продление окна меняет его конец и «в день» на экране, сброс возвращает 14 дней.
+// Сквозной путь сервис → адаптер → база: продление окна меняет его конец и «в день» на экране, возврат к 14 дням
+// стирает правку из базы.
 //
 // Мутации: не подключать WithWindowLengths у читателя — правка не видна; писать в базу days−1 — конец не тот.
 func TestWindowLength_EndToEnd(t *testing.T) {
@@ -121,8 +122,8 @@ func TestWindowLength_EndToEnd(t *testing.T) {
 	if w := res.View.Window; w == nil || w.Days != 17 || w.DaysLeft != 12 {
 		t.Fatalf("экран: %+v", res.View.Window)
 	}
-	if f, err = svc.ResetWindow(ctx); err != nil || f.Days != 14 || f.Adjusted {
-		t.Fatalf("сброс: %+v err=%v", f, err)
+	if f, err = svc.ResizeWindow(ctx, -3); err != nil || f.Days != 14 || f.Adjusted {
+		t.Fatalf("обратно к 14: %+v err=%v", f, err)
 	}
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM plan_window_length WHERE chat_id = $1`, chat).Scan(&n); err != nil || n != 0 {

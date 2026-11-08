@@ -13,7 +13,6 @@ import (
 type fakeWindowEditor struct {
 	resized []int
 	ends    []plan.Date
-	resets  int
 	err     error
 }
 
@@ -24,11 +23,6 @@ func (f *fakeWindowEditor) ResizeWindow(_ context.Context, days int) (plan.Windo
 
 func (f *fakeWindowEditor) SetWindowEnd(_ context.Context, end plan.Date) (plan.WindowFrame, error) {
 	f.ends = append(f.ends, end)
-	return plan.WindowFrame{}, f.err
-}
-
-func (f *fakeWindowEditor) ResetWindow(context.Context) (plan.WindowFrame, error) {
-	f.resets++
 	return plan.WindowFrame{}, f.err
 }
 
@@ -51,13 +45,12 @@ func TestWindowEdit_RequireToken(t *testing.T) {
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/plan/window/resize", `{"days":1}`},
 		{"PUT", "/api/plan/window/end", `{"end":"2026-10-25"}`},
-		{"DELETE", "/api/plan/window/length", ``},
 	} {
 		if rec := send(s, c.method, c.path, c.body, ""); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s без токена: %d", c.method, c.path, rec.Code)
 		}
 	}
-	if len(e.resized)+len(e.ends)+e.resets != 0 {
+	if len(e.resized)+len(e.ends) != 0 {
 		t.Fatal("запрос без токена дошёл до сервиса")
 	}
 }
@@ -89,11 +82,8 @@ func TestWindowEdit_CommandsReachServiceAndReturnView(t *testing.T) {
 	if rec := send(s, "PUT", "/api/plan/window/end", `{"end":"2026-10-25"}`, goodToken); rec.Code != http.StatusOK {
 		t.Fatalf("end: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := send(s, "DELETE", "/api/plan/window/length", ``, goodToken); rec.Code != http.StatusOK {
-		t.Fatalf("reset: %d %s", rec.Code, rec.Body.String())
-	}
-	if len(e.resized) != 1 || e.resized[0] != -2 || len(e.ends) != 1 || e.ends[0] != (plan.Date{Year: 2026, Month: 10, Day: 25}) || e.resets != 1 {
-		t.Fatalf("до сервиса дошло resized=%v ends=%v resets=%d", e.resized, e.ends, e.resets)
+	if len(e.resized) != 1 || e.resized[0] != -2 || len(e.ends) != 1 || e.ends[0] != (plan.Date{Year: 2026, Month: 10, Day: 25}) {
+		t.Fatalf("до сервиса дошло resized=%v ends=%v", e.resized, e.ends)
 	}
 }
 
@@ -107,7 +97,8 @@ func TestWindowEdit_Errors(t *testing.T) {
 		{"лишнее поле", "POST", "/api/plan/window/resize", `{"days":1,"x":2}`, nil, http.StatusBadRequest},
 		{"вне пределов", "POST", "/api/plan/window/resize", `{"days":99}`, plan.ErrBadWindowLength, http.StatusBadRequest},
 		{"нет окна", "POST", "/api/plan/window/resize", `{"days":1}`, plan.ErrNoWindow, http.StatusBadRequest},
-		{"запись выключена", "DELETE", "/api/plan/window/length", ``, plan.ErrReadOnly, http.StatusForbidden},
+		{"запись выключена", "POST", "/api/plan/window/resize", `{"days":1}`, plan.ErrReadOnly, http.StatusForbidden},
+		{"конец в прошлом", "PUT", "/api/plan/window/end", `{"end":"2026-10-01"}`, plan.ErrWindowEndPast, http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		s, _ := winServer(t, &fakeWindowEditor{err: c.err})

@@ -53,8 +53,8 @@ func TestWindow_ResizeThroughCore(t *testing.T) {
 	if w, _, err = p.SetWindowEnd(context.Background(), 42, time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC)); err != nil || w.Days != 21 {
 		t.Fatalf("конец 25.03: %+v err=%v", w, err)
 	}
-	if w, _, err = p.ResetWindow(context.Background(), 42); err != nil || w.Days != 14 || w.Adjusted {
-		t.Fatalf("сброс: %+v err=%v", w, err)
+	if w, _, err = p.ResizeWindow(context.Background(), 42, -7); err != nil || w.Days != 14 || w.Adjusted {
+		t.Fatalf("обратно к 14: %+v err=%v", w, err)
 	}
 	if cur, _, err := p.CurrentWindow(context.Background(), 42); err != nil || cur != w {
 		t.Fatalf("CurrentWindow=%+v err=%v", cur, err)

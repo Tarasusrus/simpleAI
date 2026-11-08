@@ -1,6 +1,6 @@
 import { h } from './dom.js';
 import { initToken, getWindow, deleteItem, settleItem, reopenItem, skipItem, setRate, setPast, setAvg, moveItem, editItem,
-  resizeWindow, setWindowEnd, resetWindow } from './api.js';
+  resizeWindow, setWindowEnd } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -49,10 +49,9 @@ const ctx = {
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
   onReopen: (key) => once(() => reopenItem(cur, key), 'Не удалось вернуть в план.'),
-  // Правка окна (ADR-020): на день короче/длиннее, последний день датой, вернуть 14 дней.
+  // Правка окна (ADR-020): на день короче/длиннее, последний день датой.
   onWindowResize: (days) => once(() => resizeWindow(cur, days), 'Не удалось изменить окно.'),
   onWindowEnd: (end) => once(() => setWindowEnd(cur, end), 'Не удалось изменить окно.'),
-  onWindowReset: () => once(() => resetWindow(cur), 'Не удалось вернуть окно.'),
   // onEdit — «изменить»: та же очередь, что у прочих команд; рисует ответ и отдаёт
   // true, false — занято другой командой. Ошибку показывает сам редактор.
   onEdit: async (key, body) => {

@@ -1,5 +1,5 @@
 // Package planwindow — навык агента «правка окна плана» (ADR-020): «добавь день», «сократи окно на 2 дня»,
-// «окно до 25.10», «верни окно как было». Навык — только адаптер разговора: он разбирает ввод LLM и
+// «окно до 25.10». Навык — только адаптер разговора: он разбирает ввод LLM и
 // форматирует ответ, а окно правит ядро плана через botlimits.WindowEditor. Тот же путь, что у кнопок веба.
 package planwindow
 
@@ -36,7 +36,6 @@ const (
 	actionExtend = "extend"
 	actionShrink = "shrink"
 	actionSetEnd = "set_end"
-	actionReset  = "reset"
 )
 
 // Manifest — описание для реестра, LLM и MCP.
@@ -48,7 +47,6 @@ func (s *Skill) Manifest() plugin.Manifest {
 			"action='extend' — make the window longer by `days` (default 1): 'добавь день', 'продли окно на 3 дня', 'плюс день к окну'. " +
 			"action='shrink' — make it shorter by `days` (default 1): 'убери день', 'сократи окно на 2 дня', 'минус день'. " +
 			"action='set_end' — set the LAST day of the window: 'окно до 25.10', 'пусть окно кончится 20-го', 'поправь окно до 1 ноября'. " +
-			"action='reset' — back to the standard 14 days: 'верни окно как было', 'сбрось окно', 'окно снова 14 дней'. " +
 			"action='show' — current window dates: 'какое сейчас окно', 'до какого числа окно'. " +
 			"The start of the window never moves (it is the salary date); only the end changes. Not an expense, not a limit.",
 		Version: "1.0.0",
@@ -60,8 +58,8 @@ func (s *Skill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{actionShow, actionExtend, actionShrink, actionSetEnd, actionReset},
-						"description": "show | extend | shrink | set_end | reset",
+						"enum":        []string{actionShow, actionExtend, actionShrink, actionSetEnd},
+						"description": "show | extend | shrink | set_end",
 					},
 					"days": map[string]any{
 						"type":        "integer",
@@ -141,8 +139,6 @@ func (s *Skill) do(ctx context.Context, chatID int64, in input) (botlimits.Windo
 		return s.windows.ResizeWindow(ctx, chatID, days)
 	case actionShrink:
 		return s.windows.ResizeWindow(ctx, chatID, -days)
-	case actionReset:
-		return s.windows.ResetWindow(ctx, chatID)
 	case actionSetEnd:
 		cur, ok, err := s.windows.CurrentWindow(ctx, chatID)
 		if !ok || err != nil {
@@ -188,8 +184,6 @@ func (s *Skill) reply(ctx context.Context, chatID int64, in input, w botlimits.W
 		b.WriteString("Окно сокращено. ")
 	case actionSetEnd:
 		b.WriteString("Конец окна изменён. ")
-	case actionReset:
-		b.WriteString("Окну вернул стандартные 14 дней. ")
 	}
 	fmt.Fprintf(&b, "Окно %s — %s (%d %s", w.Start.Format("02.01"), w.End.Format("02.01"), w.Days, safetospend.PluralDays(w.Days))
 	if w.Adjusted {

@@ -11,7 +11,6 @@ import (
 type WindowEditor interface {
 	ResizeWindow(ctx context.Context, days int) (plan.WindowFrame, error)
 	SetWindowEnd(ctx context.Context, end plan.Date) (plan.WindowFrame, error)
-	ResetWindow(ctx context.Context) (plan.WindowFrame, error)
 }
 
 // WithWindowEditor подключает правку окна. Без неё маршруты отвечают 404.
@@ -32,7 +31,6 @@ type windowEndBody struct {
 func (s *Server) registerWindowRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/plan/window/resize", s.auth(http.HandlerFunc(s.handleWindowResize)))
 	mux.Handle("PUT /api/plan/window/end", s.auth(http.HandlerFunc(s.handleWindowEnd)))
-	mux.Handle("DELETE /api/plan/window/length", s.auth(http.HandlerFunc(s.handleWindowReset)))
 }
 
 func (s *Server) windowEditorOn(w http.ResponseWriter) bool {
@@ -80,13 +78,4 @@ func (s *Server) handleWindowEnd(w http.ResponseWriter, r *http.Request) {
 		_, err = s.windowEditor.SetWindowEnd(r.Context(), end)
 	}
 	s.windowEdited(w, r, "window_end", err)
-}
-
-// handleWindowReset: DELETE /api/plan/window/length — окну снова 14 дней.
-func (s *Server) handleWindowReset(w http.ResponseWriter, r *http.Request) {
-	if !s.windowEditorOn(w) {
-		return
-	}
-	_, err := s.windowEditor.ResetWindow(r.Context())
-	s.windowEdited(w, r, "window_reset", err)
 }

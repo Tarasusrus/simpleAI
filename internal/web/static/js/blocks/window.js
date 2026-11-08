@@ -12,7 +12,7 @@ export function lengthNote(w) {
   return 'окно ' + w.days + ' ' + plural(w.days, 'день', 'дня', 'дней') + ' (изменено)';
 }
 
-// Кнопки правки окна: на день короче / длиннее, конец датой, вернуть 14 дней.
+// Кнопки правки окна: на день короче / длиннее, конец датой.
 function editControls(w, ctx) {
   const end = h('input', { type: 'date', class: 'sm', value: w.end, min: w.start, 'aria-label': 'последний день окна' });
   // Пока год набирается, браузер шлёт change с «годом» 0002, 0020…: такие даты раньше начала окна, их не отправляем.
@@ -21,8 +21,7 @@ function editControls(w, ctx) {
   return h('div', { class: 'win-edit' },
     btn('−1 день', 'Сократить окно на день', () => ctx.onWindowResize(-1)),
     btn('+1 день', 'Продлить окно на день', () => ctx.onWindowResize(1)),
-    h('label', null, 'до ', end),
-    w.adjusted ? btn('вернуть 14 дней', 'Стандартная длина окна', () => ctx.onWindowReset()) : null);
+    h('label', null, 'до ', end));
 }
 
 // Строка «окно 05.10 — 18.10 · осталось N дней».

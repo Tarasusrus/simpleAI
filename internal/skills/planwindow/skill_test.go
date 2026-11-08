@@ -15,7 +15,6 @@ type fakeWindows struct {
 	cur     botlimits.Window
 	resized []int
 	ends    []time.Time
-	resets  int
 	outside bool
 	err     error
 }
@@ -33,11 +32,6 @@ func (f *fakeWindows) ResizeWindow(_ context.Context, _ int64, days int) (botlim
 
 func (f *fakeWindows) SetWindowEnd(_ context.Context, _ int64, end time.Time) (botlimits.Window, bool, error) {
 	f.ends = append(f.ends, end)
-	return f.result()
-}
-
-func (f *fakeWindows) ResetWindow(context.Context, int64) (botlimits.Window, bool, error) {
-	f.resets++
 	return f.result()
 }
 
@@ -122,14 +116,10 @@ func TestRun_SetEndParsesDates(t *testing.T) {
 	}
 }
 
-func TestRun_ResetAndShow(t *testing.T) {
+func TestRun_Show(t *testing.T) {
 	f := &fakeWindows{cur: botlimits.Window{Start: utc(2026, 10, 5), End: utc(2026, 10, 18), Days: 14, DaysLeft: 9}}
-	s := New(f, nil)
-	out, err := s.Run(chatCtx(), `{"action":"reset"}`)
-	if err != nil || f.resets != 1 || !strings.Contains(out, "14 дней") || strings.Contains(out, "изменено") {
-		t.Fatalf("reset: %q err=%v", out, err)
-	}
-	if out, err = s.Run(chatCtx(), `{"action":"show"}`); err != nil || !strings.Contains(out, "05.10 — 18.10") || len(f.resized) != 0 {
+	out, err := New(f, nil).Run(chatCtx(), `{"action":"show"}`)
+	if err != nil || !strings.Contains(out, "05.10 — 18.10") || strings.Contains(out, "изменено") || len(f.resized)+len(f.ends) != 0 {
 		t.Fatalf("show: %q err=%v", out, err)
 	}
 }
@@ -173,7 +163,7 @@ func TestManifest_ActionsMatchHandlers(t *testing.T) {
 		t.Fatal("нет action")
 	}
 	enum, ok := action["enum"].([]string)
-	if !ok || len(enum) != 5 {
+	if !ok || len(enum) != 4 {
 		t.Fatalf("enum=%v", action["enum"])
 	}
 	for _, a := range enum {

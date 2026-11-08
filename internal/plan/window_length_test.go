@@ -176,7 +176,8 @@ func TestService_ResizeWindow_BackToDefaultResets(t *testing.T) {
 	}
 }
 
-func TestService_SetWindowEndAndReset(t *testing.T) {
+// Конец датой; возврат к 14 дням — тем же «до даты», правка при этом стирается.
+func TestService_SetWindowEnd(t *testing.T) {
 	ctx := context.Background()
 	s, l := lsvc(d(2026, 10, 10), incomeFact("transaction:a", d(2026, 10, 5), rub(1000)))
 	f, err := s.SetWindowEnd(ctx, d(2026, 10, 25))
@@ -186,7 +187,7 @@ func TestService_SetWindowEndAndReset(t *testing.T) {
 	if f.End != d(2026, 10, 25) || f.Days != 21 {
 		t.Fatalf("конец 25.10: %+v", f)
 	}
-	f, err = s.ResetWindow(ctx)
+	f, err = s.SetWindowEnd(ctx, d(2026, 10, 18))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +243,24 @@ func TestService_EditWindow_EndNotBeforeToday(t *testing.T) {
 	if err != nil || f.DaysLeft != 1 {
 		t.Fatalf("конец сегодня: %+v err=%v", f, err)
 	}
-	if f, err = s.ResetWindow(ctx); err != nil || f.Days != windowDays {
-		t.Fatalf("вернуть после сокращения: %+v err=%v", f, err)
+	if f, err = s.ResizeWindow(ctx, 4); err != nil || f.Days != 10 {
+		t.Fatalf("продлить после сокращения: %+v err=%v", f, err)
+	}
+}
+
+// На 15-й день продлённого окна вернуть его к 14 дням нельзя (конец встал бы на вчера), а сократить до сегодня — можно.
+func TestService_EditWindow_Day15OfExtendedWindow(t *testing.T) {
+	ctx := context.Background()
+	r := &fakeReader{snap: Snapshot{
+		Incomes:       []Event{incomeFact("transaction:a", d(2026, 10, 5), rub(1000))},
+		WindowLengths: []WindowLength{{Start: d(2026, 10, 5), Days: 20}},
+	}}
+	s := svc(r, d(2026, 10, 19)).WithWindowLengths(&fakeLengths{r: r})
+	if _, err := s.SetWindowEnd(ctx, d(2026, 10, 18)); !errors.Is(err, ErrWindowEndPast) {
+		t.Fatalf("14 дней на 15-й день: %v", err)
+	}
+	if f, err := s.ResizeWindow(ctx, -5); err != nil || f.End != d(2026, 10, 19) || f.DaysLeft != 1 {
+		t.Fatalf("сократить до сегодня: %+v err=%v", f, err)
 	}
 }
 
