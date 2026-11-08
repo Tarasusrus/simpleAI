@@ -12,16 +12,25 @@ export function lengthNote(w) {
   return 'окно ' + w.days + ' ' + plural(w.days, 'день', 'дня', 'дней') + ' (изменено)';
 }
 
-// Кнопки правки окна: на день короче / длиннее, конец датой.
+// Дата из поля годится к отправке: полная (пока год набирается, браузер шлёт change с «годом» 0002, 0020…) и
+// отличается от текущей.
+export function dateReady(value, current) {
+  return /^[12]\d{3}-\d{2}-\d{2}$/.test(value || '') && value !== current;
+}
+
+// Кнопки правки окна: на день короче / длиннее, начало и конец датой, удалить окно.
 function editControls(w, ctx) {
+  const start = h('input', { type: 'date', class: 'sm', value: w.start, max: w.end, 'aria-label': 'первый день окна' });
+  start.addEventListener('change', () => { if (dateReady(start.value, w.start)) ctx.onWindowStart(start.value); });
   const end = h('input', { type: 'date', class: 'sm', value: w.end, min: w.start, 'aria-label': 'последний день окна' });
-  // Пока год набирается, браузер шлёт change с «годом» 0002, 0020…: такие даты раньше начала окна, их не отправляем.
-  end.addEventListener('change', () => { if (end.value >= w.start && end.value !== w.end) ctx.onWindowEnd(end.value); });
+  end.addEventListener('change', () => { if (dateReady(end.value, w.end)) ctx.onWindowEnd(end.value); });
   const btn = (label, title, run) => h('button', { type: 'button', class: 'x', title, onclick: run }, label);
   return h('div', { class: 'win-edit' },
     btn('−1 день', 'Сократить окно на день', () => ctx.onWindowResize(-1)),
     btn('+1 день', 'Продлить окно на день', () => ctx.onWindowResize(1)),
-    h('label', null, 'до ', end));
+    h('label', null, 'с ', start),
+    h('label', null, 'до ', end),
+    ctx.onWindowDelete ? btn('удалить окно', 'Удалить это окно', () => ctx.onWindowDelete()) : null);
 }
 
 // Строка «окно 05.10 — 18.10 · осталось N дней».

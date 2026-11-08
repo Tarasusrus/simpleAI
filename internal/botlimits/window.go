@@ -9,10 +9,11 @@ import (
 	"simpleAI/internal/plan"
 )
 
-// Правка окна плана из бота (ADR-020). Скиллы видят только эти типы и не импортируют plan: команда «добавь день»
+// Правка окна плана из бота (ADR-020, ADR-021). Скиллы видят только эти типы и не импортируют plan: команда «добавь день»
 // проходит через то же ядро, что и кнопки веба.
 
 // Window — окно плана глазами бота: первый и последний день (UTC-полночь), длина, сколько осталось, поправлено ли.
+// Нулевое значение — окна нет (например, после удаления).
 type Window struct {
 	Start, End time.Time
 	Days       int
@@ -33,6 +34,10 @@ var (
 	ErrBadWindowLength = errors.New("botlimits: длина окна вне 1..62 дней")
 	// ErrWindowEndPast — конец окна раньше сегодня.
 	ErrWindowEndPast = errors.New("botlimits: конец окна раньше сегодня")
+	// ErrWindowOverlap — новые даты залезают на соседнее окно.
+	ErrWindowOverlap = errors.New("botlimits: окно пересекается с соседним")
+	// ErrLastWindow — единственное окно удалить нельзя.
+	ErrLastWindow = errors.New("botlimits: единственное окно удалить нельзя")
 )
 
 // WindowEditor читает и правит окно плана для чата. ok=false — чат вне области плана.
@@ -42,6 +47,10 @@ type WindowEditor interface {
 	ResizeWindow(ctx context.Context, chatID int64, days int) (w Window, ok bool, err error)
 	// SetWindowEnd ставит последний день окна (дата без времени).
 	SetWindowEnd(ctx context.Context, chatID int64, end time.Time) (w Window, ok bool, err error)
+	// SetWindowStart ставит первый день окна (дата без времени).
+	SetWindowStart(ctx context.Context, chatID int64, start time.Time) (w Window, ok bool, err error)
+	// DeleteWindow удаляет окно на экране и возвращает то, что на экране теперь (пустое — окна нет).
+	DeleteWindow(ctx context.Context, chatID int64) (w Window, ok bool, err error)
 }
 
 var _ WindowEditor = (*Plan)(nil)
@@ -55,8 +64,19 @@ func (p *Plan) ResizeWindow(ctx context.Context, chatID int64, days int) (Window
 }
 
 func (p *Plan) SetWindowEnd(ctx context.Context, chatID int64, end time.Time) (Window, bool, error) {
-	d := plan.Date{Year: end.Year(), Month: int(end.Month()), Day: end.Day()}
-	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) { return s.SetWindowEnd(ctx, d) })
+	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) {
+		return s.SetWindowEnd(ctx, plan.DateOf(end, time.UTC))
+	})
+}
+
+func (p *Plan) SetWindowStart(ctx context.Context, chatID int64, start time.Time) (Window, bool, error) {
+	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) {
+		return s.SetWindowStart(ctx, plan.DateOf(start, time.UTC))
+	})
+}
+
+func (p *Plan) DeleteWindow(ctx context.Context, chatID int64) (Window, bool, error) {
+	return p.window(chatID, func(s *plan.Service) (plan.WindowFrame, error) { return s.DeleteWindow(ctx) })
 }
 
 // window — общий путь: область чата, вызов ядра, перевод ответа и ошибок в типы бота.
@@ -73,8 +93,15 @@ func (p *Plan) window(chatID int64, run func(*plan.Service) (plan.WindowFrame, e
 		return Window{}, true, fmt.Errorf("%w: %w", ErrBadWindowLength, err)
 	case errors.Is(err, plan.ErrWindowEndPast):
 		return Window{}, true, fmt.Errorf("%w: %w", ErrWindowEndPast, err)
+	case errors.Is(err, plan.ErrWindowOverlap):
+		return Window{}, true, fmt.Errorf("%w: %w", ErrWindowOverlap, err)
+	case errors.Is(err, plan.ErrLastWindow):
+		return Window{}, true, fmt.Errorf("%w: %w", ErrLastWindow, err)
 	case err != nil:
 		return Window{}, true, fmt.Errorf("botlimits: окно плана: %w", err)
+	}
+	if f == (plan.WindowFrame{}) {
+		return Window{}, true, nil // после удаления окна на экране нет
 	}
 	return Window{Start: day(f.Start), End: day(f.End), Days: f.Days, DaysLeft: f.DaysLeft, Adjusted: f.Adjusted}, true, nil
 }

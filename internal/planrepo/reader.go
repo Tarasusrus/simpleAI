@@ -29,8 +29,8 @@ type Reader struct {
 	src    Source
 	limits LimitSource     // nil — лимиты не читаются (WithLimits)
 	dism   DismissedSource // nil — скрытые категории не читаются (WithDismissed)
-	// lengths — правки длины окна (WithWindowLengths); nil — у всех окон 14 дней.
-	lengths WindowLengthSource
+	// windows — сохранённые окна (WithWindows, ADR-021); nil — окна только считаются.
+	windows WindowSource
 	logger  *slog.Logger
 }
 
@@ -105,7 +105,7 @@ func (r *Reader) Read(ctx context.Context, sc plan.Scope) (plan.Snapshot, error)
 	if snap.Dismissed, err = r.readDismissed(ctx, sc); err != nil {
 		return plan.Snapshot{}, err
 	}
-	if snap.WindowLengths, err = r.readWindowLengths(ctx, sc); err != nil {
+	if snap.Windows, err = r.readWindows(ctx, sc); err != nil {
 		return plan.Snapshot{}, err
 	}
 	if snap.ReservePct, err = r.src.PlanReservePct(ctx); err != nil {

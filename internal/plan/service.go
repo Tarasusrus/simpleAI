@@ -52,8 +52,8 @@ type Service struct {
 	txs    TxLister      // nil — список трат категории отключён (WithTxLister)
 	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
 	rules  RuleLister    // nil — список правил отключён (WithRuleLister)
-	// lengths — правка длины окна (WithWindowLengths); nil — правка отключена.
-	lengths WindowLengthWriter
+	// windows — хранение окон (WithWindowStore, ADR-021); nil — окна только считаются, правка отключена.
+	windows WindowStore
 	today   Clock
 	scope   Scope
 }
@@ -85,6 +85,7 @@ type state struct {
 	today   Date
 	windows []Window
 	events  []Event // платежи: факты, разовые и развёрнутые повторы
+	incomes []Event // все поступления, из которых построены окна (нужны, чтобы примерить правку окна)
 	limits  []Limit
 	st      WindowState
 }
@@ -116,8 +117,11 @@ func (s *Service) load(ctx context.Context) (state, error) {
 			payments = append(payments, e)
 		}
 	}
-	ws := BuildWindows(incomes, snap.WindowLengths...)
-	return state{snap: snap, today: today, windows: ws, events: payments, limits: snap.Limits, st: Locate(ws, today)}, nil
+	ws := BuildWindows(incomes, snap.Windows...)
+	if err := s.materialize(ctx, ws, today); err != nil {
+		return state{}, err
+	}
+	return state{snap: snap, today: today, windows: ws, events: payments, incomes: incomes, limits: snap.Limits, st: Locate(ws, today)}, nil
 }
 
 // focus — окно, которое описывает экран, и «сегодня» для его расчёта. В зазоре

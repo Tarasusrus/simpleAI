@@ -29,4 +29,6 @@ var (
 	ErrLimitCategory       = errors.New("plan: у лимита должна быть категория расходов (не «Без категории»)")
 	ErrBadWindowLength     = errors.New("plan: длина окна вне 1..62 дней")
 	ErrWindowEndPast       = errors.New("plan: конец окна раньше сегодня")
+	ErrWindowOverlap       = errors.New("plan: окно пересекается с другим окном")
+	ErrLastWindow          = errors.New("plan: единственное окно удалить нельзя")
 )

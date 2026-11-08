@@ -67,3 +67,5 @@
 {"id":"r062","input":"продли окно на 3 дня","expected":{"skill":"plan_window","action":"extend"},"tags":["plan_window","ru"],"notes":"ADR-020 — продление окна на N дней"}
 {"id":"r063","input":"сократи окно на 2 дня","expected":{"skill":"plan_window","action":"shrink"},"tags":["plan_window","ru"],"notes":"ADR-020 — сокращение окна"}
 {"id":"r064","input":"поправь окно до 25.10","expected":{"skill":"plan_window","action":"set_end"},"tags":["plan_window","ru"],"notes":"ADR-020 — последний день окна датой"}
+{"id":"r065","input":"окно с 3.10","expected":{"skill":"plan_window","action":"set_start"},"tags":["plan_window","ru"],"notes":"ADR-021 — первый день окна датой (ADR-021)"}
+{"id":"r066","input":"удали окно","expected":{"skill":"plan_window","action":"delete"},"tags":["plan_window","ru"],"notes":"ADR-021 — удаление окна (ADR-021)"}

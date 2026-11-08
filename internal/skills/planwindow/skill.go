@@ -1,5 +1,5 @@
-// Package planwindow — навык агента «правка окна плана» (ADR-020): «добавь день», «сократи окно на 2 дня»,
-// «окно до 25.10». Навык — только адаптер разговора: он разбирает ввод LLM и
+// Package planwindow — навык агента «правка окна плана» (ADR-020, ADR-021): «добавь день», «сократи окно на 2 дня»,
+// «окно до 25.10», «окно с 3-го», «удали окно». Навык — только адаптер разговора: он разбирает ввод LLM и
 // форматирует ответ, а окно правит ядро плана через botlimits.WindowEditor. Тот же путь, что у кнопок веба.
 package planwindow
 
@@ -32,10 +32,12 @@ func New(w botlimits.WindowEditor, numbers botlimits.Reader) *Skill {
 var _ plugin.Skill = (*Skill)(nil)
 
 const (
-	actionShow   = "show"
-	actionExtend = "extend"
-	actionShrink = "shrink"
-	actionSetEnd = "set_end"
+	actionShow     = "show"
+	actionExtend   = "extend"
+	actionShrink   = "shrink"
+	actionSetEnd   = "set_end"
+	actionSetStart = "set_start"
+	actionDelete   = "delete"
 )
 
 // Manifest — описание для реестра, LLM и MCP.
@@ -47,8 +49,10 @@ func (s *Skill) Manifest() plugin.Manifest {
 			"action='extend' — make the window longer by `days` (default 1): 'добавь день', 'продли окно на 3 дня', 'плюс день к окну'. " +
 			"action='shrink' — make it shorter by `days` (default 1): 'убери день', 'сократи окно на 2 дня', 'минус день'. " +
 			"action='set_end' — set the LAST day of the window: 'окно до 25.10', 'пусть окно кончится 20-го', 'поправь окно до 1 ноября'. " +
+			"action='set_start' — set the FIRST day of the window: 'окно с 3.10', 'пусть окно начнётся 3-го', 'начало окна 1 ноября'. " +
+			"action='delete' — delete the current window (the money stays and joins the neighbouring window): 'удали окно', 'убери это окно'. " +
 			"action='show' — current window dates: 'какое сейчас окно', 'до какого числа окно'. " +
-			"The start of the window never moves (it is the salary date); only the end changes. Not an expense, not a limit.",
+			"A new window appears by itself when a salary or advance comes. Not an expense, not a limit.",
 		Version: "1.0.0",
 		InputSchema: &plugin.Schema{
 			Name:    "PlanWindowInput",
@@ -58,8 +62,8 @@ func (s *Skill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{actionShow, actionExtend, actionShrink, actionSetEnd},
-						"description": "show | extend | shrink | set_end",
+						"enum":        []string{actionShow, actionExtend, actionShrink, actionSetEnd, actionSetStart, actionDelete},
+						"description": "show | extend | shrink | set_end | set_start | delete",
 					},
 					"days": map[string]any{
 						"type":        "integer",
@@ -68,6 +72,10 @@ func (s *Skill) Manifest() plugin.Manifest {
 					"end": map[string]any{
 						"type":        "string",
 						"description": "Last day of the window for set_end: YYYY-MM-DD, DD.MM.YYYY or DD.MM (year is taken from the window).",
+					},
+					"start": map[string]any{
+						"type":        "string",
+						"description": "First day of the window for set_start: YYYY-MM-DD, DD.MM.YYYY or DD.MM (year is taken from the window).",
 					},
 				},
 				"required": []string{"action"},
@@ -80,6 +88,7 @@ type input struct {
 	Action string `json:"action"`
 	Days   int    `json:"days,omitempty"`
 	End    string `json:"end,omitempty"`
+	Start  string `json:"start,omitempty"`
 }
 
 // Run выполняет команду и возвращает ответ пользователю.
@@ -107,7 +116,11 @@ func (s *Skill) Run(ctx context.Context, raw string) (string, error) {
 	case errors.Is(err, botlimits.ErrNoWindow):
 		return "Открытого окна нет: сначала нужно поступление (зарплата или аванс).", nil
 	case errors.Is(err, errBadEnd):
-		return "Не понял дату конца окна. Напиши, например, «окно до 25.10».", nil
+		return "Не понял дату. Напиши, например, «окно до 25.10» или «окно с 3.10».", nil
+	case errors.Is(err, botlimits.ErrWindowOverlap):
+		return "Так окна пересекутся: сначала поправь соседнее окно.", nil
+	case errors.Is(err, botlimits.ErrLastWindow):
+		return "Единственное окно удалить нельзя: поправь его даты.", nil
 	case errors.Is(err, botlimits.ErrWindowEndPast):
 		return "Конец окна не может быть раньше сегодня: окно пропало бы, и вернуть его было бы нельзя.", nil
 	case errors.Is(err, botlimits.ErrBadWindowLength):
@@ -121,7 +134,7 @@ func (s *Skill) Run(ctx context.Context, raw string) (string, error) {
 
 var (
 	errUnknownAction = errors.New("plan_window: неизвестное действие")
-	errBadEnd        = errors.New("plan_window: не разобрал дату конца окна")
+	errBadEnd        = errors.New("plan_window: не разобрал дату")
 )
 
 func (s *Skill) do(ctx context.Context, chatID int64, in input) (botlimits.Window, bool, error) {
@@ -139,24 +152,34 @@ func (s *Skill) do(ctx context.Context, chatID int64, in input) (botlimits.Windo
 		return s.windows.ResizeWindow(ctx, chatID, days)
 	case actionShrink:
 		return s.windows.ResizeWindow(ctx, chatID, -days)
-	case actionSetEnd:
+	case actionSetEnd, actionSetStart:
 		cur, ok, err := s.windows.CurrentWindow(ctx, chatID)
 		if !ok || err != nil {
 			return cur, ok, err
 		}
-		end, err := parseEnd(in.End, cur.Start)
+		if in.Action == actionSetStart {
+			start, err := parseDay(in.Start, cur.Start)
+			if err != nil {
+				return botlimits.Window{}, true, err
+			}
+			return s.windows.SetWindowStart(ctx, chatID, start)
+		}
+		end, err := parseDay(in.End, cur.End)
 		if err != nil {
 			return botlimits.Window{}, true, err
 		}
 		return s.windows.SetWindowEnd(ctx, chatID, end)
+	case actionDelete:
+		return s.windows.DeleteWindow(ctx, chatID)
 	default:
 		return botlimits.Window{}, true, fmt.Errorf("%w: %q", errUnknownAction, in.Action)
 	}
 }
 
-// parseEnd понимает YYYY-MM-DD, DD.MM.YYYY и DD.MM. Без года берётся год начала окна, а если дата вышла раньше
-// начала (окно через Новый год) — следующий.
-func parseEnd(s string, start time.Time) (time.Time, error) {
+// parseDay понимает YYYY-MM-DD, DD.MM.YYYY и DD.MM. Без года берётся ближайшая к опорной дате ref (начало или конец
+// окна) дата с этим днём и месяцем: «окно до 03.11» в окне с 05.11 — это 3 ноября того же года (и честный отказ
+// «конец раньше начала»), а «окно с 28.12» в окне с 3 января — прошлый год.
+func parseDay(s string, ref time.Time) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	for _, layout := range []string{"2006-01-02", "02.01.2006", "2.1.2006"} {
 		if t, err := time.Parse(layout, s); err == nil {
@@ -164,15 +187,27 @@ func parseEnd(s string, start time.Time) (time.Time, error) {
 		}
 	}
 	for _, layout := range []string{"02.01", "2.1"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			t = time.Date(start.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-			if t.Before(start) {
-				t = t.AddDate(1, 0, 0)
-			}
-			return t, nil
+		t, err := time.Parse(layout, s)
+		if err != nil {
+			continue
 		}
+		var best time.Time
+		for _, y := range []int{ref.Year() - 1, ref.Year(), ref.Year() + 1} {
+			c := time.Date(y, t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+			if best.IsZero() || absDur(c.Sub(ref)) < absDur(best.Sub(ref)) {
+				best = c
+			}
+		}
+		return best, nil
 	}
 	return time.Time{}, fmt.Errorf("%w: %q", errBadEnd, s)
+}
+
+func absDur(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
 
 func (s *Skill) reply(ctx context.Context, chatID int64, in input, w botlimits.Window) string {
@@ -184,6 +219,13 @@ func (s *Skill) reply(ctx context.Context, chatID int64, in input, w botlimits.W
 		b.WriteString("Окно сокращено. ")
 	case actionSetEnd:
 		b.WriteString("Конец окна изменён. ")
+	case actionSetStart:
+		b.WriteString("Начало окна изменено. ")
+	case actionDelete:
+		if w == (botlimits.Window{}) {
+			return "Окно удалено. Открытого окна сейчас нет: новое откроется с зарплатой."
+		}
+		b.WriteString("Окно удалено. Теперь на экране: ")
 	}
 	fmt.Fprintf(&b, "Окно %s — %s (%d %s", w.Start.Format("02.01"), w.End.Format("02.01"), w.Days, safetospend.PluralDays(w.Days))
 	if w.Adjusted {

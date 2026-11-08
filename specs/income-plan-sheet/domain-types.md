@@ -61,9 +61,9 @@ func Expand(rules []RuleWithExceptions, from, to Date) ([]Event, error)
 
 ## Окна
 ```go
-type Window struct{ Start Date; Incomes []Event; Length int /*0 = 14*/ } ; func (w Window) Days() int ; func (w Window) End() Date /* Start+Days−1 */ ; func (w Window) AnchorPlanned() bool // Incomes[0] — ожидаемое
-type WindowLength struct{ Start Date; Days int } // правка длины окна (ADR-020), 1..62
-func BuildWindows(incomes []Event, lengths ...WindowLength) []Window // пропускает Kind≠income и Date==nil; пустой вход → []Window{}
+type Window struct{ ID string /*пусто — расчётное*/; Start Date; Incomes []Event; Length int /*0 = 14*/ } ; func (w Window) Days() int ; func (w Window) End() Date /* Start+Days−1 */ ; func (w Window) Stored() bool ; func (w Window) AnchorPlanned() bool // Incomes[0] — ожидаемое
+type StoredWindow struct{ ID string; Start, End Date; Deleted bool } // окно из базы (ADR-021)
+func BuildWindows(incomes []Event, stored ...StoredWindow) []Window // пропускает Kind≠income и Date==nil; пустой вход → []Window{}
 type StateKind string // StateCurrent, StateUpcoming, StateBetween, StateEnded, StateNone
 type WindowState struct{ Kind StateKind; Index int; DaysLeft int }
 func Locate(ws []Window, today Date) WindowState
