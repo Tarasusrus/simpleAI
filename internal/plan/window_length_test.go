@@ -93,7 +93,7 @@ func TestBuildWindows_LengthForOtherDateIgnored(t *testing.T) {
 func TestBuildWindows_NoLengthsSameAsDefault(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		n := rapid.IntRange(0, 8).Draw(rt, "n")
-		var evs []Event
+		evs := make([]Event, 0, n)
 		for i := range n {
 			day := rapid.IntRange(1, 120).Draw(rt, "day")
 			evs = append(evs, inc(string(rune('a'+i)), d(2026, 1, 1).AddDays(day), StateDone, 1))
