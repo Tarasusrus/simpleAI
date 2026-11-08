@@ -32,10 +32,7 @@ func newPlanService(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) 
 		logger.Error("plan not started: bad PLAN_TZ", "tz", tz, "err", err)
 		return nil, nil, nil, false
 	}
-	chats = config.ParseChatIDs(os.Getenv("PLAN_CHAT_IDS"))
-	if len(chats) == 0 {
-		chats = cfg.Telegram.AllowedChats
-	}
+	chats = cfg.PlanScopeChats()
 	if len(chats) == 0 {
 		logger.Error("plan not started: no chats (PLAN_CHAT_IDS / TELEGRAM_ALLOWED_CHATS)")
 		return nil, nil, nil, false

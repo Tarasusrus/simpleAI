@@ -12,14 +12,16 @@ import (
 )
 
 type Config struct {
-	SysPrompt  string `env:"SYS_PROMPT"`
-	DB         DBConfig
-	RAG        RAGConfig
-	Mail       MailConfig
-	Telegram   TelegramBotConfig
-	LLM        LLMConfig
-	Receipt    ReceiptConfig
-	Classifier CategoryClassifierConfig
+	SysPrompt string `env:"SYS_PROMPT"`
+	DB        DBConfig
+	RAG       RAGConfig
+	Mail      MailConfig
+	Telegram  TelegramBotConfig
+	// PlanChatIDs — PLAN_CHAT_IDS, область чатов плана; пусто — берётся Telegram.AllowedChats (см. PlanScopeChats).
+	PlanChatIDs []int64
+	LLM         LLMConfig
+	Receipt     ReceiptConfig
+	Classifier  CategoryClassifierConfig
 }
 
 type DBConfig struct {
@@ -122,6 +124,11 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Telegram = tgCfg
+	planChats, err := parseChatIDsStrict(os.Getenv("PLAN_CHAT_IDS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("PLAN_CHAT_IDS: %w", err)
+	}
+	cfg.PlanChatIDs = planChats
 	cfg.Receipt = loadReceiptConfig()
 	cfg.Classifier = loadCategoryClassifierConfig()
 	return cfg, nil
@@ -195,28 +202,9 @@ func loadLLMConfig() LLMConfig {
 	}
 }
 
-func parseChatIDs(raw string) []int64 {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]int64, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-// parseChatIDsStrict, в отличие от parseChatIDs, не выбрасывает молча
-// неразобранные записи: опечатка вроде «12345;6789» иначе давала бы пустой
-// список, а пустой список в RequireAllowedChats открывает бота всем.
+// parseChatIDsStrict не выбрасывает молча неразобранные записи: опечатка вроде
+// «12345;6789» иначе давала бы пустой список, а пустой список в RequireAllowedChats
+// открывает бота всем (и тихо сдвигает область плана на другой список).
 func parseChatIDsStrict(raw string) ([]int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -280,5 +268,10 @@ func getenvOrDefault(key, def string) string {
 	return def
 }
 
-// ParseChatIDs разбирает список chat_id через запятую (для PLAN_CHAT_IDS и т. п.).
-func ParseChatIDs(raw string) []int64 { return parseChatIDs(raw) }
+// PlanScopeChats — область чатов плана: PLAN_CHAT_IDS, иначе TELEGRAM_ALLOWED_CHATS.
+func (c Config) PlanScopeChats() []int64 {
+	if len(c.PlanChatIDs) > 0 {
+		return c.PlanChatIDs
+	}
+	return c.Telegram.AllowedChats
+}
