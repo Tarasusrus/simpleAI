@@ -84,6 +84,7 @@ type TelegramConfig struct {
 type TelegramBotConfig struct {
 	Token          string
 	AllowedChats   []int64
+	AllowAll       bool // ALLOW_ALL=true: подтверждение, что пустой список чатов (= бот открыт всем) задуман; при непустом списке ничего не меняет
 	PollingTimeout time.Duration
 	Workers        int
 	RateLimit      time.Duration
@@ -116,7 +117,11 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Mail = mailCfg
-	cfg.Telegram = loadTelegramBotConfig()
+	tgCfg, err := loadTelegramBotConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Telegram = tgCfg
 	cfg.Receipt = loadReceiptConfig()
 	cfg.Classifier = loadCategoryClassifierConfig()
 	return cfg, nil
@@ -152,15 +157,20 @@ func loadMailConfig() (MailConfig, error) {
 	}, nil
 }
 
-func loadTelegramBotConfig() TelegramBotConfig {
+func loadTelegramBotConfig() (TelegramBotConfig, error) {
+	allowed, err := parseChatIDsStrict(os.Getenv("TELEGRAM_ALLOWED_CHATS"))
+	if err != nil {
+		return TelegramBotConfig{}, fmt.Errorf("TELEGRAM_ALLOWED_CHATS: %w", err)
+	}
 	return TelegramBotConfig{
 		Token:          os.Getenv("TELEGRAM_BOT_TOKEN"),
-		AllowedChats:   parseChatIDs(os.Getenv("TELEGRAM_ALLOWED_CHATS")),
+		AllowedChats:   allowed,
+		AllowAll:       parseBool(os.Getenv("ALLOW_ALL")),
 		PollingTimeout: 30 * time.Second,
 		Workers:        parseInt(os.Getenv("TELEGRAM_WORKERS"), 4),
 		RateLimit:      parseDurationMs(os.Getenv("TELEGRAM_RATE_LIMIT_MS")),
 		MediaDir:       getenvOrDefault("TELEGRAM_MEDIA_DIR", "data/telegram"),
-	}
+	}, nil
 }
 
 func loadLLMConfig() LLMConfig {
@@ -202,6 +212,35 @@ func parseChatIDs(raw string) []int64 {
 		}
 	}
 	return out
+}
+
+// parseChatIDsStrict, в отличие от parseChatIDs, не выбрасывает молча
+// неразобранные записи: опечатка вроде «12345;6789» иначе давала бы пустой
+// список, а пустой список в RequireAllowedChats открывает бота всем.
+func parseChatIDsStrict(raw string) ([]int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("запись %q не число (разделитель — запятая)", part)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func parseBool(raw string) bool {
+	v, _ := strconv.ParseBool(strings.TrimSpace(raw))
+	return v
 }
 
 func parseInt(raw string, def int) int {

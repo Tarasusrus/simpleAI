@@ -211,6 +211,7 @@ POSTGRES_PASSWORD=simpleai
 
 # Telegram
 TELEGRAM_BOT_TOKEN=...
+# chat_id через запятую; пусто или битая запись — бот не стартует (ALLOW_ALL=true подтверждает пустой список)
 TELEGRAM_ALLOWED_CHATS=123456789
 TELEGRAM_WORKERS=4
 

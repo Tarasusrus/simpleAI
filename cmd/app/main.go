@@ -45,6 +45,9 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to load config: ", err)
 	}
+	if len(cfg.Telegram.AllowedChats) == 0 && !cfg.Telegram.AllowAll {
+		log.Fatal("TELEGRAM_ALLOWED_CHATS пуст: бот открыт всем. Задай список чатов или явно ALLOW_ALL=true")
+	}
 
 	logger := tools.NewLogger()
 
