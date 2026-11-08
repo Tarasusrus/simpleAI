@@ -1,6 +1,6 @@
 import { h } from './dom.js';
 import { initToken, getWindow, deleteItem, settleItem, reopenItem, skipItem, setRate, setPast, setAvg, moveItem, editItem,
-  resizeWindow, setWindowEnd } from './api.js';
+  resizeWindow, setWindowEnd, setWindowStart, deleteWindow } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -49,9 +49,15 @@ const ctx = {
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
   onReopen: (key) => once(() => reopenItem(cur, key), 'Не удалось вернуть в план.'),
-  // Правка окна (ADR-020): на день короче/длиннее, последний день датой.
+  // Правка окна (ADR-020, ADR-021): на день короче/длиннее, первый и последний день датой, удалить окно.
   onWindowResize: (days) => once(() => resizeWindow(cur, days), 'Не удалось изменить окно.'),
   onWindowEnd: (end) => once(() => setWindowEnd(cur, end), 'Не удалось изменить окно.'),
+  onWindowStart: (start) => once(() => setWindowStart(cur, start), 'Не удалось изменить окно.'),
+  onWindowDelete: () => {
+    if (confirm('Удалить окно? Поступления и платежи останутся и попадут в соседние окна по дате.')) {
+      once(() => deleteWindow(cur), 'Не удалось удалить окно.');
+    }
+  },
   // onEdit — «изменить»: та же очередь, что у прочих команд; рисует ответ и отдаёт
   // true, false — занято другой командой. Ошибку показывает сам редактор.
   onEdit: async (key, body) => {

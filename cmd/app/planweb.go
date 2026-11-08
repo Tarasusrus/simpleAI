@@ -41,13 +41,13 @@ func newPlanService(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) 
 		return nil, nil, nil, false
 	}
 	store = budget.NewStore(pool)
-	reader := planrepo.NewReader(store, logger).WithLimits(store).WithDismissed(store).WithWindowLengths(store)
+	reader := planrepo.NewReader(store, logger).WithLimits(store).WithDismissed(store).WithWindows(store)
 	svc = plan.NewService(reader, planrepo.NewWriter(store), func() plan.Date { return plan.DateOf(time.Now(), loc) }, plan.Scope{ChatIDs: chats},
 		plan.WithFactWriter(planrepo.NewFactWriter(store)), plan.WithRuleLister(reader)).
 		WithLimitWriter(planrepo.NewLimitWriter(store)).
 		WithCategoryHider(planrepo.NewCategoryHider(store)).
 		WithTxLister(planrepo.NewTxLister(store)).
-		WithWindowLengths(planrepo.NewWindowLengthWriter(store))
+		WithWindowStore(planrepo.NewWindowStore(store))
 	return svc, store, chats, true
 }
 

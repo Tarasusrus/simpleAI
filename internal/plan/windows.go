@@ -2,16 +2,19 @@ package plan
 
 import "sort"
 
-// windowDays — длина окна. Жёстко 14 дней по решению владельца: поступления у него
-// приходят примерно раз в две недели, и окно должно быть одинаковым всегда.
+// windowDays — длина нового окна по умолчанию: поступления у владельца приходят примерно раз в две недели.
+// Сохранённое окно может быть другой длины (ADR-020, ADR-021).
 const windowDays = 14
 
-// Window — календарные дни от даты поступления (по умолчанию 14, владелец может поправить длину,
-// ADR-020). Хранит только поступления: платежи по окнам раскладывает Compute.
+// Window — окно плана (ADR-021): сохранённое (ID не пуст) или расчётное — ещё не начавшееся окно, которое
+// открыло поступление и которое сохранится в день начала. Хранит только поступления: платежи по окнам раскладывает
+// Compute.
 type Window struct {
+	// ID — id сохранённого окна; пусто — окно расчётное.
+	ID      string
 	Start   Date
 	Incomes []Event
-	// Length — длина в днях; 0 — по умолчанию (windowDays). Задаётся правкой окна (WindowLength).
+	// Length — длина в днях; 0 — по умолчанию (windowDays).
 	Length int
 }
 
@@ -23,8 +26,11 @@ func (w Window) Days() int {
 	return windowDays
 }
 
-// Adjusted — длина окна поправлена владельцем и отличается от стандартной.
+// Adjusted — длина окна отличается от стандартной.
 func (w Window) Adjusted() bool { return w.Days() != windowDays }
+
+// Stored — окно сохранено в базе.
+func (w Window) Stored() bool { return w.ID != "" }
 
 // End — последний день окна включительно (Start + Days − 1).
 func (w Window) End() Date { return w.Start.AddDays(w.Days() - 1) }
@@ -34,34 +40,78 @@ func (w Window) AnchorPlanned() bool {
 	return len(w.Incomes) > 0 && w.Incomes[0].State == StatePlanned
 }
 
-// BuildWindows строит окна из поступлений (платежи и события без даты пропускает).
+// StoredWindow — окно из базы. Deleted — владелец удалил окно: на его датах окно само больше не появляется,
+// а поступления этих дат попадают в соседние окна по дате, как обычный приход.
+type StoredWindow struct {
+	ID         string
+	Start, End Date
+	Deleted    bool
+}
+
+func (sw StoredWindow) contains(d Date) bool {
+	return d.Compare(sw.Start) >= 0 && d.Compare(sw.End) <= 0
+}
+
+// BuildWindows строит окна из сохранённых окон и поступлений (платежи и события без даты пропускает).
 //
-// Проход 1: цепочку окон строят только открывающие поступления (JoinsWindow=false): окно открывает самое раннее
-// ещё не покрытое, поступление внутри окна добавляется к нему, позже конца — открывает новое. Проход 2 (ADR-019):
-// обычные приходы (JoinsWindow=true) окон не создают и не двигают, а кладутся в окно по дате: внутри окна — в него,
-// в зазоре — в следующее, после последнего — в последнее, до первого — в первое. Если открывающих нет вовсе, первый
-// обычный приход открывает окно: иначе деньги исчезли бы с экрана. Обычные добавляются после открывающих, поэтому
-// Incomes[0] остаётся якорем окна.
-//
-// Длина окна — по умолчанию 14 дней; правка (lengths, ключ — дата начала окна, ADR-020) меняет конец окна, и
-// цепочка строится уже от него: продлённое окно забирает открывающее поступление в себя, сокращённое оставляет зазор.
-// Правка для даты, с которой окно не начинается, ничего не меняет.
+// Сохранённые окна главные (ADR-021): их даты не зависят от поступлений, и это история — от начала первого до конца
+// последнего сохранённого окна. Новые расчётные окна появляются только вне истории: после её конца — как раньше; до её
+// начала — только если все 14 дней окна помещаются до первого сохранённого (так окна до выкатки ADR-021 считаются и
+// сохраняются при первом чтении, а не сливаются с перенесённым окном; а зарплата чуть раньше сдвинутого начала окна
+// остаётся в нём). Открывающее поступление (JoinsWindow=false) внутри сохранённого окна
+// добавляется к нему; позже последнего сохранённого окна — открывает расчётное окно на 14 дней (как до ADR-021).
+// История — все сохранённые окна, включая удалённые. Открывающее поступление внутри истории (в зазоре, до начала
+// сдвинутого окна, на датах удалённого окна) окно не открывает и ведёт себя как обычный приход: иначе сдвиг начала окна плодил бы рядом крошечные окна. Обычные приходы (JoinsWindow=true, ADR-019) кладутся в окно по дате:
+// внутри окна — в него, в зазоре — в следующее, после последнего — в последнее, до первого — в первое. Если окон нет
+// вовсе и нет истории, первое поступление открывает окно: иначе деньги исчезли бы с экрана. Обычные добавляются после открывающих,
+// поэтому Incomes[0] остаётся якорем окна.
 //
 // Сортировка (дата, факт раньше плана, ключ) делает результат независимым от порядка входа. Вызывающий отдаёт ВСЕ
-// поступления с начала: цепочка окон зависит от точки отсечки истории.
-func BuildWindows(incomes []Event, lengths ...WindowLength) []Window {
-	byStart := make(map[Date]int, len(lengths))
-	for _, l := range lengths {
-		byStart[l.Start] = l.Days
+// поступления с начала: цепочка расчётных окон зависит от точки отсечки истории.
+func BuildWindows(incomes []Event, stored ...StoredWindow) []Window {
+	var active, deleted []StoredWindow
+	for _, sw := range stored {
+		if sw.Deleted {
+			deleted = append(deleted, sw)
+		} else if sw.End.Compare(sw.Start) >= 0 {
+			active = append(active, sw)
+		}
 	}
-	open := func(e Event) Window {
-		return Window{Start: *e.Date, Incomes: []Event{e}, Length: byStart[*e.Date]}
+	sort.SliceStable(active, func(i, j int) bool { return active[i].Start.Compare(active[j].Start) < 0 })
+	ws := make([]Window, 0, len(active))
+	var lastEnd *Date
+	for _, sw := range active {
+		if lastEnd != nil && sw.Start.Compare(*lastEnd) <= 0 {
+			continue // пересекающиеся окна разных чатов области: оставляем раннее, расчёт не падает
+		}
+		ws = append(ws, Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1})
+		end := sw.End
+		lastEnd = &end
 	}
-	ws := []Window{}
+	// История — все сохранённые окна, и удалённые тоже: удаление окна не должно освобождать его зарплату, чтобы та
+	// открыла окно заново.
+	var historyStart, historyEnd *Date
+	for _, sw := range stored {
+		if sw.Deleted || sw.End.Compare(sw.Start) >= 0 {
+			if historyStart == nil || sw.Start.Compare(*historyStart) < 0 {
+				start := sw.Start
+				historyStart = &start
+			}
+			if historyEnd == nil || sw.End.Compare(*historyEnd) > 0 {
+				end := sw.End
+				historyEnd = &end
+			}
+		}
+	}
+
 	var opening, joining []Event
 	for _, e := range incomes {
 		if e.Kind != KindIncome || e.Date == nil {
 			continue
+		}
+		inHistory := historyEnd != nil && e.Date.AddDays(windowDays-1).Compare(*historyStart) >= 0 && e.Date.Compare(*historyEnd) <= 0
+		if !e.JoinsWindow && (inDeleted(deleted, *e.Date) || inHistory && !inAny(ws, *e.Date)) {
+			e.JoinsWindow = true // ведёт себя как обычный приход: в окно по дате, и Compute не ждёт его в границах окна
 		}
 		if e.JoinsWindow {
 			joining = append(joining, e)
@@ -72,20 +122,61 @@ func BuildWindows(incomes []Event, lengths ...WindowLength) []Window {
 	sortIncomes(opening)
 	sortIncomes(joining)
 	for _, e := range opening {
-		if n := len(ws); n > 0 && e.Date.Compare(ws[n-1].End()) <= 0 {
-			ws[n-1].Incomes = append(ws[n-1].Incomes, e)
+		if i, ok := containing(ws, *e.Date); ok {
+			ws[i].Incomes = append(ws[i].Incomes, e)
 			continue
 		}
-		ws = append(ws, open(e))
+		ws = insertWindow(ws, provisional(*e.Date, e))
 	}
-	if len(ws) == 0 && len(joining) > 0 {
-		ws = append(ws, open(joining[0]))
+	// Окон нет вовсе и истории нет — первое поступление открывает окно, иначе деньги исчезли бы с экрана. С историей
+	// (например, все окна удалены) окно само не воскресает.
+	if len(ws) == 0 && historyEnd == nil && len(joining) > 0 {
+		ws = append(ws, provisional(*joining[0].Date, joining[0]))
 		joining = joining[1:]
+	}
+	if len(ws) == 0 {
+		return ws // все окна удалены: поступлениям некуда встать, экран покажет «окон нет»
 	}
 	for _, e := range joining {
 		i := windowIndexFor(ws, *e.Date)
 		ws[i].Incomes = append(ws[i].Incomes, e)
 	}
+	return ws
+}
+
+func inAny(ws []Window, d Date) bool {
+	_, ok := containing(ws, d)
+	return ok
+}
+
+func inDeleted(deleted []StoredWindow, d Date) bool {
+	for _, sw := range deleted {
+		if sw.contains(d) {
+			return true
+		}
+	}
+	return false
+}
+
+// containing — индекс окна, в которое попадает d.
+func containing(ws []Window, d Date) (int, bool) {
+	for i, w := range ws {
+		if d.Compare(w.Start) >= 0 && d.Compare(w.End()) <= 0 {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// provisional — расчётное окно с d на 14 дней.
+func provisional(d Date, anchor Event) Window { return Window{Start: d, Incomes: []Event{anchor}} }
+
+// insertWindow вставляет окно, сохраняя порядок по началу: окно до истории встаёт перед сохранёнными.
+func insertWindow(ws []Window, w Window) []Window {
+	i := sort.Search(len(ws), func(i int) bool { return ws[i].Start.Compare(w.Start) > 0 })
+	ws = append(ws, Window{})
+	copy(ws[i+1:], ws[i:])
+	ws[i] = w
 	return ws
 }
 

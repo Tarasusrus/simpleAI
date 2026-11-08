@@ -1,63 +1,75 @@
 package budget
 
 import (
-	"reflect"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-// Правка длины окна: перезапись, область чатов, свежая правка побеждает, сброс по области.
+// Окна плана: повторное сохранение того же окна, область чатов, правка, удаление, ограничения базы.
 //
-// Мутации: убрать ON CONFLICT DO UPDATE (повтор падает); убрать фильтр chat_id (чужой чат виден/стирается);
-// ORDER BY updated_at без DESC (побеждает старая правка).
-func TestPlanWindowLength_SetReadReset(t *testing.T) {
+// Мутации: убрать ON CONFLICT … DO NOTHING (повтор падает); убрать фильтр chat_id (чужой чат правится);
+// убрать NOT deleted в UPDATE (правится удалённое окно).
+func TestPlanWindow_CRUD(t *testing.T) {
 	s, ctx := rateTestStore(t)
-	chatA, chatB, chatOther := limitChat, limitChat-1, limitChat-2
+	chat, other := limitChat, limitChat-1
 	clean := func() {
-		if _, err := s.pool.Exec(ctx, `DELETE FROM plan_window_length WHERE chat_id IN ($1, $2, $3)`, chatA, chatB, chatOther); err != nil {
+		if _, err := s.pool.Exec(ctx, `DELETE FROM plan_window WHERE chat_id IN ($1, $2)`, chat, other); err != nil {
 			t.Errorf("очистка: %v", err)
 		}
 	}
 	clean()
 	t.Cleanup(clean)
-	oct5 := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
-	oct19 := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	day := func(m time.Month, d int) time.Time { return time.Date(2099, m, d, 0, 0, 0, 0, time.UTC) }
 
-	if err := s.SetPlanWindowLength(ctx, chatA, oct5, 16); err != nil {
+	id, err := s.CreatePlanWindow(ctx, chat, day(10, 5), day(10, 18))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPlanWindowLength(ctx, chatA, oct5, 17); err != nil { // повтор перезаписывает
-		t.Fatalf("повтор: %v", err)
+	again, err := s.CreatePlanWindow(ctx, chat, day(10, 5), day(10, 18))
+	if err != nil || again != id {
+		t.Fatalf("повтор вернул %v (err=%v), ждали %v", again, err, id)
 	}
-	if err := s.SetPlanWindowLength(ctx, chatOther, oct19, 30); err != nil {
+	if _, err := s.CreatePlanWindow(ctx, other, day(10, 5), day(10, 18)); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.PlanWindowLengths(ctx, []int64{chatA, chatB})
-	want := []PlanWindowLength{{WindowStart: oct5, Days: 17}}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("PlanWindowLengths=%+v err=%v, ждали %+v (чужой чат не виден)", got, err, want)
-	}
-
-	if err := s.SetPlanWindowLength(ctx, chatB, oct5, 10); err != nil { // свежая правка другого чата области
-		t.Fatal(err)
-	}
-	if got, err := s.PlanWindowLengths(ctx, []int64{chatA, chatB}); err != nil || len(got) != 1 || got[0].Days != 10 {
-		t.Fatalf("побеждает свежая правка: %+v err=%v", got, err)
+	got, err := s.PlanWindows(ctx, []int64{chat})
+	if err != nil || len(got) != 1 || got[0].ID != id || !got[0].End.Equal(day(10, 18)) {
+		t.Fatalf("PlanWindows=%+v err=%v", got, err)
 	}
 
-	if err := s.ResetPlanWindowLength(ctx, []int64{chatA, chatB}, oct5); err != nil {
+	if err := s.UpdatePlanWindow(ctx, []int64{other - 5}, id, day(10, 3), day(10, 20)); !errors.Is(err, ErrPlanWindowNotFound) {
+		t.Fatalf("правка из чужой области: %v", err)
+	}
+	if err := s.UpdatePlanWindow(ctx, []int64{chat}, id, day(10, 3), day(10, 20)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.PlanWindowLengths(ctx, []int64{chatA, chatB}); err != nil || len(got) != 0 {
-		t.Fatalf("после сброса: %+v err=%v", got, err)
+	if got, err := s.PlanWindows(ctx, []int64{chat}); err != nil || !got[0].Start.Equal(day(10, 3)) || !got[0].End.Equal(day(10, 20)) {
+		t.Fatalf("после правки: %+v err=%v", got, err)
 	}
-	if got, err := s.PlanWindowLengths(ctx, []int64{chatOther}); err != nil || len(got) != 1 {
-		t.Fatalf("сброс задел чужой чат: %+v err=%v", got, err)
+
+	if err := s.DeletePlanWindow(ctx, []int64{chat}, id); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.ResetPlanWindowLength(ctx, []int64{chatA}, oct5); err != nil { // сброс без правки — не ошибка
-		t.Fatalf("повторный сброс: %v", err)
+	if err := s.UpdatePlanWindow(ctx, []int64{chat}, id, day(10, 3), day(10, 21)); !errors.Is(err, ErrPlanWindowNotFound) {
+		t.Fatalf("правка удалённого окна: %v", err)
 	}
-	if err := s.SetPlanWindowLength(ctx, chatA, oct5, 63); err == nil {
-		t.Fatal("база обязана отвергнуть длину вне 1..62")
+	if err := s.DeletePlanWindow(ctx, []int64{chat}, uuid.New()); !errors.Is(err, ErrPlanWindowNotFound) {
+		t.Fatalf("удаление несуществующего: %v", err)
+	}
+	if got, err := s.PlanWindows(ctx, []int64{chat}); err != nil || len(got) != 1 || !got[0].Deleted {
+		t.Fatalf("удалённое окно остаётся в базе с пометкой: %+v err=%v", got, err)
+	}
+	// После удаления на той же дате можно снова сохранить окно (уникальность только среди действующих).
+	if id2, err := s.CreatePlanWindow(ctx, chat, day(10, 3), day(10, 16)); err != nil || id2 == id {
+		t.Fatalf("новое окно на дате удалённого: %v err=%v", id2, err)
+	}
+	if _, err := s.CreatePlanWindow(ctx, chat, day(12, 1), day(11, 1)); err == nil {
+		t.Fatal("база обязана отвергнуть конец раньше начала")
+	}
+	if _, err := s.CreatePlanWindow(ctx, chat, day(12, 1), day(12, 1).AddDate(0, 0, 62)); err == nil {
+		t.Fatal("база обязана отвергнуть окно длиннее 62 дней")
 	}
 }

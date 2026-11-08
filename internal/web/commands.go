@@ -350,6 +350,8 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrUnknownCategory:     "Такой категории нет. Выбери из списка или оставь поле пустым.",
 		plan.ErrBadWindowLength:     "Окно: от 1 до 62 дней, конец не раньше начала.",
 		plan.ErrWindowEndPast:       "Конец окна не может быть раньше сегодня.",
+		plan.ErrWindowOverlap:       "Окна не могут пересекаться: сначала поправь соседнее окно.",
+		plan.ErrLastWindow:          "Единственное окно удалить нельзя: поправь его даты.",
 	}
 	for target, msg := range bad {
 		if errors.Is(err, target) {

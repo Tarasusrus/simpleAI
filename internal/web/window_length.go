@@ -7,10 +7,13 @@ import (
 	"simpleAI/internal/plan"
 )
 
-// WindowEditor — правка окна на экране (ADR-020). Узкий интерфейс потребителя: веб не знает, как окно хранится.
+// WindowEditor — правка окна на экране (ADR-020, ADR-021). Узкий интерфейс потребителя: веб не знает, как окно
+// хранится.
 type WindowEditor interface {
 	ResizeWindow(ctx context.Context, days int) (plan.WindowFrame, error)
 	SetWindowEnd(ctx context.Context, end plan.Date) (plan.WindowFrame, error)
+	SetWindowStart(ctx context.Context, start plan.Date) (plan.WindowFrame, error)
+	DeleteWindow(ctx context.Context) (plan.WindowFrame, error)
 }
 
 // WithWindowEditor подключает правку окна. Без неё маршруты отвечают 404.
@@ -28,9 +31,15 @@ type windowEndBody struct {
 	End string `json:"end"`
 }
 
+type windowStartBody struct {
+	Start string `json:"start"`
+}
+
 func (s *Server) registerWindowRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/plan/window/resize", s.auth(http.HandlerFunc(s.handleWindowResize)))
 	mux.Handle("PUT /api/plan/window/end", s.auth(http.HandlerFunc(s.handleWindowEnd)))
+	mux.Handle("PUT /api/plan/window/start", s.auth(http.HandlerFunc(s.handleWindowStart)))
+	mux.Handle("DELETE /api/plan/window", s.auth(http.HandlerFunc(s.handleWindowDelete)))
 }
 
 func (s *Server) windowEditorOn(w http.ResponseWriter) bool {
@@ -78,4 +87,29 @@ func (s *Server) handleWindowEnd(w http.ResponseWriter, r *http.Request) {
 		_, err = s.windowEditor.SetWindowEnd(r.Context(), end)
 	}
 	s.windowEdited(w, r, "window_end", err)
+}
+
+// handleWindowStart: PUT /api/plan/window/start {"start": "YYYY-MM-DD"}
+func (s *Server) handleWindowStart(w http.ResponseWriter, r *http.Request) {
+	if !s.windowEditorOn(w) {
+		return
+	}
+	var b windowStartBody
+	if !decode(w, r, &b) {
+		return
+	}
+	start, err := plan.ParseDate(b.Start)
+	if err == nil {
+		_, err = s.windowEditor.SetWindowStart(r.Context(), start)
+	}
+	s.windowEdited(w, r, "window_start", err)
+}
+
+// handleWindowDelete: DELETE /api/plan/window — удалить окно на экране (единственное удалить нельзя).
+func (s *Server) handleWindowDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.windowEditorOn(w) {
+		return
+	}
+	_, err := s.windowEditor.DeleteWindow(r.Context())
+	s.windowEdited(w, r, "window_delete", err)
 }

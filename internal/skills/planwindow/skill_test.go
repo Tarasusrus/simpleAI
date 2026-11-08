@@ -15,6 +15,9 @@ type fakeWindows struct {
 	cur     botlimits.Window
 	resized []int
 	ends    []time.Time
+	starts  []time.Time
+	deleted int
+	after   *botlimits.Window // что вернуть после удаления; nil — cur
 	outside bool
 	err     error
 }
@@ -32,6 +35,19 @@ func (f *fakeWindows) ResizeWindow(_ context.Context, _ int64, days int) (botlim
 
 func (f *fakeWindows) SetWindowEnd(_ context.Context, _ int64, end time.Time) (botlimits.Window, bool, error) {
 	f.ends = append(f.ends, end)
+	return f.result()
+}
+
+func (f *fakeWindows) SetWindowStart(_ context.Context, _ int64, start time.Time) (botlimits.Window, bool, error) {
+	f.starts = append(f.starts, start)
+	return f.result()
+}
+
+func (f *fakeWindows) DeleteWindow(context.Context, int64) (botlimits.Window, bool, error) {
+	f.deleted++
+	if f.after != nil {
+		return *f.after, !f.outside, f.err
+	}
 	return f.result()
 }
 
@@ -98,7 +114,8 @@ func TestRun_SetEndParsesDates(t *testing.T) {
 		"2026-10-25": utc(2026, 10, 25),
 		"25.10.2026": utc(2026, 10, 25),
 		"25.10":      utc(2026, 10, 25),
-		"3.1":        utc(2027, 1, 3), // без года и раньше начала окна — следующий год
+		"3.1":        utc(2027, 1, 3),  // ближе к концу окна (19.10) — следующий январь
+		"03.10":      utc(2026, 10, 3), // раньше начала — тот же год (честный отказ ядра, а не 2027-й)
 	}
 	for in, want := range cases {
 		f := &fakeWindows{cur: window()}
@@ -113,6 +130,42 @@ func TestRun_SetEndParsesDates(t *testing.T) {
 	out, err := New(f, nil).Run(chatCtx(), `{"action":"set_end","end":"двадцатое"}`)
 	if err != nil || len(f.ends) != 0 || !strings.Contains(out, "Не понял дату") {
 		t.Fatalf("неразборчивая дата: out=%q err=%v ends=%v", out, err, f.ends)
+	}
+}
+
+func TestRun_SetStartParsesDates(t *testing.T) {
+	cases := map[string]time.Time{
+		"2026-10-03": utc(2026, 10, 3),
+		"3.10":       utc(2026, 10, 3),
+		"28.09":      utc(2026, 9, 28), // раньше начала окна — тот же год, а не следующий
+	}
+	for in, want := range cases {
+		f := &fakeWindows{cur: window()}
+		out, err := New(f, nil).Run(chatCtx(), `{"action":"set_start","start":"`+in+`"}`)
+		if err != nil || !strings.Contains(out, "Начало окна изменено") {
+			t.Fatalf("%s: out=%q err=%v", in, out, err)
+		}
+		if len(f.starts) != 1 || !f.starts[0].Equal(want) {
+			t.Errorf("%s → %v, ждали %v", in, f.starts, want)
+		}
+	}
+	// Окно через Новый год: «28.12» в окне с 3 января — прошлый год.
+	f := &fakeWindows{cur: botlimits.Window{Start: utc(2027, 1, 3), End: utc(2027, 1, 16), Days: 14}}
+	if _, err := New(f, nil).Run(chatCtx(), `{"action":"set_start","start":"28.12"}`); err != nil || !f.starts[0].Equal(utc(2026, 12, 28)) {
+		t.Fatalf("через Новый год: %v err=%v", f.starts, err)
+	}
+}
+
+func TestRun_Delete(t *testing.T) {
+	next := botlimits.Window{Start: utc(2026, 10, 20), End: utc(2026, 11, 2), Days: 14, DaysLeft: 14}
+	f := &fakeWindows{cur: window(), after: &next}
+	out, err := New(f, nil).Run(chatCtx(), `{"action":"delete"}`)
+	if err != nil || f.deleted != 1 || !strings.Contains(out, "Окно удалено") || !strings.Contains(out, "20.10 — 02.11") {
+		t.Fatalf("удаление: %q err=%v", out, err)
+	}
+	none := &fakeWindows{cur: window(), after: &botlimits.Window{}}
+	if out, err = New(none, nil).Run(chatCtx(), `{"action":"delete"}`); err != nil || !strings.Contains(out, "Открытого окна сейчас нет") {
+		t.Fatalf("удалено последнее: %q err=%v", out, err)
 	}
 }
 
@@ -133,6 +186,8 @@ func TestRun_FriendlyRefusals(t *testing.T) {
 		{&fakeWindows{err: botlimits.ErrNoWindow}, "Открытого окна нет"},
 		{&fakeWindows{err: botlimits.ErrBadWindowLength}, "от 1 до 62 дней"},
 		{&fakeWindows{err: botlimits.ErrWindowEndPast}, "раньше сегодня"},
+		{&fakeWindows{err: botlimits.ErrWindowOverlap}, "пересекутся"},
+		{&fakeWindows{err: botlimits.ErrLastWindow}, "Единственное окно"},
 	}
 	for _, c := range cases {
 		out, err := New(c.f, nil).Run(chatCtx(), `{"action":"extend"}`)
@@ -163,11 +218,11 @@ func TestManifest_ActionsMatchHandlers(t *testing.T) {
 		t.Fatal("нет action")
 	}
 	enum, ok := action["enum"].([]string)
-	if !ok || len(enum) != 4 {
+	if !ok || len(enum) != 6 {
 		t.Fatalf("enum=%v", action["enum"])
 	}
 	for _, a := range enum {
-		if _, err := s.Run(chatCtx(), `{"action":"`+a+`","end":"25.10"}`); err != nil {
+		if _, err := s.Run(chatCtx(), `{"action":"`+a+`","end":"25.10","start":"3.10"}`); err != nil {
 			t.Errorf("действие %q из схемы не обработано: %v", a, err)
 		}
 	}
