@@ -125,7 +125,7 @@ func (s *SafeToSpendSkill) shadowRemaining(ctx context.Context, chatID int64, ol
 func formatPlanLimits(snap botlimits.Snapshot, m Display, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n",
-		snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, pluralDays(snap.DaysLeft))
+		snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, PluralDays(snap.DaysLeft))
 	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(m.RubPerTHB), now.Format("02.01"))
 
 	var over []string
@@ -176,7 +176,7 @@ func planDayLines(snap botlimits.Snapshot, m Display) string {
 // formatPlanFree — режим общего остатка («сколько свободно осталось») из плана.
 func formatPlanFree(snap botlimits.Snapshot, m Display) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "🧧 Окно плана: %s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, pluralDays(snap.DaysLeft))
+	fmt.Fprintf(&b, "🧧 Окно плана: %s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, PluralDays(snap.DaysLeft))
 	b.WriteString(strings.TrimPrefix(planDayLines(snap, m), "\n"))
 	return b.String()
 }
@@ -186,7 +186,7 @@ func formatPlanFree(snap botlimits.Snapshot, m Display) string {
 func FormatPlanDigest(snap botlimits.Snapshot) string {
 	m := NewDisplay(snap.Cur, 0)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, pluralDays(snap.DaysLeft))
+	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, PluralDays(snap.DaysLeft))
 	b.WriteString(planDayLines(snap, m))
 	if len(snap.Limits) > 0 {
 		b.WriteString("\n\nЛимиты:")

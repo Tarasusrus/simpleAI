@@ -21,6 +21,7 @@ import (
 	"simpleAI/internal/skills"
 	advisorskill "simpleAI/internal/skills/advisor"
 	budgetskill "simpleAI/internal/skills/budget"
+	"simpleAI/internal/skills/planwindow"
 	safetospendskill "simpleAI/internal/skills/safetospend"
 	"simpleAI/internal/trace"
 )
@@ -31,12 +32,21 @@ type RegistryOption func(*registryOpts)
 type registryOpts struct {
 	limits     botlimits.Reader
 	limitsMode safetospendskill.LimitsMode
+	windows    botlimits.WindowEditor
+	numbers    botlimits.Reader
 }
 
 // WithBotLimits подключает лимиты из плана для safe_to_spend (ADR-016): числа ответов берутся из plan.Service,
 // когда mode.FromPlan, иначе — только shadow-сравнение (mode.Shadow). Без опции скилл работает по-старому.
 func WithBotLimits(r botlimits.Reader, mode safetospendskill.LimitsMode) RegistryOption {
 	return func(o *registryOpts) { o.limits, o.limitsMode = r, mode }
+}
+
+// WithPlanWindow подключает навык правки окна плана (ADR-020): «добавь день», «окно до 25.10». Без опции навыка
+// в реестре нет. numbers — «Свободно» и «на день» в ответе на правку (может быть nil). От флагов лимитов
+// (WithBotLimits) не зависит.
+func WithPlanWindow(w botlimits.WindowEditor, numbers botlimits.Reader) RegistryOption {
+	return func(o *registryOpts) { o.windows, o.numbers = w, numbers }
 }
 
 // BuildRegistry собирает единый реестр skills (rag_search, budget, advisor)
@@ -75,6 +85,12 @@ func BuildRegistry(llmClient core.LLMClient, logger *slog.Logger, pool *pgxpool.
 		WithLimits(o.limits, o.limitsMode)
 	if err := registry.Register(safeToSpendSkill); err != nil {
 		logger.Error("failed to register safe_to_spend skill", "err", err)
+	}
+
+	if o.windows != nil {
+		if err := registry.Register(planwindow.New(o.windows, o.numbers)); err != nil {
+			logger.Error("failed to register plan_window skill", "err", err)
+		}
 	}
 
 	logger.Info("registry ready", "skills", len(registry.List()))

@@ -37,30 +37,41 @@ func envBool(v string, def bool) bool {
 type botLimits struct {
 	reader botlimits.Reader
 	mode   safetospendskill.LimitsMode
+	// windows — правка окна плана из бота (ADR-020), numbers — числа окна для ответа на правку; nil — плана нет.
+	windows botlimits.WindowEditor
+	numbers botlimits.Reader
 }
 
-// newBotLimits подключает план к скиллам бота, если он нужен (флаг или shadow) и собирается из окружения.
-// Нет области чатов или плохой PLAN_TZ — бот работает по старому пути.
+// newBotLimits подключает план к скиллам бота, если он собирается из окружения. Правка окна (ADR-020) от флагов
+// лимитов не зависит: окно — понятие плана, и «добавь день» работает всегда, когда план есть. Числа лимитов
+// скиллы берут из плана только при флаге или shadow. Нет области чатов или плохой PLAN_TZ — бот работает по
+// старому пути, без правки окна.
 func newBotLimits(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, getenv func(string) string) botLimits {
 	mode := botLimitsMode(getenv)
-	if !mode.FromPlan && !mode.Shadow {
-		return botLimits{mode: mode}
-	}
 	svc, _, chats, ok := newPlanService(cfg, logger, pool)
 	if !ok {
 		logger.Warn("bot limits: план недоступен, бот работает по старому пути")
 		return botLimits{mode: mode}
 	}
+	p := botlimits.NewPlan(svc, botlimits.ScopeOfChats(chats))
+	b := botLimits{mode: mode, windows: p, numbers: p}
+	if mode.FromPlan || mode.Shadow {
+		b.reader = p
+	}
 	logger.Info("bot limits wired", "from_plan", mode.FromPlan, "shadow", mode.Shadow && !mode.FromPlan, "chats", len(chats))
-	return botLimits{reader: botlimits.NewPlan(svc, botlimits.ScopeOfChats(chats)), mode: mode}
+	return b
 }
 
 // options — опция реестра скиллов (пусто, если плана нет).
 func (b botLimits) options() []appwiring.RegistryOption {
-	if b.reader == nil {
-		return nil
+	var opts []appwiring.RegistryOption
+	if b.reader != nil {
+		opts = append(opts, appwiring.WithBotLimits(b.reader, b.mode))
 	}
-	return []appwiring.RegistryOption{appwiring.WithBotLimits(b.reader, b.mode)}
+	if b.windows != nil {
+		opts = append(opts, appwiring.WithPlanWindow(b.windows, b.numbers))
+	}
+	return opts
 }
 
 // pushSource переключает утренний пуш на план при BOT_LIMITS_FROM_PLAN; иначе источник остаётся прежним.

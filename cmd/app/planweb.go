@@ -41,12 +41,13 @@ func newPlanService(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) 
 		return nil, nil, nil, false
 	}
 	store = budget.NewStore(pool)
-	reader := planrepo.NewReader(store, logger).WithLimits(store).WithDismissed(store)
+	reader := planrepo.NewReader(store, logger).WithLimits(store).WithDismissed(store).WithWindowLengths(store)
 	svc = plan.NewService(reader, planrepo.NewWriter(store), func() plan.Date { return plan.DateOf(time.Now(), loc) }, plan.Scope{ChatIDs: chats},
 		plan.WithFactWriter(planrepo.NewFactWriter(store)), plan.WithRuleLister(reader)).
 		WithLimitWriter(planrepo.NewLimitWriter(store)).
 		WithCategoryHider(planrepo.NewCategoryHider(store)).
-		WithTxLister(planrepo.NewTxLister(store))
+		WithTxLister(planrepo.NewTxLister(store)).
+		WithWindowLengths(planrepo.NewWindowLengthWriter(store))
 	return svc, store, chats, true
 }
 
@@ -68,7 +69,7 @@ func runPlanWeb(ctx context.Context, cfg config.Config, logger *slog.Logger, poo
 		logger.Warn("plan web not started: invalid config", "reason", err.Error())
 		return
 	}
-	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc).WithCategoryTransactions(svc).WithRuleViewer(svc).
+	srv.WithLimits(svc, planrepo.NewLimitSuggester(store)).WithCategoryHider(svc).WithCategoryTransactions(svc).WithRuleViewer(svc).WithWindowEditor(svc).
 		WithTransactions(txedit.NewService(store, categories.NewStore(pool)))
 	if err := srv.Run(ctx); err != nil {
 		logger.Error("plan web stopped", "err", err)

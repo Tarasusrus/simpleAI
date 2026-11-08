@@ -21,6 +21,9 @@ button.add.on{background:var(--acc);color:#fff}
 .seg button:first-child{border-radius:9px 0 0 9px}.seg button:last-child{border-radius:0 9px 9px 0;border-left:0}.seg button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .win{color:var(--mut);font-size:13px;margin:0 2px 10px}
 .win a{color:var(--acc);cursor:pointer}
+.win-edit{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;margin-top:4px}
+.win-edit .x{margin-left:0;background:none;border:0;padding:0;min-height:0;font:inherit;font-size:13px;color:var(--acc);font-weight:500}
+.win-edit input{width:auto}
 .fi.hide{display:none!important}
 .f{display:none}.f.on{display:block}.f.fx.on{display:flex}
 .rep{display:none;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--mut);margin-top:10px}.rep.on{display:flex}

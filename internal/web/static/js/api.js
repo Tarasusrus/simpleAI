@@ -57,6 +57,11 @@ export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + en
 export const reopenItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/reopen' + q(cur));
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));
 
+// Правка окна (ADR-020): продлить или сократить на N дней, задать последний день, вернуть 14 дней.
+export const resizeWindow = (cur, days) => call('POST', '/api/plan/window/resize' + q(cur), { days });
+export const setWindowEnd = (cur, end) => call('PUT', '/api/plan/window/end' + q(cur), { end });
+export const resetWindow = (cur) => call('DELETE', '/api/plan/window/length' + q(cur));
+
 // Регулярные платежи: список правил повтора, включая приостановленные.
 export const getRecurring = (cur) => call('GET', '/api/plan/recurring' + q(cur));
 

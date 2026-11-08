@@ -52,8 +52,10 @@ type Service struct {
 	txs    TxLister      // nil — список трат категории отключён (WithTxLister)
 	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
 	rules  RuleLister    // nil — список правил отключён (WithRuleLister)
-	today  Clock
-	scope  Scope
+	// lengths — правка длины окна (WithWindowLengths); nil — правка отключена.
+	lengths WindowLengthWriter
+	today   Clock
+	scope   Scope
 }
 
 // NewService собирает сервис; все зависимости приходят снаружи. Writer может быть
@@ -114,7 +116,7 @@ func (s *Service) load(ctx context.Context) (state, error) {
 			payments = append(payments, e)
 		}
 	}
-	ws := BuildWindows(incomes)
+	ws := BuildWindows(incomes, snap.WindowLengths...)
 	return state{snap: snap, today: today, windows: ws, events: payments, limits: snap.Limits, st: Locate(ws, today)}, nil
 }
 

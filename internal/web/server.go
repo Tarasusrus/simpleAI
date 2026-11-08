@@ -64,6 +64,8 @@ type Server struct {
 	txEditor TxEditor
 	// ruleView — список регулярных платежей; nil — маршрут отвечает 404.
 	ruleView RuleViewer
+	// windowEditor — правка длины окна (ADR-020); nil — маршруты отвечают 404.
+	windowEditor WindowEditor
 }
 
 // New собирает сервер. Невалидный конфиг (в том числе слабый токен) — ошибка:
@@ -108,6 +110,7 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	s.registerLimitRoutes(mux)
 	s.registerTxRoutes(mux)
 	s.registerRuleRoutes(mux)
+	s.registerWindowRoutes(mux)
 	files := http.FileServerFS(sub)
 	// Страница «Транзакции» (ADR-018): /transactions?focus=<id> отдаёт тот же HTML, фокус разбирает скрипт.
 	mux.HandleFunc("GET /transactions", func(w http.ResponseWriter, r *http.Request) {

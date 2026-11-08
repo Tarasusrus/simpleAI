@@ -29,7 +29,9 @@ type Reader struct {
 	src    Source
 	limits LimitSource     // nil — лимиты не читаются (WithLimits)
 	dism   DismissedSource // nil — скрытые категории не читаются (WithDismissed)
-	logger *slog.Logger
+	// lengths — правки длины окна (WithWindowLengths); nil — у всех окон 14 дней.
+	lengths WindowLengthSource
+	logger  *slog.Logger
 }
 
 // NewReader собирает читателя; logger может быть nil.
@@ -101,6 +103,9 @@ func (r *Reader) Read(ctx context.Context, sc plan.Scope) (plan.Snapshot, error)
 		return plan.Snapshot{}, err
 	}
 	if snap.Dismissed, err = r.readDismissed(ctx, sc); err != nil {
+		return plan.Snapshot{}, err
+	}
+	if snap.WindowLengths, err = r.readWindowLengths(ctx, sc); err != nil {
 		return plan.Snapshot{}, err
 	}
 	if snap.ReservePct, err = r.src.PlanReservePct(ctx); err != nil {
