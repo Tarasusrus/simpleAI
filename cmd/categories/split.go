@@ -312,10 +312,7 @@ func remapped(s plan.Snapshot, p categories.SplitPlan) plan.Snapshot {
 
 // printPlanEffect — «Свободно», лимиты и «Как обычно тратишь» до и после (ADR-013 §4, ADR-011 §3): тот же расчёт плана.
 func fillPlanEffect(ctx context.Context, w *strings.Builder, pool *pgxpool.Pool, cfg config.Config, p categories.SplitPlan) error {
-	chats := config.ParseChatIDs(os.Getenv("PLAN_CHAT_IDS"))
-	if len(chats) == 0 {
-		chats = cfg.Telegram.AllowedChats
-	}
+	chats := cfg.PlanScopeChats()
 	if len(chats) == 0 {
 		fmt.Fprintf(w, "\n## Влияние на план\n\nПропущено: не задан PLAN_CHAT_IDS / TELEGRAM_ALLOWED_CHATS.\n")
 		return nil
