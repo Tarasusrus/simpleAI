@@ -56,7 +56,13 @@ type Service struct {
 	windows WindowStore
 	today   Clock
 	scope   Scope
+	// carryDebt — пользователь разрешил переносить минус прошлых окон. По умолчанию нет: дефицит
+	// прошлого окна не висит на новом (WithCarryDebt).
+	carryDebt bool
 }
+
+// WithCarryDebt — перенос минуса прошлых окон разрешён пользователем. Без него переносится только плюс.
+func WithCarryDebt(allowed bool) Option { return func(s *Service) { s.carryDebt = allowed } }
 
 // NewService собирает сервис; все зависимости приходят снаружи. Writer может быть
 // nil: тогда команды записи возвращают ErrReadOnly.
@@ -88,6 +94,8 @@ type state struct {
 	incomes []Event // все поступления, из которых построены окна (нужны, чтобы примерить правку окна)
 	limits  []Limit
 	st      WindowState
+	// carryDebt — разрешён перенос минуса прошлых окон (Service.carryDebt).
+	carryDebt bool
 }
 
 func (s *Service) load(ctx context.Context) (state, error) {
@@ -127,7 +135,7 @@ func (s *Service) load(ctx context.Context) (state, error) {
 		return state{}, err
 	}
 	ExtendLast(ws, today)
-	return state{snap: snap, today: today, windows: ws, events: payments, incomes: incomes, limits: snap.Limits, st: Locate(ws, today)}, nil
+	return state{snap: snap, today: today, windows: ws, events: payments, incomes: incomes, limits: snap.Limits, st: Locate(ws, today), carryDebt: s.carryDebt}, nil
 }
 
 // lastStoredStart — начало последнего действующего сохранённого окна; nil, если таких нет.
@@ -211,6 +219,7 @@ func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
 		Limits:     ld.limits,
 		Dismissed:  ld.snap.Dismissed,
 		Carry:      true,
+		CarryDebt:  ld.carryDebt,
 	})
 	if err != nil {
 		return Result{}, err
