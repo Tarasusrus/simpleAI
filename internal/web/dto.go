@@ -81,6 +81,8 @@ type KPIDTO struct {
 	SpentBefore     int64   `json:"spentBefore"`
 	SpentBeforeFrom *string `json:"spentBeforeFrom"`
 	Reserve         int64   `json:"reserve"`
+	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый; уже учтён в canSpend.
+	Carry int64 `json:"carry"`
 	Received        int64   `json:"received"`
 	ExpectedIncome  int64   `json:"expectedIncome"`
 	Unpriced        int     `json:"unpriced"`
@@ -168,7 +170,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		},
 		State: string(v.State),
 		KPI: KPIDTO{
-			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, Reserve: v.Reserve,
+			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, Reserve: v.Reserve, Carry: v.Carry,
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
 			LimitHold: v.LimitHold, LimitsExceedFree: v.LimitsExceedFree,

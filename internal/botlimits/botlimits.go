@@ -35,6 +35,8 @@ type Snapshot struct {
 	PerDay   *int64
 	// LimitHold — сумма остатков лимитов (уже вычтена из CanSpend).
 	LimitHold int64
+	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый; уже учтён в CanSpend.
+	Carry int64
 	Limits    []Limit
 }
 

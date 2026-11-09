@@ -2,6 +2,10 @@ package plan
 
 import "sort"
 
+// earlyCloseDays — за сколько последних дней окна пришедшая зарплата закрывает его и открывает новое (ADR-023):
+// выплата, выпавшая на выходные, приходит в пятницу, и это уже следующий период, а не прибавка к текущему.
+const earlyCloseDays = 3
+
 // windowDays — длина нового окна по умолчанию: поступления у владельца приходят примерно раз в две недели.
 // Сохранённое окно может быть другой длины (ADR-020, ADR-021).
 const windowDays = 14
@@ -104,14 +108,19 @@ func buildWindows(incomes []Event, stored []StoredWindow, grow bool) []Window {
 	}
 	sort.SliceStable(active, func(i, j int) bool { return active[i].Start.Compare(active[j].Start) < 0 })
 	ws := make([]Window, 0, len(active))
-	var lastEnd *Date
 	for _, sw := range active {
-		if lastEnd != nil && sw.Start.Compare(*lastEnd) <= 0 {
-			continue // пересекающиеся окна разных чатов области: оставляем раннее, расчёт не падает
+		w := Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1, FixedEnd: sw.FixedEnd}
+		if n := len(ws); n > 0 && sw.Start.Compare(ws[n-1].End()) <= 0 {
+			prev := &ws[n-1]
+			// Окна пересекаются. Окно, закрытое ранней зарплатой (ADR-023), хранит прежний конец, а следующее уже
+			// сохранено с её даты: прежнее заканчивается накануне. Конец владельца так не обрезается — тогда (и при
+			// окнах разных чатов области с одним началом) остаётся раннее, расчёт не падает.
+			if !grow || prev.FixedEnd || sw.Start.Compare(prev.Start) <= 0 {
+				continue
+			}
+			prev.Length = DaysBetween(prev.Start, sw.Start)
 		}
-		ws = append(ws, Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1, FixedEnd: sw.FixedEnd})
-		end := sw.End
-		lastEnd = &end
+		ws = append(ws, w)
 	}
 	// История — все сохранённые окна, и удалённые тоже: удаление окна не должно освобождать его зарплату, чтобы та
 	// открыла окно заново.
@@ -148,6 +157,11 @@ func buildWindows(incomes []Event, stored []StoredWindow, grow bool) []Window {
 	sortIncomes(joining)
 	for _, e := range opening {
 		if i, ok := containing(ws, *e.Date); ok {
+			if grow && closesEarly(ws, i, *e.Date) {
+				ws[i].Length = DaysBetween(ws[i].Start, *e.Date) // окно кончается накануне зарплаты
+				ws = append(ws, provisional(*e.Date, e))
+				continue
+			}
 			ws[i].Incomes = append(ws[i].Incomes, e)
 			continue
 		}
@@ -199,6 +213,13 @@ func ExtendLast(ws []Window, today Date) {
 		last.Extra += d
 		last.Ongoing = true
 	}
+}
+
+// closesEarly — зарплата в последние earlyCloseDays дней последнего окна закрывает его (ADR-023): выплата раньше
+// срока из-за выходных. Не трогаем окно с концом владельца и не режем окно в день его собственного начала.
+func closesEarly(ws []Window, i int, d Date) bool {
+	w := ws[i]
+	return i == len(ws)-1 && !w.FixedEnd && d.Compare(w.Start) > 0 && DaysBetween(d, w.BaseEnd()) < earlyCloseDays
 }
 
 func inAny(ws []Window, d Date) bool {

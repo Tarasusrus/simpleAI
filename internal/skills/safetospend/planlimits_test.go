@@ -258,3 +258,16 @@ func TestFormatPlanDigest(t *testing.T) {
 		t.Errorf("валюта сводки не из снимка:\n%s", out)
 	}
 }
+
+// Перенос остатка прошлого окна виден в ответе бота (ADR-023), нулевой — молчит.
+func TestPlanDayLines_Carry(t *testing.T) {
+	per := int64(500)
+	m := NewDisplay("RUB", 0)
+	with := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per, Carry: -700}, m)
+	if !strings.Contains(with, "перенос из прошлого окна") {
+		t.Fatalf("нет строки переноса: %q", with)
+	}
+	if without := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per}, m); strings.Contains(without, "перенос") {
+		t.Fatalf("нулевой перенос показан: %q", without)
+	}
+}
