@@ -31,19 +31,58 @@ func TestService_CarryChain(t *testing.T) {
 	}
 }
 
-func TestService_CarryNegativeAndReserve(t *testing.T) {
+// Минус прошлого окна по умолчанию НЕ переносится: без разрешения пользователя дефицит не висит на новом окне.
+//
+// Мутация: убрать `total = 0` в carry() — перенос −200, тест краснеет.
+func TestService_CarryDebtNotCarriedByDefault(t *testing.T) {
 	r := &fakeReader{snap: Snapshot{
 		Incomes:    []Event{salary("a", d(2026, 9, 1)), salary("b", d(2026, 9, 15))},
 		Payments:   []Event{spend("x", d(2026, 9, 5), 1100)},
 		ReservePct: 10,
 	}}
-	// Окно 01.09: 1000 − 1100 − резерв 100 = −200 переходит в окно 15.09.
+	// Окно 01.09: 1000 − 1100 − резерв 100 = −200: без разрешения в окно 15.09 не переходит.
 	res, err := svc(r, d(2026, 9, 20)).View(context.Background(), CurRUB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.View.Carry != 0 || res.View.CanSpend != 1000-100 {
+		t.Fatalf("перенос %d (ждали 0), свободно %d (ждали 900)", res.View.Carry, res.View.CanSpend)
+	}
+}
+
+// С разрешением пользователя минус переносится, как в ADR-023.
+func TestService_CarryDebtWhenAllowed(t *testing.T) {
+	r := &fakeReader{snap: Snapshot{
+		Incomes:    []Event{salary("a", d(2026, 9, 1)), salary("b", d(2026, 9, 15))},
+		Payments:   []Event{spend("x", d(2026, 9, 5), 1100)},
+		ReservePct: 10,
+	}}
+	res, err := svc(r, d(2026, 9, 20), WithCarryDebt(true)).View(context.Background(), CurRUB)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.View.Carry != -200 || res.View.CanSpend != 1000-100-200 {
 		t.Fatalf("перенос %d, свободно %d", res.View.Carry, res.View.CanSpend)
+	}
+}
+
+// Старый долг не копится: плюс после минуса переносится целиком, а не уменьшается на давний дефицит.
+//
+// Мутация: убрать `total = 0` — перенос 100 вместо 600.
+func TestService_OldDeficitDoesNotEatLaterSurplus(t *testing.T) {
+	r := &fakeReader{snap: Snapshot{
+		Incomes: []Event{
+			salary("a", d(2026, 8, 1)), salary("b", d(2026, 8, 15)), salary("c", d(2026, 9, 1)), salary("d", d(2026, 9, 15)),
+		},
+		Payments: []Event{spend("x", d(2026, 8, 5), 1500), spend("y", d(2026, 8, 20), 400)},
+	}}
+	// 01.08: 1000 − 1500 = −500 (гасится); 15.08: 1000 − 400 = +600; 01.09: +1000 → переносится 1600, не 1100.
+	res, err := svc(r, d(2026, 9, 20)).View(context.Background(), CurRUB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.View.Carry != 1600 {
+		t.Fatalf("перенос %d, ждали 1600: давний дефицит не должен съедать последующий плюс", res.View.Carry)
 	}
 }
 
