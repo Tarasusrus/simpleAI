@@ -31,3 +31,18 @@ export function plural(n, one, few, many) {
   if (b === 1) return one;
   return many;
 }
+
+// Как часто повторяется платёж: «каждый месяц», «каждые 2 недели», «каждые 5 лет».
+const EVERY = {
+  day: ['каждый день', 'день', 'дня', 'дней'],
+  week: ['каждую неделю', 'неделю', 'недели', 'недель'],
+  month: ['каждый месяц', 'месяц', 'месяца', 'месяцев'],
+  year: ['каждый год', 'год', 'года', 'лет'],
+};
+
+export function every(n, unit) {
+  const u = EVERY[unit];
+  if (!u) return '—';
+  if (n === 1) return u[0];
+  return 'каждые ' + n + ' ' + plural(n, u[1], u[2], u[3]);
+}

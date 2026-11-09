@@ -32,6 +32,7 @@ import (
 	"simpleAI/internal/plugin"
 	advisorskill "simpleAI/internal/skills/advisor"
 	budgetskill "simpleAI/internal/skills/budget"
+	"simpleAI/internal/skills/planwindow"
 	safetospendskill "simpleAI/internal/skills/safetospend"
 
 	"simpleAI/evals"
@@ -128,6 +129,7 @@ func buildManifests() []plugin.Manifest {
 		budgetskill.NewBudgetSkill(nil).Manifest(),
 		advisorskill.NewAdvisorSkill(nil, nil, nil).Manifest(),
 		safetospendskill.NewSafeToSpendSkill(nil, nil, nil).Manifest(),
+		planwindow.New(nil, nil).Manifest(),
 	}
 }
 

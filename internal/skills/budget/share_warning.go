@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/skills/safetospend"
 )
@@ -37,6 +38,9 @@ type shareWarningStore interface {
 // поверх computeShareRemaining — единственного места, где живёт формула
 // remaining = allocated + carried_in − факт (ADR-008 §8).
 func (s *BudgetSkill) shareOverspendWarning(ctx context.Context, t budget.Transaction, req budgetInput) string {
+	if warn, ok := s.planOverspendWarning(ctx, t, req); ok {
+		return warn
+	}
 	st := s.shareStore
 	if st == nil {
 		return ""
@@ -111,4 +115,52 @@ func formatShareWarning(rem safetospend.ShareRemaining, m safetospend.Display) s
 	}
 	return fmt.Sprintf("\n\n⚠️ Конверт «%s» пробит на %s (лимит %s, потрачено %s).",
 		rem.Name, m.Fmt(-rem.Remaining), m.Fmt(rem.LimitTHB), m.Fmt(rem.SpentTHB))
+}
+
+// WithLimits подключает лимиты из плана (ADR-016): при fromPlan предупреждение о трате считает ядро плана.
+func (s *BudgetSkill) WithLimits(r botlimits.Reader, fromPlan bool) *BudgetSkill {
+	s.limits, s.limitsFromPlan = r, fromPlan
+	s.limitsWriter, _ = r.(botlimits.Writer) //nolint:errcheck // нет писателя — старый путь
+	return s
+}
+
+// planOverspendWarning — предупреждение из плана (ADR-016 §6). ok=false — отвечать старым путём (флаг выключен,
+// чат вне области плана, окна нет, ошибка плана). ok=true и пустая строка — предупреждать не о чем: у категории
+// нет лимита (раньше трата падала в «прочее» и печатала чужой пробой) или лимит не пробит.
+// Трата уже записана, функция только дополняет ответ; платежи повторяющихся правил лимит не едят.
+func (s *BudgetSkill) planOverspendWarning(ctx context.Context, t budget.Transaction, req budgetInput) (string, bool) {
+	if !s.limitsFromPlan || s.limits == nil {
+		return "", false
+	}
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	if !ok || chatID == 0 {
+		return "", false
+	}
+	m := safetospend.NewDisplay(displayCode(req), 0)
+	snap, ok, err := s.limits.Snapshot(ctx, chatID, m.Code)
+	if err != nil {
+		slog.Default().WarnContext(ctx, "add_expense: план недоступен, предупреждение по старому пути", "err", err, "chat_id", chatID)
+		return "", false
+	}
+	if !ok {
+		return "", false
+	}
+	if t.RecurringID != nil {
+		return "", true
+	}
+	l, found := snap.ForCategory(t.CategoryName)
+	if !found || l.Over <= 0 {
+		return "", true
+	}
+	return formatPlanWarning(l, m), true
+}
+
+// formatPlanWarning — текст предупреждения плана; числа готовые, целые, в валюте показа.
+func formatPlanWarning(l botlimits.Limit, m safetospend.Display) string {
+	used := fmt.Sprintf("потрачено %s", m.Signed(int(l.Spent)))
+	if l.Planned > 0 {
+		used += fmt.Sprintf(", запланировано %s", m.Signed(int(l.Planned)))
+	}
+	return fmt.Sprintf("\n\n⚠️ Лимит «%s» пробит на %s (лимит %s, %s).",
+		l.Category, m.Signed(int(l.Over)), m.Signed(int(l.Amount)), used)
 }

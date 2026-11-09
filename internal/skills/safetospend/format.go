@@ -133,7 +133,7 @@ func FormatEnvelopePlan(d EnvelopeReply) string {
 
 	// Шапка: период, приход, курс. Обычным текстом — крупно и без колонок.
 	fmt.Fprintf(&b, "%s — %s · %d %s\n",
-		d.From.Format("02.01"), d.To.Format("02.01"), days, pluralDays(days))
+		d.From.Format("02.01"), d.To.Format("02.01"), days, PluralDays(days))
 	fmt.Fprintf(&b, "Пришло %s\n", incomeLine(d, m))
 	// Перенос — отдельная строка и НЕ складывается с приходом: там деньги
 	// этого прихода, здесь — прошлого. Свернув их в одну сумму, мы показали бы
@@ -353,7 +353,8 @@ func envelopeDays(from, to time.Time) int {
 	return d
 }
 
-func pluralDays(n int) string {
+// PluralDays — «день / дня / дней» для n; общая для ответов бота про окно.
+func PluralDays(n int) string {
 	switch {
 	case n%10 == 1 && n%100 != 11:
 		return "день"
@@ -540,7 +541,7 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 	// показывается всегда, любой валютой показа — по нему оператор сверяет
 	// числа с тем, что видит в банке.
 	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n",
-		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"), daysLeft, pluralDays(daysLeft))
+		env.PeriodStart.Format("02.01"), env.PeriodEnd.Format("02.01"), daysLeft, PluralDays(daysLeft))
 	fmt.Fprintf(&b, "Курс %s ₽/฿ на %s\n", FmtRate(m.RubPerTHB), now.Format("02.01"))
 
 	b.WriteString("\n**Что осталось**\n```\n")
@@ -567,7 +568,7 @@ func formatShareRemaining(items []ShareRemaining, m Display, env *budget.Envelop
 
 	// Главное число — одно и внизу: по нему оператор действует сегодня.
 	fmt.Fprintf(&b, "\n**На день: %s**\n", m.Fmt(DailyLimit(FlexibleRemainingTHB(items), daysLeft)))
-	fmt.Fprintf(&b, "Осталось %d %s. %s", daysLeft, pluralDays(daysLeft), remainingScope(items))
+	fmt.Fprintf(&b, "Осталось %d %s. %s", daysLeft, PluralDays(daysLeft), remainingScope(items))
 
 	if over := overspentNames(items); len(over) > 0 {
 		fmt.Fprintf(&b, "\n\n⚠️ Пробито: %s — дальше тратишь из других конвертов.", strings.Join(over, ", "))

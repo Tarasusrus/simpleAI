@@ -46,15 +46,36 @@ type Result struct {
 // повторы, считает окно. Ни веб, ни Telegram «можно тратить» сами не считают.
 type Service struct {
 	reader Reader
-	writer Writer // nil — запись отключена
-	today  Clock
-	scope  Scope
+	writer Writer        // nil — запись отключена
+	facts  FactWriter    // nil — правка и возврат закрытых записей отключены
+	limits LimitWriter   // nil — запись лимитов отключена (WithLimitWriter)
+	txs    TxLister      // nil — список трат категории отключён (WithTxLister)
+	hider  CategoryHider // nil — скрытие категорий отключено (WithCategoryHider)
+	rules  RuleLister    // nil — список правил отключён (WithRuleLister)
+	// windows — хранение окон (WithWindowStore, ADR-021); nil — окна только считаются, правка отключена.
+	windows WindowStore
+	today   Clock
+	scope   Scope
 }
 
 // NewService собирает сервис; все зависимости приходят снаружи. Writer может быть
 // nil: тогда команды записи возвращают ErrReadOnly.
-func NewService(r Reader, w Writer, today Clock, sc Scope) *Service {
-	return &Service{reader: r, writer: w, today: today, scope: sc}
+func NewService(r Reader, w Writer, today Clock, sc Scope, opts ...Option) *Service {
+	s := &Service{reader: r, writer: w, today: today, scope: sc}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// ForScope возвращает сервис с другой областью чатов; зависимости общие. Область — параметр запроса,
+// а не свойство процесса: бот многочатовый, а сервис собирается один раз (ADR-016 §2). Выбрана копия
+// сервиса, а не параметр у каждого метода: публичный API plan не меняется, а область по-прежнему
+// принудительно ограничивает чтение, запись, правку и удаление.
+func (s *Service) ForScope(sc Scope) *Service {
+	c := *s
+	c.scope = sc
+	return &c
 }
 
 // state — снимок и окна, посчитанные от одной «сегодня»; общий для расчёта и
@@ -64,6 +85,8 @@ type state struct {
 	today   Date
 	windows []Window
 	events  []Event // платежи: факты, разовые и развёрнутые повторы
+	incomes []Event // все поступления, из которых построены окна (нужны, чтобы примерить правку окна)
+	limits  []Limit
 	st      WindowState
 }
 
@@ -77,6 +100,11 @@ func (s *Service) load(ctx context.Context) (state, error) {
 		return state{}, fmt.Errorf("%w: сегодня %v", ErrBadDate, today)
 	}
 	from := today.AddDays(-lookbackDays)
+	// Последнее окно может идти дольше горизонта догона (давно без зарплаты, ADR-022): сроки повторов разворачиваются
+	// с его начала, иначе ранние платежи окна пропали бы из расчёта.
+	if s := lastStoredStart(snap.Windows); s != nil && s.Compare(from) < 0 {
+		from = *s
+	}
 	to := Date{today.Year, today.Month, 1}.AddMonths(horizonMonths).AddDays(-1)
 	expanded, err := Expand(snap.Rules, from, to)
 	if err != nil {
@@ -94,8 +122,24 @@ func (s *Service) load(ctx context.Context) (state, error) {
 			payments = append(payments, e)
 		}
 	}
-	ws := BuildWindows(incomes)
-	return state{snap: snap, today: today, windows: ws, events: payments, st: Locate(ws, today)}, nil
+	ws := BuildGrowingWindows(incomes, snap.Windows...)
+	if err := s.materialize(ctx, ws, today); err != nil {
+		return state{}, err
+	}
+	ExtendLast(ws, today)
+	return state{snap: snap, today: today, windows: ws, events: payments, incomes: incomes, limits: snap.Limits, st: Locate(ws, today)}, nil
+}
+
+// lastStoredStart — начало последнего действующего сохранённого окна; nil, если таких нет.
+func lastStoredStart(ws []StoredWindow) *Date {
+	var last *Date
+	for _, w := range ws {
+		if !w.Deleted && (last == nil || w.Start.Compare(*last) > 0) {
+			start := w.Start
+			last = &start
+		}
+	}
+	return last
 }
 
 // focus — окно, которое описывает экран, и «сегодня» для его расчёта. В зазоре
@@ -135,11 +179,16 @@ type ViewOptions struct {
 
 // ViewWith — View с настройками показа.
 func (s *Service) ViewWith(ctx context.Context, cur Currency, opt ViewOptions) (Result, error) {
-	showPast := opt.ShowPast
 	ld, err := s.load(ctx)
 	if err != nil {
 		return Result{}, err
 	}
+	return viewOf(ld, cur, opt)
+}
+
+// viewOf считает окно по уже загруженному состоянию: по нему же считается предпросмотр лимита.
+func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
+	showPast := opt.ShowPast
 	asOf, upcoming := ld.today, false
 	if ld.st.Kind == StateBetween {
 		_, asOf, upcoming = ld.focus()
@@ -159,6 +208,9 @@ func (s *Service) ViewWith(ctx context.Context, cur Currency, opt ViewOptions) (
 		Cur:        cur,
 		Today:      asOf,
 		ReservePct: ld.snap.ReservePct,
+		Limits:     ld.limits,
+		Dismissed:  ld.snap.Dismissed,
+		Carry:      true,
 	})
 	if err != nil {
 		return Result{}, err
@@ -226,7 +278,7 @@ func checkInvariant(v View) error {
 	if v.State == StateNone || v.Window == nil {
 		return nil
 	}
-	want := v.Income.Received + v.Income.Expected - v.Payments - v.Spent - v.Reserve
+	want := v.Income.Received + v.Income.Expected + v.Carry - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	if v.CanSpend != want {
 		return fmt.Errorf("%w: canSpend=%d, по слагаемым %d", ErrInvariant, v.CanSpend, want)
 	}
@@ -250,6 +302,9 @@ type AddIncomeInput struct {
 	Name   string
 	Amount Money
 	Date   Date
+	// JoinsWindow — обычный приход (продажа вещи и т.п.): окно не открывает, попадает в окно по дате (ADR-019).
+	// Ноль — зарплата/аванс, открывает окно, как раньше.
+	JoinsWindow bool
 }
 
 // AddPaymentInput — плановый платёж: либо с датой, либо в выбранное окно, либо без
@@ -275,7 +330,7 @@ func (s *Service) AddIncome(ctx context.Context, in AddIncomeInput) (string, err
 		return "", err
 	}
 	amount, date := in.Amount, in.Date
-	n := NewItem{Kind: KindIncome, Name: in.Name, Amount: &amount, Date: &date}
+	n := NewItem{Kind: KindIncome, Name: in.Name, Amount: &amount, Date: &date, JoinsWindow: in.JoinsWindow}
 	if err := n.Validate(); err != nil {
 		return "", err
 	}
@@ -366,7 +421,9 @@ func (st state) chosenWindowStart(c WindowChoice) (Date, error) {
 	if idx+1 < len(st.windows) {
 		return st.windows[idx+1].Start, nil
 	}
-	return st.windows[idx].End().AddDays(1), nil
+	// От заданного конца, а не от выросшего: иначе день «после конца» оказался бы внутри растущего окна, и платёж
+	// «в следующее» тихо попал бы в текущее (ADR-022).
+	return st.windows[idx].BaseEnd().AddDays(1), nil
 }
 
 // Delete удаляет плановую запись по ключу вида "planned:<id>" или по самому id.

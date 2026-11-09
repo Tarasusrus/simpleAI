@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 )
 
@@ -13,13 +14,18 @@ import (
 // Остаток вычисляется из фактических транзакций (ADR-007 §4, недвойной учёт),
 // не хранится.
 func (s *SafeToSpendSkill) runRemaining(ctx context.Context, chatID int64, rates map[string]float64) (string, error) {
+	if reply, ok := s.planFirst(ctx, chatID, "RUB", func(snap botlimits.Snapshot) string {
+		return formatPlanFree(snap, NewDisplay("RUB", rates["THB"]))
+	}); ok {
+		return reply, nil
+	}
 	env, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
 	if err != nil {
 		s.logger.WarnContext(ctx, "safe_to_spend: get active envelope", "err", err, "chat_id", chatID)
 		return "Не удалось получить конверт — попробуй позже.", nil
 	}
 	if !ok {
-		return "Активного конверта нет. Скажи «пришло X, сколько свободно?» — посчитаю, или «запомни приход X», чтобы отслеживать остаток.", nil
+		return "Активного конверта нет. Скажи «пришло X, сколько свободно?» — посчитаю.", nil
 	}
 
 	incomeTHB, ok := budget.ToTHB(env.IncomeAmount, env.IncomeCurrency, rates)
@@ -53,6 +59,7 @@ func (s *SafeToSpendSkill) runRemaining(ctx context.Context, chatID int64, rates
 	}
 
 	res := computeRemaining(incomeTHB, snapObl, plannedTHB, actualSpentTHB)
+	s.shadowRemaining(ctx, chatID, int64(roundInt(res.RemainingTHB*rates["THB"])))
 	reply := formatRemaining(res, rates["THB"], env)
 	s.logger.InfoContext(ctx, "safe_to_spend.remaining",
 		"chat_id", chatID, "remaining_thb", res.RemainingTHB, "spent_thb", actualSpentTHB)
@@ -82,13 +89,18 @@ func formatRemaining(r RemainingResult, rubPerTHB float64, env *budget.Envelope)
 // runShares — режим «сколько осталось в конвертах» (ADR-008 §8). Скилл
 // read-only: остаток считается из фактических транзакций и никуда не пишется.
 func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates map[string]float64, m Display) (string, error) {
+	if reply, ok := s.planFirst(ctx, chatID, m.Code, func(snap botlimits.Snapshot) string {
+		return formatPlanLimits(snap, m, time.Now())
+	}); ok {
+		return reply, nil
+	}
 	env, ok, err := s.store.GetActiveEnvelope(ctx, chatID)
 	if err != nil {
 		s.logger.WarnContext(ctx, "safe_to_spend: shares get active envelope", "err", err, "chat_id", chatID)
 		return "Не удалось получить конверт — попробуй позже.", nil
 	}
 	if !ok {
-		return "Активного конверта нет. Скажи «пришло X, разложи по конвертам» — заведу раскладку.", nil
+		return "Активного конверта нет. Конверты больше не заводятся: лимиты на категории ставятся словами («на еду хватит 15000») и считаются по окну плана — для этого нужен ожидаемый приход в плане.", nil
 	}
 
 	shares, err := s.store.ListShares(ctx, chatID, env.ID)
@@ -122,6 +134,7 @@ func (s *SafeToSpendSkill) runShares(ctx context.Context, chatID int64, rates ma
 	}
 
 	items := computeShareRemaining(shares, rowsSpent, rates)
+	s.shadowShares(ctx, chatID, items, DaysLeft(time.Now(), env.PeriodEnd))
 	reply := formatShareRemaining(items, m, env, time.Now())
 	s.logger.InfoContext(ctx, "safe_to_spend.shares",
 		"chat_id", chatID, "envelope_id", env.ID, "shares", len(items), "display", m.Code)

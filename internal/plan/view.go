@@ -13,8 +13,21 @@ type View struct {
 	AvgDays int
 
 	Income IncomeSum
+	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый: минус — перерасход прошлых окон.
+	Carry int64
 	// CanSpend знаковое: отрицательное значение — недостача.
 	CanSpend, Payments, Spent, Reserve int64
+	// LimitHold — сумма остатков лимитов категорий: отложена и из CanSpend вычтена.
+	LimitHold int64
+	// LimitsExceedFree — лимиты откладывают больше, чем было свободно до них.
+	LimitsExceedFree bool
+	Limits           []LimitView
+	// Unplanned — категории без действующего лимита с тратами окна; UnplannedSpent — их сумма.
+	// Часть Spent, в формулу не входит (ADR-015 §2).
+	Unplanned []UnplannedRow
+	// Hidden — те же строки по категориям, скрытым владельцем («Не планировать»); в UnplannedSpent входят.
+	Hidden         []UnplannedRow
+	UnplannedSpent int64
 	// SpentBefore — траты в зазоре между окнами, пока описываемое окно ещё не началось; в окно не входят.
 	SpentBefore     int64
 	SpentBeforeFrom *Date
@@ -38,6 +51,11 @@ type WindowInfo struct {
 	Start, End    Date
 	DaysLeft      int
 	AnchorPlanned bool
+	// Days — длина окна; Adjusted — длина не равна 14 (поправлена или выросла сама, ADR-020/022).
+	Days     int
+	Adjusted bool
+	// Ongoing — окно закончилось, а зарплаты нет: идёт до следующего поступления (ADR-022).
+	Ongoing bool
 }
 
 // Row — строка ленты, «без даты», следующего окна и деталей категории.
@@ -55,6 +73,9 @@ type Row struct {
 	WindowMissing bool
 	// WindowPassed — выбранное окно уже прошло, а платёж не оплачен.
 	WindowPassed bool
+	// Editable и Reopenable — права строки (Event.Actions): «изменить» и «вернуть в план».
+	// Фронт их не выводит, а берёт готовыми.
+	Editable, Reopenable bool
 }
 
 // UndatedBlock — платежи без даты и без окна: лежат здесь и в расчёт не входят.

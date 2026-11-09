@@ -27,6 +27,10 @@ var (
 	ErrNotEditable = fmt.Errorf("%w: изменить можно только плановую запись или повтор", ErrInvalidEvent)
 	// ErrRuleSchedule — у повтора попросили поменять дату или окно.
 	ErrRuleSchedule = fmt.Errorf("%w: у повтора срок не правится", ErrInvalidEvent)
+	// ErrKindNotIncome — вид «открывает окно» просили у расхода: он есть только у поступления.
+	ErrKindNotIncome = fmt.Errorf("%w: вид «открывает окно» есть только у поступления", ErrInvalidEvent)
+	// ErrRuleKind — у правила повтора вид прихода не правится (отдельная задача).
+	ErrRuleKind = fmt.Errorf("%w: у повтора вид поступления не правится", ErrInvalidEvent)
 )
 
 // EditableItem — запись в том виде, в каком её правят: сумма в исходной валюте, а не
@@ -36,13 +40,18 @@ type EditableItem struct {
 	Key       string
 	Kind      Kind
 	Recurring bool
-	Name      string
-	Amount    *Money // nil — суммы нет (только у разового платежа)
-	Category  string
+	// Fact — закрытая запись (факт-транзакция): правятся название, сумма и дата,
+	// валюта и категория остаются.
+	Fact     bool
+	Name     string
+	Amount   *Money // nil — суммы нет (только у разового платежа)
+	Category string
 	// Date и WindowStart — размещение разовой записи; у правила nil.
 	Date, WindowStart *Date
 	// Rule — расписание правила, только для подписи в форме; у разовой nil.
 	Rule *Rule
+	// OpensWindow — у ожидаемого поступления: открывает окно (зарплата, аванс) или нет (ADR-019).
+	OpensWindow bool
 }
 
 // EditInput — новые значения записи. Название, сумма и категория заменяются
@@ -52,6 +61,8 @@ type EditInput struct {
 	Amount   *Money
 	Category string
 	Place    *MoveInput
+	// OpensWindow — вид ожидаемого поступления (ADR-019): nil — не менять. Только у разового поступления.
+	OpensWindow *bool
 }
 
 // PlannedEdit — проверенная разовая запись для писателя. Item несёт итоговые дату и
@@ -60,6 +71,8 @@ type EditInput struct {
 type PlannedEdit struct {
 	Item     NewItem
 	SetPlace bool
+	// OpensWindow — вид поступления: nil — не менять.
+	OpensWindow *bool
 }
 
 // RuleEdit — новые название, сумма и категория правила. Kind — вид правила из базы:
@@ -94,6 +107,13 @@ func (s *Service) Edit(ctx context.Context, key string, in EditInput) error {
 	if err != nil {
 		return err
 	}
+	if _, ok := factID(key); ok {
+		e, err := findFact(snap, key)
+		if err != nil {
+			return err
+		}
+		return s.editFact(ctx, e, in)
+	}
 	it, err := findItem(snap, key)
 	if err != nil {
 		return err
@@ -105,6 +125,9 @@ func (s *Service) Edit(ctx context.Context, key string, in EditInput) error {
 }
 
 func (s *Service) editPlanned(ctx context.Context, it EditableItem, in EditInput) error {
+	if in.OpensWindow != nil && it.Kind != KindIncome {
+		return ErrKindNotIncome
+	}
 	n := NewItem{
 		Kind: it.Kind, Name: in.Name, Amount: in.Amount, Category: strings.TrimSpace(in.Category),
 		Date: it.Date, WindowStart: it.WindowStart,
@@ -120,12 +143,15 @@ func (s *Service) editPlanned(ctx context.Context, it EditableItem, in EditInput
 		return err
 	}
 	n.Name = strings.TrimSpace(n.Name)
-	return s.writer.UpdatePlanned(ctx, s.scope, strings.TrimPrefix(it.Key, "planned:"), PlannedEdit{Item: n, SetPlace: in.Place != nil})
+	return s.writer.UpdatePlanned(ctx, s.scope, strings.TrimPrefix(it.Key, "planned:"), PlannedEdit{Item: n, SetPlace: in.Place != nil, OpensWindow: in.OpensWindow})
 }
 
 func (s *Service) editRule(ctx context.Context, it EditableItem, in EditInput) error {
 	if in.Place != nil {
 		return ErrRuleSchedule
+	}
+	if in.OpensWindow != nil {
+		return ErrRuleKind
 	}
 	name, cat := strings.TrimSpace(in.Name), strings.TrimSpace(in.Category)
 	if name == "" {
@@ -156,6 +182,20 @@ func (s *Service) editRule(ctx context.Context, it EditableItem, in EditInput) e
 // findItem ищет запись по ключу строки экрана. У правила ключ срока
 // "recurring:<ruleID>@YYYY-MM-DD" ведёт к самому правилу.
 func findItem(snap Snapshot, key string) (EditableItem, error) {
+	if _, ok := factID(key); ok {
+		e, err := findFact(snap, key)
+		if err != nil {
+			return EditableItem{}, err
+		}
+		if !e.Actions().Edit {
+			return EditableItem{}, ErrNotEditable
+		}
+		name := e.Name
+		if name == UnnamedName {
+			name = ""
+		}
+		return EditableItem{Key: e.Key, Kind: e.Kind, Fact: true, Name: name, Amount: e.Amount, Category: e.Category, Date: e.Date}, nil
+	}
 	if _, ok := strings.CutPrefix(key, "planned:"); ok {
 		for _, list := range [][]Event{snap.Payments, snap.Incomes} {
 			for _, e := range list {
@@ -166,7 +206,7 @@ func findItem(snap Snapshot, key string) (EditableItem, error) {
 					}
 					return EditableItem{
 						Key: e.Key, Kind: e.Kind, Name: name, Amount: e.Amount, Category: editCategory(e.Kind, e.Category),
-						Date: e.Date, WindowStart: e.WindowStart,
+						Date: e.Date, WindowStart: e.WindowStart, OpensWindow: !e.JoinsWindow,
 					}, nil
 				}
 			}

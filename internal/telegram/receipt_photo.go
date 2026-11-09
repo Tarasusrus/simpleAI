@@ -19,6 +19,7 @@ const (
 	msgReceiptUnknownFile   = "Это не похоже на фото или PDF — такой файл не принимаю."
 	msgReceiptUnsupported   = "Этот формат модель не принимает — пришли обычное фото чека."
 	msgReceiptNotReceipt    = "На фото не чек — расход не создан."
+	msgReceiptDuplicate     = "Этот чек уже записан — второй раз не записываю."
 	msgReceiptUnreadable    = "Не удалось распознать фото. Сними чек ещё раз, ровно и при хорошем свете."
 	msgReceiptNoCurrency    = "Не понял валюту чека — расход не создан. Можно ввести трату текстом."
 	msgReceiptNoTotal       = "Не нашёл итоговую сумму на чеке — расход не создан. Можно ввести трату текстом."
@@ -28,7 +29,7 @@ const (
 
 // WithReceiptPhotos отправляет фото и документы-картинки/PDF в сценарий
 // чека, а всё остальное — в next. Подпись к фото игнорируется: фото — это
-// ввод данных, а не вопрос агенту (ADR-010 §1). Фото не сохраняется на
+// ввод данных, а не вопрос агенту (ADR-014 §1). Фото не сохраняется на
 // диск и не попадает в ingest-JSON: ветка стоит до next.
 //
 // svc == nil — сценарий не настроен: фото получает «не настроена», а не
@@ -92,7 +93,7 @@ func handleReceiptAttachment(ctx context.Context, tctx *Context, svc ReceiptServ
 }
 
 // logReceiptError пишет только тип вложения и ошибку: ни байтов, ни
-// распознанного текста чека в логах быть не должно (ADR-010 §6).
+// распознанного текста чека в логах быть не должно (ADR-014 §6).
 func logReceiptError(ctx context.Context, tctx *Context, msg string, att core.Attachment, err error) {
 	if tctx.Logger != nil {
 		tctx.Logger.ErrorContext(ctx, msg, "kind", att.Kind, "size", att.Size, "err", scrubError(err))
@@ -132,6 +133,8 @@ func receiptErrorMessage(err error) (msg string, known bool) {
 		return msgReceiptUnsupported, true
 	case errors.Is(err, receipt.ErrNotReceipt):
 		return msgReceiptNotReceipt, true
+	case errors.Is(err, receipt.ErrDuplicate):
+		return msgReceiptDuplicate, true
 	case errors.Is(err, receipt.ErrUnreadable):
 		return msgReceiptUnreadable, true
 	case errors.Is(err, receipt.ErrNoCurrency):

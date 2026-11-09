@@ -33,6 +33,12 @@ type Snapshot struct {
 	// Skipped — сколько записей не вошло в план: валюта не бат и не рубль, либо
 	// ожидаемое поступление без даты. Молча их терять нельзя, экран скажет об этом.
 	Skipped int
+	// Limits — лимиты категорий всех окон; действующие на окно выбирает Compute.
+	Limits []Limit
+	// Dismissed — названия категорий, скрытых из блока «Не запланировано» (ADR-015 §3).
+	Dismissed []string
+	// Windows — сохранённые окна области, в том числе удалённые (ADR-021).
+	Windows []StoredWindow
 }
 
 // Reader читает данные для плана. Реализует internal/planrepo.
@@ -50,6 +56,8 @@ type NewItem struct {
 	Date        *Date
 	WindowStart *Date
 	Category    string // только у платежа; пусто = без категории
+	// JoinsWindow — только у поступления: обычный приход, окна не открывает (ADR-019).
+	JoinsWindow bool
 }
 
 // maxAmountMinor — потолок суммы записи: 1 000 000 000 в основных единицах. Без него

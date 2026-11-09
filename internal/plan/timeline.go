@@ -106,10 +106,7 @@ func (c calc) blocks(v *View) error {
 			return err
 		}
 		if e.State == StateDone {
-			if e.Date != nil && c.inWindowByDate(*e.Date) {
-				timeline = append(timeline, newItem(row, 1, 2))
-			}
-			continue
+			continue // лента — что ещё впереди; закрытое смотрится в деталях категорий
 		}
 		group := 1
 		if row.OverdueDays > 0 {
@@ -158,6 +155,9 @@ func (c calc) blocks(v *View) error {
 		}
 		r := rowOf(e, &n)
 		r.Expected = e.State == StatePlanned
+		if !r.Expected {
+			continue // пришедшее — уже в «пришло» шапки окна, в ленте не нужно
+		}
 		r.NotArrived = r.Expected && e.Date.Compare(c.in.Today) < 0
 		ord := 0
 		if r.Expected {

@@ -18,7 +18,7 @@ import (
 // VisionClient — core.VisionLLM поверх OpenAI-совместимого API (прокси
 // LiteLLM). В отличие от Client у него нет ни ретраев, ни fallback-клиента:
 // переключение между моделями делает сама цепочка маршрута в прокси, а
-// бот обязан отправить картинку ровно в запрошенную модель (ADR-010 §4).
+// бот обязан отправить картинку ровно в запрошенную модель (ADR-014 §4).
 type VisionClient struct {
 	api     openai.Client
 	timeout time.Duration

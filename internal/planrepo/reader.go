@@ -17,6 +17,7 @@ import (
 type Source interface {
 	PlanTransactions(ctx context.Context) ([]budget.PlanTx, error)
 	PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]budget.PlanRecurring, error)
+	PlanRecurringRulesAll(ctx context.Context, chatIDs []int64) ([]budget.PlanRecurring, error)
 	PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]budget.PlanPlanned, error)
 	PlanReservePct(ctx context.Context) (int, error)
 	GetExchangeRates(ctx context.Context) (map[string]float64, error)
@@ -26,7 +27,11 @@ type Source interface {
 // Reader реализует plan.Reader поверх Source.
 type Reader struct {
 	src    Source
-	logger *slog.Logger
+	limits LimitSource     // nil — лимиты не читаются (WithLimits)
+	dism   DismissedSource // nil — скрытые категории не читаются (WithDismissed)
+	// windows — сохранённые окна (WithWindows, ADR-021); nil — окна только считаются.
+	windows WindowSource
+	logger  *slog.Logger
 }
 
 // NewReader собирает читателя; logger может быть nil.
@@ -94,6 +99,15 @@ func (r *Reader) Read(ctx context.Context, sc plan.Scope) (plan.Snapshot, error)
 		snap.Rules = append(snap.Rules, rw)
 	}
 
+	if snap.Limits, err = r.readLimits(ctx, sc); err != nil {
+		return plan.Snapshot{}, err
+	}
+	if snap.Dismissed, err = r.readDismissed(ctx, sc); err != nil {
+		return plan.Snapshot{}, err
+	}
+	if snap.Windows, err = r.readWindows(ctx, sc); err != nil {
+		return plan.Snapshot{}, err
+	}
 	if snap.ReservePct, err = r.src.PlanReservePct(ctx); err != nil {
 		return plan.Snapshot{}, err
 	}
@@ -162,7 +176,7 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 	}
 	d := date(t.Date)
 	ev := plan.Event{
-		Key:      "transaction:" + t.ID.String(),
+		Key:      plan.TransactionKey(t.ID.String()),
 		Kind:     kind,
 		State:    plan.StateDone,
 		Name:     firstNonEmpty(t.Description, t.Category, plan.UnnamedName),
@@ -170,6 +184,9 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 		Date:     &d,
 		Category: t.Category,
 		Source:   plan.SourceTransaction,
+		Origin:   factOrigin(t),
+		// Обычный приход окна не открывает (ADR-019); у расходов флаг не используется.
+		JoinsWindow: kind == plan.KindIncome && !t.OpensWindow,
 	}
 	if t.RecurringID != nil {
 		ev.RuleID = t.RecurringID.String()
@@ -181,6 +198,19 @@ func (r *Reader) txEvent(t budget.PlanTx) (plan.Event, bool) {
 		}
 	}
 	return ev, true
+}
+
+// factOrigin — происхождение факта для прав строки (plan.Event.Actions). Решает
+// адаптер, потому что знает колонки; что с этим можно делать — решает домен.
+func factOrigin(t budget.PlanTx) plan.FactOrigin {
+	switch {
+	case t.AddedBy != budget.AddedByWeb:
+		return plan.FactExternal
+	case t.PlannedID != nil:
+		return plan.FactSettled
+	default:
+		return plan.FactWebLoose
+	}
 }
 
 func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {
@@ -202,6 +232,7 @@ func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {
 		WindowStart: datePtr(p.WindowStart),
 		Category:    p.Category,
 		Source:      plan.SourcePlanned,
+		JoinsWindow: kind == plan.KindIncome && !p.OpensWindow,
 	}
 	if p.AmountMinor != nil {
 		m, ok := money(*p.AmountMinor, p.Currency)
@@ -215,11 +246,17 @@ func (r *Reader) plannedEvent(p budget.PlanPlanned) (plan.Event, bool) {
 }
 
 func (r *Reader) ruleEvent(x budget.PlanRecurring) (plan.RuleWithExceptions, bool) {
-	m, ok := money(x.AmountMinor, x.Currency)
-	if !ok {
+	if _, ok := money(x.AmountMinor, x.Currency); !ok {
 		r.skip("повторяющееся правило", x.ID.String(), x.Currency)
 		return plan.RuleWithExceptions{}, false
 	}
+	return ruleOf(x), true
+}
+
+// ruleOf переводит строку базы в правило домена без проверки валюты: список
+// регулярных платежей показывает и такие правила (с пометкой Invalid).
+func ruleOf(x budget.PlanRecurring) plan.RuleWithExceptions {
+	m := plan.Money{Minor: x.AmountMinor, Cur: plan.Currency(x.Currency)}
 	kind := plan.KindPayment
 	if x.Type == "income" {
 		kind = plan.KindIncome
@@ -243,8 +280,30 @@ func (r *Reader) ruleEvent(x budget.PlanRecurring) (plan.RuleWithExceptions, boo
 	}
 	return plan.RuleWithExceptions{
 		ID: x.ID.String(), Name: x.Name, Category: x.Category,
-		Kind: kind, Rule: rule, Exceptions: ex,
-	}, true
+		Kind: kind, Rule: rule, Exceptions: ex, JoinsWindow: kind == plan.KindIncome && !x.OpensWindow,
+	}
+}
+
+var _ plan.RuleLister = (*Reader)(nil)
+
+// ListRules отдаёт все правила области, включая приостановленные, и курс для
+// пересчёта «в месяц».
+func (r *Reader) ListRules(ctx context.Context, sc plan.Scope) (plan.RuleList, error) {
+	if len(sc.ChatIDs) == 0 {
+		return plan.RuleList{}, fmt.Errorf("planrepo: пустая область чатов")
+	}
+	rows, err := r.src.PlanRecurringRulesAll(ctx, sc.ChatIDs)
+	if err != nil {
+		return plan.RuleList{}, err
+	}
+	list := plan.RuleList{Rules: make([]plan.RuleRecord, 0, len(rows))}
+	for _, x := range rows {
+		list.Rules = append(list.Rules, plan.RuleRecord{RuleWithExceptions: ruleOf(x), Paused: !x.Enabled})
+	}
+	if list.Rate, _, err = r.rate(ctx); err != nil {
+		return plan.RuleList{}, err
+	}
+	return list, nil
 }
 
 func firstNonEmpty(ss ...string) string {

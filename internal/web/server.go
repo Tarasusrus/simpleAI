@@ -35,6 +35,7 @@ type Planner interface {
 	ExpenseCategories(ctx context.Context) ([]string, error)
 	Item(ctx context.Context, key string) (plan.EditableItem, error)
 	Edit(ctx context.Context, key string, in plan.EditInput) error
+	Reopen(ctx context.Context, key string) error
 }
 
 const (
@@ -52,6 +53,19 @@ type Server struct {
 	sem     chan struct{}
 	limiter *badAttempts
 	handler http.Handler
+	// limits и suggester — лимиты категорий (WithLimits); nil — маршруты отвечают 404.
+	limits    LimitPlanner
+	suggester plan.LimitSuggester
+	// hider — «Не планировать» (ADR-015 §3); nil — маршруты отвечают 404.
+	hider CategoryHider
+	// txs — траты категории окна (ADR-015 §6); nil — маршрут отвечает 404.
+	txs CategoryTxPlanner
+	// txEditor — страница «Транзакции» (ADR-018); nil — маршруты отвечают 404.
+	txEditor TxEditor
+	// ruleView — список регулярных платежей; nil — маршрут отвечает 404.
+	ruleView RuleViewer
+	// windowEditor — правка длины окна (ADR-020); nil — маршруты отвечают 404.
+	windowEditor WindowEditor
 }
 
 // New собирает сервер. Невалидный конфиг (в том числе слабый токен) — ошибка:
@@ -88,11 +102,23 @@ func New(cfg Config, p Planner, logger *slog.Logger) (*Server, error) {
 	mux.Handle("POST /api/plan/item/{key}/done", s.auth(http.HandlerFunc(s.handleDone)))
 	mux.Handle("POST /api/plan/item/{key}/move", s.auth(http.HandlerFunc(s.handleMove)))
 	mux.Handle("POST /api/plan/item/{key}/skip", s.auth(http.HandlerFunc(s.handleSkip)))
+	mux.Handle("POST /api/plan/item/{key}/reopen", s.auth(http.HandlerFunc(s.handleReopen)))
 	mux.Handle("POST /api/plan/rate", s.auth(http.HandlerFunc(s.handleRate)))
 	mux.Handle("DELETE /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleDelete)))
 	mux.Handle("GET /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleItem)))
 	mux.Handle("PATCH /api/plan/item/{key}", s.auth(http.HandlerFunc(s.handleEdit)))
+	s.registerLimitRoutes(mux)
+	s.registerTxRoutes(mux)
+	s.registerRuleRoutes(mux)
+	s.registerWindowRoutes(mux)
 	files := http.FileServerFS(sub)
+	// Страница «Транзакции» (ADR-018): /transactions?focus=<id> отдаёт тот же HTML, фокус разбирает скрипт.
+	mux.HandleFunc("GET /transactions", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "transactions.html")
+	})
+	mux.HandleFunc("GET /recurring", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, sub, "recurring.html")
+	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// Без листинга каталогов: отдаём только сами файлы.
 		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {

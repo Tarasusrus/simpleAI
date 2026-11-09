@@ -8,11 +8,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"simpleAI/internal/categories"
 )
 
 // Строки для плана окна. Деньги отдаются целыми минимальными единицами
 // (amount*100), прямо из NUMERIC в SQL: через float64 копейки терялись бы на
 // границе, а домен плана считает только целыми (C1).
+
+// AddedByWeb — значение added_by у фактов, созданных экраном плана. По нему и по
+// recurring_id IS NULL экран узнаёт «свои» факты, которые можно править и возвращать в
+// план (транзакции общие и chat_id не имеют): менять в одном месте.
+const AddedByWeb = "web"
 
 // PlanTx — транзакция для плана: факт поступления или расхода.
 type PlanTx struct {
@@ -26,6 +33,13 @@ type PlanTx struct {
 	RecurringID *uuid.UUID
 	// ScheduledFor — срок правила, к которому относится факт; у старых строк NULL.
 	ScheduledFor *time.Time
+	// AddedBy — кто создал факт ("web", "bot", ...; у старых строк пусто).
+	AddedBy string
+	// PlannedID — плановая запись, которую закрыл факт; у старых строк и чужих NULL.
+	PlannedID *uuid.UUID
+	// OpensWindow — приход открывает окно (зарплата, аванс); false — обычный приход (ADR-019). Читает только
+	// PlanTransactions; у расходов значение не используется.
+	OpensWindow bool
 }
 
 // PlanRecurring — включённое повторяющееся правило в новом описании (шаг, якорь).
@@ -43,6 +57,8 @@ type PlanRecurring struct {
 	DayOfMonth   *int
 	Until        *time.Time
 	Skipped      []time.Time
+	OpensWindow  bool // правило прихода: порождённые факты и план наследуют (ADR-019)
+	Enabled      bool // false — правило на паузе (читает только PlanRecurringRulesAll)
 }
 
 // PlanPlanned — незакрытая плановая запись (расход или поступление).
@@ -56,6 +72,7 @@ type PlanPlanned struct {
 	AmountMinor *int64 // nil — сумма неизвестна («Права»)
 	DueDate     *time.Time
 	WindowStart *time.Time
+	OpensWindow bool // у поступления: открывает окно (ADR-019)
 }
 
 // PlanTransactions возвращает ВСЕ транзакции: поступления нужны с самого начала
@@ -64,7 +81,8 @@ type PlanPlanned struct {
 func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id, t.type, ROUND(t.amount * 100)::bigint, t.currency, COALESCE(c.name, ''),
-		       t.description, t.transaction_date, t.recurring_id, t.scheduled_for
+		       t.description, t.transaction_date, t.recurring_id, t.scheduled_for,
+		       COALESCE(t.added_by, ''), t.planned_id, t.opens_window
 		FROM budget_transaction t
 		LEFT JOIN budget_category c ON c.id = t.category_id
 		ORDER BY t.transaction_date, t.created_at, t.id`)
@@ -76,7 +94,7 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 	for rows.Next() {
 		var x PlanTx
 		if err := rows.Scan(&x.ID, &x.Type, &x.AmountMinor, &x.Currency, &x.Category,
-			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor); err != nil {
+			&x.Description, &x.Date, &x.RecurringID, &x.ScheduledFor, &x.AddedBy, &x.PlannedID, &x.OpensWindow); err != nil {
 			return nil, fmt.Errorf("plan transactions scan: %w", err)
 		}
 		out = append(out, x)
@@ -88,15 +106,25 @@ func (s *Store) PlanTransactions(ctx context.Context) ([]PlanTx, error) {
 // заведённые до миграции 00021 или откатившимся бинарём, имеют NULL в новых
 // колонках — тогда берётся то, что выводится из старых (recurrence_type, next_date).
 func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]PlanRecurring, error) {
+	return s.planRecurring(ctx, chatIDs, true)
+}
+
+// PlanRecurringRulesAll — то же, но и приостановленные правила (для списка
+// регулярных платежей); пауза видна в поле Enabled.
+func (s *Store) PlanRecurringRulesAll(ctx context.Context, chatIDs []int64) ([]PlanRecurring, error) {
+	return s.planRecurring(ctx, chatIDs, false)
+}
+
+func (s *Store) planRecurring(ctx context.Context, chatIDs []int64, onlyEnabled bool) ([]PlanRecurring, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.chat_id, r.name, r.type, COALESCE(c.name, ''), r.currency,
 		       ROUND(r.amount * 100)::bigint, r.interval_n,
 		       COALESCE(r.interval_unit, CASE r.recurrence_type WHEN 'weekly' THEN 'week' WHEN 'daily' THEN 'day' ELSE 'month' END),
-		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates
+		       COALESCE(r.anchor_date, r.next_date), r.day_of_month, r.until, r.skipped_dates, r.opens_window, r.enabled
 		FROM budget_recurring r
 		LEFT JOIN budget_category c ON c.id = r.category_id
-		WHERE r.enabled AND r.chat_id = ANY($1)
-		ORDER BY r.created_at, r.id`, chatIDs)
+		WHERE (r.enabled OR NOT $2) AND r.chat_id = ANY($1)
+		ORDER BY r.created_at, r.id`, chatIDs, onlyEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("plan recurring: %w", err)
 	}
@@ -105,7 +133,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 	for rows.Next() {
 		var x PlanRecurring
 		if err := rows.Scan(&x.ID, &x.ChatID, &x.Name, &x.Type, &x.Category, &x.Currency,
-			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped); err != nil {
+			&x.AmountMinor, &x.IntervalN, &x.IntervalUnit, &x.Anchor, &x.DayOfMonth, &x.Until, &x.Skipped, &x.OpensWindow, &x.Enabled); err != nil {
 			return nil, fmt.Errorf("plan recurring scan: %w", err)
 		}
 		out = append(out, x)
@@ -118,7 +146,7 @@ func (s *Store) PlanRecurringRules(ctx context.Context, chatIDs []int64) ([]Plan
 func (s *Store) PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]PlanPlanned, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.chat_id, p.direction, p.description, p.currency, COALESCE(c.name, ''),
-		       ROUND(p.amount * 100)::bigint, p.due_date, p.window_start
+		       ROUND(p.amount * 100)::bigint, p.due_date, p.window_start, p.opens_window
 		FROM budget_planned_expense p
 		LEFT JOIN budget_category c ON c.id = p.category_id
 		WHERE NOT p.settled AND p.chat_id = ANY($1)
@@ -131,7 +159,7 @@ func (s *Store) PlanPlannedItems(ctx context.Context, chatIDs []int64) ([]PlanPl
 	for rows.Next() {
 		var x PlanPlanned
 		if err := rows.Scan(&x.ID, &x.ChatID, &x.Direction, &x.Description, &x.Currency, &x.Category,
-			&x.AmountMinor, &x.DueDate, &x.WindowStart); err != nil {
+			&x.AmountMinor, &x.DueDate, &x.WindowStart, &x.OpensWindow); err != nil {
 			return nil, fmt.Errorf("plan planned scan: %w", err)
 		}
 		out = append(out, x)
@@ -148,6 +176,26 @@ func (s *Store) PlanReservePct(ctx context.Context) (int, error) {
 	return pct, nil
 }
 
+// ErrUnknownCategory — имя категории расходов не найдено ни среди категорий, ни среди алиасов.
+// План не создаёт категории и не пишет тихий NULL: непустое имя без категории — ошибка (ADR-012 §1).
+var ErrUnknownCategory = errors.New("budget: категория расходов не найдена")
+
+// expenseCategoryID переводит имя из формы плана в category_id через единый модуль категорий
+// (имя или алиас, регистр не важен). Пустое имя — NULL: запись без категории.
+func (s *Store) expenseCategoryID(ctx context.Context, name string) (uuid.NullUUID, error) {
+	if categories.Clean(name) == "" {
+		return uuid.NullUUID{}, nil
+	}
+	c, found, err := categories.NewStore(s.pool).Resolve(ctx, name, "expense")
+	if err != nil {
+		return uuid.NullUUID{}, fmt.Errorf("resolve category %q: %w", name, err)
+	}
+	if !found {
+		return uuid.NullUUID{}, ErrUnknownCategory
+	}
+	return uuid.NullUUID{UUID: c.ID, Valid: true}, nil
+}
+
 // PlanItemInput — новая плановая запись (расход или поступление).
 type PlanItemInput struct {
 	ChatID      int64
@@ -158,21 +206,28 @@ type PlanItemInput struct {
 	Category    string // имя категории расходов; пусто — без категории
 	DueDate     *time.Time
 	WindowStart *time.Time
+	// JoinsWindow — обычный приход, окна не открывает (ADR-019). Ноль — прежнее поведение: открывает.
+	JoinsWindow bool
 }
 
 // AddPlanItem сохраняет плановую запись одной командой (одна транзакция БД).
-// Категория подбирается по имени без учёта регистра; нет такой — запись без категории.
+// Категория — по имени или алиасу через модуль категорий; пусто — без категории;
+// непустое имя без категории — ErrUnknownCategory.
 func (s *Store) AddPlanItem(ctx context.Context, in PlanItemInput) (uuid.UUID, error) {
+	catID, err := s.expenseCategoryID(ctx, in.Category)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `
+	err = s.pool.QueryRow(ctx, `
 		INSERT INTO budget_planned_expense
-		    (chat_id, direction, description, amount, currency, due_date, window_start, category_id)
+		    (chat_id, direction, description, amount, currency, due_date, window_start, category_id, opens_window)
 		VALUES ($1, $2, $3,
 		        CASE WHEN $4::bigint IS NULL THEN NULL ELSE $4::bigint::numeric / 100 END,
 		        $5, $6, $7,
-		        (SELECT c.id FROM budget_category c WHERE LOWER(c.name) = LOWER($8) AND c.type = 'expense' LIMIT 1))
+		        $8::uuid, NOT $9::boolean)
 		RETURNING id`,
-		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, in.Category).Scan(&id)
+		in.ChatID, in.Direction, in.Description, in.AmountMinor, in.Currency, in.DueDate, in.WindowStart, catID, in.JoinsWindow).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("add plan item: %w", err)
 	}
@@ -229,12 +284,13 @@ func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		direction, currency, description string
 		amount                           *int64
 		categoryID                       *uuid.UUID
+		opensWindow                      bool
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT direction, currency, description, ROUND(amount * 100)::bigint, category_id
+		SELECT direction, currency, description, ROUND(amount * 100)::bigint, category_id, opens_window
 		FROM budget_planned_expense
 		WHERE id = $1 AND chat_id = ANY($2) AND NOT settled
-		FOR UPDATE`, id, chatIDs).Scan(&direction, &currency, &description, &amount, &categoryID)
+		FOR UPDATE`, id, chatIDs).Scan(&direction, &currency, &description, &amount, &categoryID, &opensWindow)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -248,9 +304,9 @@ func (s *Store) SettlePlanItem(ctx context.Context, chatIDs []int64, id uuid.UUI
 		return false, fmt.Errorf("settle plan item: нет суммы")
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by)
-		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, 'web')`,
-		uuid.New(), direction, *amount, currency, categoryID, description, date); err != nil {
+		INSERT INTO budget_transaction (id, type, amount, currency, category_id, description, transaction_date, added_by, planned_id, opens_window)
+		VALUES ($1, $2, $3::bigint::numeric / 100, $4, $5, $6, $7, $8, $9, $10)`,
+		uuid.New(), direction, *amount, currency, categoryID, description, date, AddedByWeb, id, opensWindow); err != nil {
 		return false, fmt.Errorf("settle plan item: transaction: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE budget_planned_expense SET settled = true WHERE id = $1`, id); err != nil {

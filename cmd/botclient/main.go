@@ -74,7 +74,8 @@ func run() error {
 		return fmt.Errorf("llm: %w", err)
 	}
 
-	registry, _ := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	appwiring.AttachCategoryChooser(budgetSkill, pool, cfg.Classifier, logger)
 	svc := appwiring.BuildAgentService(llmClient, registry, nil, nil, logger, cfg.LLM.ChatModel)
 
 	mode := "read-only"

@@ -19,6 +19,9 @@ type incomeBody struct {
 	Amount   json.Number `json:"amount"`
 	Currency string      `json:"currency"`
 	Date     string      `json:"date"`
+	// OpensWindow — зарплата/аванс открывают окно (true), обычный приход нет (false). Нет поля — true, как раньше:
+	// старые клиенты ведут себя прежне (ADR-019).
+	OpensWindow *bool `json:"opensWindow"`
 }
 
 type paymentBody struct {
@@ -106,6 +109,11 @@ func (s *Server) viewFor(r *http.Request, cur plan.Currency) (plan.Result, error
 
 // respondView отдаёт обновлённый WindowView после команды.
 func (s *Server) respondView(w http.ResponseWriter, r *http.Request, status int) {
+	s.respondViewWith(w, r, status, nil)
+}
+
+// respondViewWith — то же, но с правкой готового ответа (например, id созданного лимита).
+func (s *Server) respondViewWith(w http.ResponseWriter, r *http.Request, status int, edit func(*WindowView)) {
 	cur := s.curFrom(r)
 	res, err := s.viewFor(r, cur)
 	if err != nil {
@@ -114,7 +122,11 @@ func (s *Server) respondView(w http.ResponseWriter, r *http.Request, status int)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(toWindowView(res, cur)) //nolint:errcheck // клиент мог уйти
+	v := toWindowView(res, cur)
+	if edit != nil {
+		edit(&v)
+	}
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // клиент мог уйти
 }
 
 // handleAddIncome: POST /api/plan/income — ожидаемое поступление.
@@ -133,7 +145,9 @@ func (s *Server) handleAddIncome(w http.ResponseWriter, r *http.Request) {
 		s.writeCommandError(w, plan.ErrIncomeNoDate)
 		return
 	}
-	id, err := s.planner.AddIncome(r.Context(), plan.AddIncomeInput{Name: b.Name, Amount: money, Date: date})
+	id, err := s.planner.AddIncome(r.Context(), plan.AddIncomeInput{
+		Name: b.Name, Amount: money, Date: date, JoinsWindow: b.OpensWindow != nil && !*b.OpensWindow,
+	})
 	if err != nil {
 		s.writeCommandError(w, err)
 		return
@@ -333,6 +347,11 @@ func (s *Server) writeCommandError(w http.ResponseWriter, err error) {
 		plan.ErrBadRate:             "Курс: число больше нуля и не больше 1000 ₽ за бат.",
 		plan.ErrNoWindow:            "Открытого окна нет: сначала добавь ожидаемое поступление с датой.",
 		plan.ErrInvalidEvent:        "Укажи либо дату, либо окно, а не оба сразу.",
+		plan.ErrUnknownCategory:     "Такой категории нет. Выбери из списка или оставь поле пустым.",
+		plan.ErrBadWindowLength:     "Окно: от 1 до 62 дней, конец не раньше начала.",
+		plan.ErrWindowEndPast:       "Конец окна не может быть раньше сегодня.",
+		plan.ErrWindowOverlap:       "Окна не могут пересекаться: сначала поправь соседнее окно.",
+		plan.ErrLastWindow:          "Единственное окно удалить нельзя: поправь его даты.",
 	}
 	for target, msg := range bad {
 		if errors.Is(err, target) {

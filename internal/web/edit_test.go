@@ -17,6 +17,10 @@ func (f *fakePlanner) Item(context.Context, string) (plan.EditableItem, error) {
 	return plan.EditableItem{}, f.cmdErr
 }
 func (f *fakePlanner) Edit(context.Context, string, plan.EditInput) error { return f.cmdErr }
+func (f *fakePlanner) Reopen(_ context.Context, key string) error {
+	f.reopened = append(f.reopened, key)
+	return f.cmdErr
+}
 
 type editPlanner struct {
 	fakePlanner
@@ -201,5 +205,38 @@ func TestEdit_Rejects(t *testing.T) {
 		if c.cmdErr == nil && len(p.edits) != 0 {
 			t.Errorf("%s: невалидное тело дошло до сервиса: %+v", c.name, p.edits)
 		}
+	}
+}
+
+// opensWindow в PATCH записи плана и в форме: false доходит до домена, нет поля — nil; форма получает текущий вид;
+// ошибки вида — 400 со своим текстом.
+//
+// Мутации: не разбирать поле, не отдавать в DTO, не мапить ErrKindNotIncome — краснеют проверки.
+func TestEdit_OpensWindow(t *testing.T) {
+	p := &editPlanner{item: plan.EditableItem{Key: "planned:i1", Kind: plan.KindIncome, Name: "байк", Amount: &plan.Money{Minor: 100, Cur: plan.CurRUB}, OpensWindow: false}}
+	s, _ := newServer(t, p)
+	rec := do(s, http.MethodGet, "/api/plan/item/planned:i1", goodToken)
+	var dto ItemDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil || dto.OpensWindow {
+		t.Fatalf("форма: %+v %v, ждали opensWindow=false", dto, err)
+	}
+	rec = patch(s, "/api/plan/item/planned:i1", "application/json", `{"name":"байк","amount":100,"currency":"RUB","category":"","opensWindow":false}`)
+	if rec.Code != http.StatusOK || len(p.edits) != 1 || p.edits[0].OpensWindow == nil || *p.edits[0].OpensWindow {
+		t.Fatalf("false: код %d, вход %+v", rec.Code, p.edits)
+	}
+	p.edits = nil
+	patch(s, "/api/plan/item/planned:i1", "application/json", `{"name":"байк","amount":100,"currency":"RUB","category":""}`)
+	if len(p.edits) != 1 || p.edits[0].OpensWindow != nil {
+		t.Errorf("без поля: %+v", p.edits)
+	}
+	p.item.OpensWindow = true
+	rec = do(s, http.MethodGet, "/api/plan/item/planned:i1", goodToken)
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil || !dto.OpensWindow {
+		t.Errorf("форма: %+v %v, ждали opensWindow=true", dto, err)
+	}
+	p.cmdErr = plan.ErrKindNotIncome
+	rec = patch(s, "/api/plan/item/planned:p1", "application/json", `{"name":"x","amount":1,"currency":"RUB","category":"","opensWindow":true}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "открывает окно") {
+		t.Errorf("вид у расхода: %d %s", rec.Code, rec.Body.String())
 	}
 }

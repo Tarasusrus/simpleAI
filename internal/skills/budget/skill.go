@@ -5,8 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
+	"time"
 
+	"github.com/google/uuid"
+
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
+	"simpleAI/internal/categories"
 	"simpleAI/internal/plugin"
 )
 
@@ -18,6 +25,108 @@ type BudgetSkill struct {
 	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
 	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
 	shareStore shareWarningStore
+	// limits — лимиты из плана (ADR-016); при limitsFromPlan предупреждение о трате берётся из плана, а не из долей
+	// конверта. nil или выключено — прежний путь.
+	limits         botlimits.Reader
+	limitsFromPlan bool
+	limitsWriter   botlimits.Writer // запись лимитов через план (set_share_limit/clear); nil — старый путь
+	// chooser выбирает категорию (ADR-012); nil — прежнее поведение: имя из запроса через
+	// GetOrCreateCategory, без классификатора.
+	chooser   CategoryChooser
+	proposals ProposalSink
+	// categoryNames даёт имена назначаемых категорий расходов для схемы инструмента (ADR-012 §2);
+	// nil — запасной список в коде. Ответ кэшируется на categoryTTL.
+	categoryNames func(ctx context.Context) ([]string, error)
+	catMu         sync.Mutex
+	catCache      []string
+	catCacheUntil time.Time
+	catRetryAt    time.Time // после сбоя БД не ходим в неё до этого момента
+	now           func() time.Time
+}
+
+// categoryTTL — как долго схема помнит список категорий из БД. Короткий срок нужен, чтобы новая
+// категория появилась в подсказке модели без перезапуска; длинный — чтобы не ходить в БД на каждый
+// запрос списка инструментов.
+const categoryTTL = 5 * time.Minute
+
+// categoryRetry — пауза после сбоя чтения списка: без неё каждый запрос схемы ждал бы таймаут БД.
+const categoryRetry = 30 * time.Second
+
+// fallbackExpenseCategories — список, если БД недоступна или провайдера имён нет.
+var fallbackExpenseCategories = []string{"Продукты", "Рестораны", "Транспорт", "Жильё", "Здоровье", "Красота", "Развлечения", "Подписки", "Одежда", "Переводы", "Прочее"}
+
+// WithCategoryNames подключает источник имён категорий для схемы инструмента.
+func (s *BudgetSkill) WithCategoryNames(f func(ctx context.Context) ([]string, error)) *BudgetSkill {
+	s.categoryNames = f
+	return s
+}
+
+// expenseCategoryNames — имена из БД (с кэшем) либо запасной список. Сбой БД не ломает схему.
+func (s *BudgetSkill) expenseCategoryNames() []string {
+	if s.categoryNames == nil {
+		return fallbackExpenseCategories
+	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	s.catMu.Lock()
+	defer s.catMu.Unlock()
+	if len(s.catCache) > 0 && now().Before(s.catCacheUntil) {
+		return s.catCache
+	}
+	if now().Before(s.catRetryAt) {
+		return s.staleOrFallback()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	names, err := s.categoryNames(ctx)
+	if err != nil || len(names) == 0 {
+		if err != nil {
+			slog.Warn("category names for tool schema unavailable, using fallback", "err", err)
+		}
+		s.catRetryAt = now().Add(categoryRetry)
+		return s.staleOrFallback()
+	}
+	s.catCache, s.catCacheUntil = names, now().Add(categoryTTL)
+	return names
+}
+
+// staleOrFallback — последний удачный список из БД лучше запасного. Вызывать под catMu.
+func (s *BudgetSkill) staleOrFallback() []string {
+	if len(s.catCache) > 0 {
+		return s.catCache
+	}
+	return fallbackExpenseCategories
+}
+
+// categoryFieldDescription — описание поля category для модели. Главное правило (ADR-012 §3):
+// категорию называет только пользователь; иначе поле пустое, а система определяет её по описанию.
+func categoryFieldDescription(expense []string) string {
+	return "Category the USER NAMED in their message. Pass it ONLY when the user explicitly named a category " +
+		"('запиши в транспорт', 'категория развлечения', 'на еду' as the category itself) — pass it as-is. " +
+		"If the user only described what they bought or paid for ('поход в кафе', 'Пятёрочка', 'такси домой'), " +
+		"LEAVE category EMPTY and put the text into description: the system picks the category from the description. " +
+		"Never guess a category and never use 'прочее' as a guess. " +
+		"Existing expense categories: " + strings.Join(expense, ", ") + ". " +
+		"Income categories: зарплата, фриланс, прочее. " +
+		"A category that does not exist yet is created only when the user explicitly named it."
+}
+
+// CategoryChooser — то, что навык берёт у модуля категорий (реализует *categories.Chooser).
+type CategoryChooser interface {
+	Choose(ctx context.Context, in categories.ChooseInput) (categories.Choice, error)
+}
+
+// ProposalSink принимает то, что бот не смог определить (реализует *categories.Store).
+type ProposalSink interface {
+	AddProposal(ctx context.Context, p categories.Proposal, transactionID uuid.UUID) error
+}
+
+// WithCategoryChooser подключает выбор категории с памятью описаний и классификатором.
+func (s *BudgetSkill) WithCategoryChooser(ch CategoryChooser, sink ProposalSink) *BudgetSkill {
+	s.chooser, s.proposals = ch, sink
+	return s
 }
 
 // NewBudgetSkill создаёт BudgetSkill с дефолтной конфигурацией корзин.
@@ -54,12 +163,9 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 			"Do NOT use for purchase advice / affordability questions / planning a future purchase ('планирую купить', 'хочу купить', 'стоит ли', 'можем ли позволить', 'хватит ли денег') — use the advisor skill for those. " +
 			"Do NOT use for free-form spending analysis / anomalies / trends / savings advice ('проанализируй траты', 'найди аномалии', 'обзор трат', 'дай советы по экономии') — use advisor.analyze. " +
 			"action='add_planned_expense' records a FUTURE planned one-off expense the user wants to set aside ('запланируй трату X на Y', 'будет трата X', 'отложи X на Z', 'плановая трата X') — it is NOT a completed transaction. " +
-			"action='start_envelope' SAVES an arrived income and SPLITS it into category envelopes ('запомни приход X', 'создай конверт на X', 'заведи конверт X на 2 недели', 'начни отслеживать приход X', " +
-			"'пришло X, разложи по конвертам', 'разложи приход X по конвертам', 'раскидай X по конвертам', 'пришло X, разложи'). " +
-			"Any 'разложи / раскидай / распредели ... по конвертам' with an arrived income is start_envelope — it WRITES the envelope and its shares; safe_to_spend only counts and writes nothing. " +
-			"action='set_share_limit' CORRECTS the LIMIT of a category envelope by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
-			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The correction is remembered and applied to every following income until removed. " +
-			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the limit goes back to being computed from spending history; pass name=<категория>. " +
+			"action='set_share_limit' CORRECTS the LIMIT of a category (a limit on the plan window; people also call it an envelope limit) by hand ('на еду хватит 15000', 'на транспорт закладывай 5000', 'лимит на развлечения 3000', 'ставь на еду 15000') — pass name=<категория>, amount, currency. " +
+			"It is NOT a transaction: nothing was spent, the user is fixing the PLAN. The limit repeats every plan window until removed. " +
+			"action='clear_share_limit' REMOVES that manual limit ('убери лимит на еду', 'сними лимит с транспорта', 'считай лимит на еду сам') — the category has no limit any more; pass name=<категория>. " +
 			"action='set_rate' SETS the ฿→₽ EXCHANGE RATE by hand ('курс 2,7', 'ставь курс 2.65', 'курс бата 2,7') — pass amount=<rate>. " +
 			"It is NOT a transaction and NOT a limit: the number is rubles per one baht, not money spent or planned. " +
 			"action='clear_rate' returns to the automatic rate ('курс авто', 'верни автоматический курс', 'бери курс сам'). " +
@@ -74,7 +180,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, start_envelope, set_share_limit, clear_share_limit, set_rate, clear_rate, rate_status",
+						"description": "Action to perform: add_expense, add_income, summary, list_transactions, edit_transaction, add_goal, update_goal, goal_status, add_debt, pay_debt, debt_status, set_reminder, get_reminder, add_recurring, list_recurring, disable_recurring, forecast, add_planned_expense, set_share_limit, clear_share_limit, set_rate, clear_rate, rate_status",
 					},
 					"amount": map[string]any{
 						"type":        "number",
@@ -82,7 +188,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"category": map[string]any{
 						"type":        "string",
-						"description": "Expense or income category. Standard expense categories: еда (food), транспорт (transport), жильё (housing), здоровье (health), красота (beauty), развлечения (entertainment), подписки (subscriptions), одежда (clothes), переводы (transfers), прочее (other). Standard income categories: зарплата (salary), фриланс (freelance), прочее (other). If the user explicitly named a category — pass it as-is, do not replace with 'прочее'. The system will create a new category automatically if no match is found.",
+						"description": categoryFieldDescription(s.expenseCategoryNames()),
 					},
 					"description": map[string]any{
 						"type":        "string",

@@ -218,3 +218,139 @@ func TestResolveWindow(t *testing.T) {
 		}
 	}
 }
+
+// ---------- ADR-019: обычный приход (JoinsWindow) не открывает окно ----------
+
+func joins(e Event) Event { e.JoinsWindow = true; return e }
+
+func incomeSum(ws []Window) (n int64) {
+	for _, w := range ws {
+		for _, e := range w.Incomes {
+			n += e.Amount.Minor
+		}
+	}
+	return n
+}
+
+// Сценарии владельца: байк внутри окна, в зазоре, после последнего окна, до первого. Окна не создаются и не
+// сдвигаются (AC-1.11, 1.12).
+//
+// Мутации: убрать второй проход (joining), заменить «следующее» на «предыдущее» для зазора, вернуть joining в
+// цепочку — краснеют соответствующие кейсы.
+func TestBuildWindows_JoiningIncomeAttachesByDate(t *testing.T) {
+	a := inc("a", Date{2026, 10, 5}, StateDone, 100)  // окно 05.10–18.10
+	b := inc("b", Date{2026, 11, 10}, StateDone, 100) // окно 10.11–23.11, зазор 19.10–09.11
+	cases := map[string]struct {
+		bike Date
+		want int // индекс окна
+	}{
+		"внутри первого":               {Date{2026, 10, 12}, 0},
+		"в зазоре → следующее":         {Date{2026, 10, 25}, 1},
+		"после последнего → последнее": {Date{2026, 12, 20}, 1},
+		"до первого → первое":          {Date{2026, 9, 20}, 0},
+		"последний день окна":          {Date{2026, 10, 18}, 0},
+	}
+	for name, c := range cases {
+		ws := BuildWindows([]Event{a, b, joins(inc("bike", c.bike, StateDone, 7))})
+		if len(ws) != 2 || ws[0].Start != (Date{2026, 10, 5}) || ws[1].Start != (Date{2026, 11, 10}) {
+			t.Errorf("%s: окна изменились: %+v", name, ws)
+			continue
+		}
+		got := -1
+		for i, w := range ws {
+			for _, e := range w.Incomes {
+				if e.Key == "bike" {
+					got = i
+				}
+			}
+		}
+		if got != c.want {
+			t.Errorf("%s: байк в окне %d, ждали %d", name, got, c.want)
+		}
+		if ws[c.want].Incomes[0].Key == "bike" {
+			t.Errorf("%s: обычный приход стал якорем окна", name)
+		}
+	}
+}
+
+// Открывающих нет вовсе: первый обычный приход открывает окно, остальные кладутся в него (AC-1.13).
+func TestBuildWindows_NoOpeningIncomeFirstJoinerOpens(t *testing.T) {
+	ws := BuildWindows([]Event{joins(inc("b", Date{2026, 10, 20}, StateDone, 2)), joins(inc("a", Date{2026, 10, 5}, StateDone, 1))})
+	if len(ws) != 1 || ws[0].Start != (Date{2026, 10, 5}) || len(ws[0].Incomes) != 2 || ws[0].Incomes[0].Key != "a" {
+		t.Fatalf("окна: %+v", ws)
+	}
+}
+
+// Свойства: обычные приходы не меняют границ окон; сумма доходов окон равна сумме всех приходов; порядок входа
+// не влияет (AC-1.14).
+//
+// Мутация: класть joining в цепочку окон — краснеет «границы».
+func TestBuildWindows_JoiningProperties(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		n := rapid.IntRange(1, 8).Draw(t, "n")
+		var all, openers []Event
+		var total int64
+		for i := 0; i < n; i++ {
+			d := Date{2026, 10, 1}.AddDays(rapid.IntRange(0, 120).Draw(t, "day"))
+			e := inc("k"+string(rune('a'+i)), d, StateDone, int64(i+1))
+			e.JoinsWindow = rapid.Bool().Draw(t, "joins")
+			all = append(all, e)
+			total += e.Amount.Minor
+			if !e.JoinsWindow {
+				openers = append(openers, e)
+			}
+		}
+		ws := BuildWindows(all)
+		if incomeSum(ws) != total {
+			t.Fatalf("сумма приходов окон %d, всех %d", incomeSum(ws), total)
+		}
+		if len(openers) > 0 {
+			ref := BuildWindows(openers)
+			if len(ref) != len(ws) {
+				t.Fatalf("обычные приходы изменили число окон: %d → %d", len(ref), len(ws))
+			}
+			for i := range ref {
+				if ref[i].Start != ws[i].Start {
+					t.Fatalf("обычные приходы сдвинули окно %d: %v → %v", i, ref[i].Start, ws[i].Start)
+				}
+			}
+		}
+		rev := make([]Event, len(all))
+		for i := range all {
+			rev[len(all)-1-i] = all[i]
+		}
+		ws2 := BuildWindows(rev)
+		if len(ws2) != len(ws) {
+			t.Fatalf("порядок входа изменил число окон")
+		}
+		for i := range ws {
+			if ws[i].Start != ws2[i].Start || len(ws[i].Incomes) != len(ws2[i].Incomes) {
+				t.Fatalf("порядок входа изменил окно %d", i)
+			}
+		}
+	})
+}
+
+// Обычный приход после конца окна: окон по-прежнему одно, «Свободно» выросло, «в день» остаётся пустым
+// (daysLeft=0), состояние — закончившееся окно (AC-1.15). Contract Compute (checkWindows) принимает приход вне окна.
+//
+// Мутации: вернуть проверку диапазона для обычных приходов в checkWindows — Compute вернёт ошибку; не считать
+// приход в Income — краснеет «Свободно».
+func TestCompute_JoiningIncomeAfterEndedWindow(t *testing.T) {
+	salary := inc("salary", Date{2026, 10, 5}, StateDone, 9_800_000)
+	today := Date{2026, 10, 25} // окно 05.10–18.10 закончилось
+	before := mustCompute(t, in(BuildWindows([]Event{salary}), nil, CurRUB, nil, today, 0))
+	with := mustCompute(t, in(BuildWindows([]Event{salary, joins(inc("bike", today, StateDone, 3_000_000))}), nil, CurRUB, nil, today, 0))
+	if with.State != StateEnded || before.State != StateEnded {
+		t.Fatalf("состояние: %v / %v, ждали ended", before.State, with.State)
+	}
+	if with.CanSpend-before.CanSpend != 30_000 || with.Income.Received-before.Income.Received != 30_000 { // View в целых рублях
+		t.Errorf("приход не вошёл в окно: canSpend %d → %d", before.CanSpend, with.CanSpend)
+	}
+	if with.PerDay != nil {
+		t.Errorf("в закончившемся окне «в день» должно быть пусто: %v", *with.PerDay)
+	}
+	if with.Window.Start != (Date{2026, 10, 5}) {
+		t.Errorf("окно сдвинулось: %v", with.Window.Start)
+	}
+}

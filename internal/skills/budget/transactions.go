@@ -3,11 +3,13 @@ package budgetskill
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
+	"simpleAI/internal/categories"
 
 	"github.com/google/uuid"
 )
@@ -36,7 +38,18 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 		Date:        date,
 	}
 
-	if req.Category != "" {
+	var choice categories.Choice
+	if s.chooser != nil && typ == "expense" {
+		var err error
+		choice, err = s.chooser.Choose(ctx, categories.ChooseInput{Name: req.Category, Description: req.Description, Type: typ})
+		if err != nil {
+			return "", fmt.Errorf("choose category: %w", err)
+		}
+		if choice.Category.ID != uuid.Nil {
+			t.CategoryID = &choice.Category.ID
+			t.CategoryName = choice.Category.Name
+		}
+	} else if req.Category != "" {
 		cat, err := s.store.GetOrCreateCategory(ctx, req.Category, typ)
 		if err != nil {
 			return "", fmt.Errorf("create category: %w", err)
@@ -48,8 +61,12 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 	if err := s.store.AddTransaction(ctx, t); err != nil {
 		return "", fmt.Errorf("add transaction: %w", err)
 	}
+	s.saveProposal(ctx, choice, t.ID)
 
 	reply := formatTransaction(t, typ)
+	if choice.Note != "" {
+		reply += "\nℹ️ " + choice.Note
+	}
 	// Предупреждение о пробитом конверте — ПОВЕРХ обычного ответа и только для
 	// расхода: транзакция уже записана и не откатывается (ADR-008, задача 7/8).
 	if typ == "expense" {
@@ -77,7 +94,7 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 		patch.Currency = strings.ToUpper(req.Currency)
 	}
 	if req.Category != "" {
-		cat, err := s.store.GetOrCreateCategory(ctx, req.Category, tx.Type)
+		cat, err := s.resolveNamedCategory(ctx, req.Category, tx.Type, firstNonEmpty(req.Description, tx.Description))
 		if err != nil {
 			return "", fmt.Errorf("resolve category: %w", err)
 		}
@@ -112,6 +129,40 @@ func (s *BudgetSkill) editTransaction(ctx context.Context, req budgetInput) (str
 		cat, updated.Date.Format("02.01.2006"),
 		updated.ID.String()[:8],
 	), nil
+}
+
+// resolveNamedCategory — категория по имени, названному пользователем. С chooser легаси-источник
+// разделения («Еда») уточняется по описанию (ADR-013); без него — прежний GetOrCreate.
+func (s *BudgetSkill) resolveNamedCategory(ctx context.Context, name, typ, description string) (categories.Category, error) {
+	if s.chooser != nil && typ == "expense" {
+		choice, err := s.chooser.Choose(ctx, categories.ChooseInput{Name: name, Description: description, Type: typ})
+		return choice.Category, err
+	}
+	cat, err := s.store.GetOrCreateCategory(ctx, name, typ)
+	if err != nil {
+		return categories.Category{}, err
+	}
+	return categories.Category{ID: cat.ID, Name: cat.Name, Type: cat.Type}, nil
+}
+
+// saveProposal кладёт в очередь разбора то, что не удалось определить. Сбой записи не ломает
+// запись траты: она уже сохранена, а предложение можно потерять без последствий.
+func (s *BudgetSkill) saveProposal(ctx context.Context, choice categories.Choice, txID uuid.UUID) {
+	if choice.Proposal == nil || s.proposals == nil {
+		return
+	}
+	if err := s.proposals.AddProposal(ctx, *choice.Proposal, txID); err != nil {
+		slog.Warn("category proposal not saved", "err", err)
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (s *BudgetSkill) listTransactions(ctx context.Context, req budgetInput) (string, error) {

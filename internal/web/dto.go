@@ -28,6 +28,24 @@ type WindowView struct {
 	Later      []MonthDTO    `json:"later"`
 	Inbox      []RowDTO      `json:"inbox"`
 	Categories []CategoryDTO `json:"categories"`
+	// Limits — лимиты категорий окна (ADR-011); [] если их нет.
+	Limits []LimitDTO `json:"limits"`
+	// Unplanned — категории без действующего лимита с тратами окна (ADR-015 §3); [] если их нет.
+	Unplanned []UnplannedDTO `json:"unplanned"`
+	// Hidden — то же по скрытым категориям («Скрытые · N»); [] если их нет.
+	Hidden []UnplannedDTO `json:"hidden"`
+	// LimitID — id только что созданного лимита (ответ POST /api/plan/limits); иначе поля нет.
+	// По нему тост «Отменить» удаляет лимит (ADR-015 §5).
+	LimitID string `json:"limitId,omitempty"`
+}
+
+// UnplannedDTO — категория без лимита и сколько в ней потрачено за окно.
+type UnplannedDTO struct {
+	Category string `json:"category"`
+	Spent    int64  `json:"spent"`
+	// Count — число трат в окне; Prefill — сумма по умолчанию для «Запланировать» (2 × spent).
+	Count   int   `json:"count"`
+	Prefill int64 `json:"prefill"`
 }
 
 type MetaDTO struct {
@@ -47,6 +65,12 @@ type WindowDTO struct {
 	End           string `json:"end"`
 	DaysLeft      int    `json:"daysLeft"`
 	AnchorPlanned bool   `json:"anchorPlanned"`
+	// Days — длина окна; Adjusted — длина поправлена (ADR-020). Поля добавлены без смены версии: старый фронт их
+	// просто не читает.
+	Days     int  `json:"days"`
+	Adjusted bool `json:"adjusted"`
+	// Ongoing — окно закончилось, а зарплаты нет: идёт до следующего поступления (ADR-022).
+	Ongoing bool `json:"ongoing"`
 }
 
 type KPIDTO struct {
@@ -57,11 +81,18 @@ type KPIDTO struct {
 	SpentBefore     int64   `json:"spentBefore"`
 	SpentBeforeFrom *string `json:"spentBeforeFrom"`
 	Reserve         int64   `json:"reserve"`
-	Received        int64   `json:"received"`
-	ExpectedIncome  int64   `json:"expectedIncome"`
-	Unpriced        int     `json:"unpriced"`
-	UndatedCount    int     `json:"undatedCount"`
-	UndatedSum      int64   `json:"undatedSum"`
+	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый; уже учтён в canSpend.
+	Carry          int64 `json:"carry"`
+	Received       int64 `json:"received"`
+	ExpectedIncome int64 `json:"expectedIncome"`
+	Unpriced       int   `json:"unpriced"`
+	UndatedCount   int   `json:"undatedCount"`
+	UndatedSum     int64 `json:"undatedSum"`
+	// LimitHold — сумма остатков лимитов: отложена и уже вычтена из canSpend.
+	LimitHold        int64 `json:"limitHold"`
+	LimitsExceedFree bool  `json:"limitsExceedFree"`
+	// UnplannedSpent — часть spent в категориях без лимита; в canSpend отдельно не вычитается.
+	UnplannedSpent int64 `json:"unplannedSpent"`
 }
 
 type RowDTO struct {
@@ -76,6 +107,9 @@ type RowDTO struct {
 	NoAmount      bool    `json:"noAmount"`
 	WindowMissing bool    `json:"windowMissing"`
 	WindowPassed  bool    `json:"windowPassed"`
+	// Права строки выводит домен (plan.Event.Actions); фронт их не угадывает по ключу.
+	Editable   bool `json:"editable"`
+	Reopenable bool `json:"reopenable"`
 }
 
 type BlockDTO struct {
@@ -119,6 +153,7 @@ func rows(in []plan.Row) []RowDTO {
 			Key: r.Key, Date: datePtr(r.Date), Name: r.Name, Kind: string(r.Kind), Amount: r.Amount,
 			OverdueDays: r.OverdueDays, Expected: r.Expected, NotArrived: r.NotArrived, NoAmount: r.NoAmount,
 			WindowMissing: r.WindowMissing, WindowPassed: r.WindowPassed,
+			Editable: r.Editable, Reopenable: r.Reopenable,
 		})
 	}
 	return out
@@ -135,19 +170,25 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		},
 		State: string(v.State),
 		KPI: KPIDTO{
-			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, SpentBeforeFrom: datePtr(v.SpentBeforeFrom), Reserve: v.Reserve,
+			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, SpentBeforeFrom: datePtr(v.SpentBeforeFrom), Reserve: v.Reserve, Carry: v.Carry,
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
+			LimitHold: v.LimitHold, LimitsExceedFree: v.LimitsExceedFree,
+			UnplannedSpent: v.UnplannedSpent,
 		},
 		Timeline:   rows(v.Timeline),
 		Inbox:      rows(v.Undated.Items),
 		Later:      make([]MonthDTO, 0, len(v.Later)),
 		Categories: make([]CategoryDTO, 0, len(v.Categories)),
+		Limits:     limitDTOs(v.Limits),
+		Unplanned:  unplannedDTOs(v.Unplanned),
+		Hidden:     unplannedDTOs(v.Hidden),
 	}
 	if v.Window != nil {
 		out.Window = &WindowDTO{
 			Start: dateStr(v.Window.Start), End: dateStr(v.Window.End),
 			DaysLeft: v.Window.DaysLeft, AnchorPlanned: v.Window.AnchorPlanned,
+			Days: v.Window.Days, Adjusted: v.Window.Adjusted, Ongoing: v.Window.Ongoing,
 		}
 	}
 	out.AvgDays = v.AvgDays
@@ -162,6 +203,14 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 	}
 	for _, c := range v.Categories {
 		out.Categories = append(out.Categories, CategoryDTO{Name: c.Name, Avg: c.Avg, Planned: c.Planned, Free: c.Free, Last: c.Last, Now: c.Now, Recent: rows(c.Recent)})
+	}
+	return out
+}
+
+func unplannedDTOs(in []plan.UnplannedRow) []UnplannedDTO {
+	out := make([]UnplannedDTO, 0, len(in)) // пустой список — [], а не null
+	for _, r := range in {
+		out = append(out, UnplannedDTO{Category: r.Category, Spent: r.Spent, Count: r.Count, Prefill: r.Prefill})
 	}
 	return out
 }

@@ -32,6 +32,7 @@ type fakePlanner struct {
 	rates    []int64
 	moved    []string
 	moves    []plan.MoveInput
+	reopened []string
 
 	opts []plan.ViewOptions
 }
@@ -256,7 +257,7 @@ func TestWindow_ContractShape(t *testing.T) {
 	if !ok {
 		t.Fatalf("kpi не объект: %T", got["kpi"])
 	}
-	for _, k := range []string{"canSpend", "perDay", "payments", "spent", "reserve", "received", "expectedIncome", "unpriced", "undatedCount", "undatedSum"} {
+	for _, k := range []string{"canSpend", "perDay", "payments", "spent", "reserve", "carry", "received", "expectedIncome", "unpriced", "undatedCount", "undatedSum"} {
 		if _, ok := kpi[k]; !ok {
 			t.Errorf("в kpi нет ключа %q", k)
 		}

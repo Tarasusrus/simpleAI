@@ -1,5 +1,6 @@
 import { h } from './dom.js';
-import { initToken, getWindow, deleteItem, settleItem, skipItem, setRate, setPast, setAvg, moveItem, editItem } from './api.js';
+import { initToken, getWindow, deleteItem, settleItem, reopenItem, skipItem, setRate, setPast, setAvg, moveItem, editItem,
+  resizeWindow, setWindowEnd, setWindowStart, deleteWindow } from './api.js';
 import { blocks } from './blocks/index.js';
 
 initToken();
@@ -28,7 +29,7 @@ let lastView = null;
 
 // ctx для блоков: show — показать свежий вид (ответ на команду), redraw — перерисовать
 // тот же, onDelete — убрать плановую запись, onSettle — «оплачено» / «пришло»,
-// onSkip — пропустить этот срок повтора. Ошибку команды показываем текстом сервера.
+// onSkip — пропустить этот срок повтора, onReopen — вернуть закрытую запись в план. Ошибку команды показываем текстом сервера.
 const ctx = {
   show: (view) => draw(view),
   redraw: () => { if (lastView) draw(lastView); },
@@ -39,10 +40,24 @@ const ctx = {
   canWindow: () => !!lastView && ['current', 'upcoming', 'between'].includes(lastView.state),
   onMove: (key, body) => once(() => moveItem(cur, key, body), 'Не удалось перенести.'),
   onAvg: (days) => { setAvg(days); try { sessionStorage.setItem('plan_avg', String(days)); } catch (e) { /* не страшно */ } load(); },
+  // reload — перечитать окно с сервера (например, после «Отменить», когда лимита уже нет).
+  reload: () => load(),
+  // toast — короткое сообщение с необязательным действием; «Отменить» действует, пока тост на экране.
+  toast: showToast,
   onShowPast: () => { setPast(true); load(); },
   onHidePast: () => { setPast(false); load(); },
   onSettle: (key, body) => once(() => settleItem(cur, key, body), 'Не удалось отметить.'),
   onSkip: (key) => once(() => skipItem(cur, key), 'Не удалось пропустить.'),
+  onReopen: (key) => once(() => reopenItem(cur, key), 'Не удалось вернуть в план.'),
+  // Правка окна (ADR-020, ADR-021): на день короче/длиннее, первый и последний день датой, удалить окно.
+  onWindowResize: (days) => once(() => resizeWindow(cur, days), 'Не удалось изменить окно.'),
+  onWindowEnd: (end) => once(() => setWindowEnd(cur, end), 'Не удалось изменить окно.'),
+  onWindowStart: (start) => once(() => setWindowStart(cur, start), 'Не удалось изменить окно.'),
+  onWindowDelete: () => {
+    if (confirm('Удалить окно? Поступления и платежи останутся и попадут в соседние окна по дате.')) {
+      once(() => deleteWindow(cur), 'Не удалось удалить окно.');
+    }
+  },
   // onEdit — «изменить»: та же очередь, что у прочих команд; рисует ответ и отдаёт
   // true, false — занято другой командой. Ошибку показывает сам редактор.
   onEdit: async (key, body) => {
@@ -51,6 +66,21 @@ const ctx = {
     return !!view;
   },
 };
+
+let toastEl = null;
+let toastTimer = null;
+function showToast(text, actionLabel, onAction) {
+  if (!toastEl) {
+    toastEl = h('div', { class: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.append(toastEl);
+  }
+  clearTimeout(toastTimer);
+  const hide = () => { toastEl.classList.remove('on'); toastEl.replaceChildren(); };
+  toastEl.replaceChildren(h('span', null, text),
+    actionLabel ? h('button', { type: 'button', class: 'tact', onclick: () => { hide(); onAction(); } }, actionLabel) : null);
+  toastEl.classList.add('on');
+  toastTimer = setTimeout(hide, 10000);
+}
 
 // Одна команда за раз: второй тап, пока первая в пути, не должен дать «не найдено».
 let busy = false;

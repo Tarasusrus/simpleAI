@@ -17,8 +17,11 @@ type Config struct {
 	RAG       RAGConfig
 	Mail      MailConfig
 	Telegram  TelegramBotConfig
-	LLM       LLMConfig
-	Receipt   ReceiptConfig
+	// PlanChatIDs — PLAN_CHAT_IDS, область чатов плана; пусто — берётся Telegram.AllowedChats (см. PlanScopeChats).
+	PlanChatIDs []int64
+	LLM         LLMConfig
+	Receipt     ReceiptConfig
+	Classifier  CategoryClassifierConfig
 }
 
 type DBConfig struct {
@@ -35,10 +38,10 @@ type RAGConfig struct {
 
 type LLMConfig struct {
 	// Primary provider
-	Provider   string
-	APIKey     string
-	BaseURL    string
-	ChatModel  string
+	Provider          string
+	APIKey            string
+	BaseURL           string
+	ChatModel         string
 	Timeout           time.Duration
 	RetryCount        int
 	RetryBase         time.Duration
@@ -83,6 +86,7 @@ type TelegramConfig struct {
 type TelegramBotConfig struct {
 	Token          string
 	AllowedChats   []int64
+	AllowAll       bool // ALLOW_ALL=true: подтверждение, что пустой список чатов (= бот открыт всем) задуман; при непустом списке ничего не меняет
 	PollingTimeout time.Duration
 	Workers        int
 	RateLimit      time.Duration
@@ -115,8 +119,18 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Mail = mailCfg
-	cfg.Telegram = loadTelegramBotConfig()
+	tgCfg, err := loadTelegramBotConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Telegram = tgCfg
+	planChats, err := parseChatIDsStrict(os.Getenv("PLAN_CHAT_IDS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("PLAN_CHAT_IDS: %w", err)
+	}
+	cfg.PlanChatIDs = planChats
 	cfg.Receipt = loadReceiptConfig()
+	cfg.Classifier = loadCategoryClassifierConfig()
 	return cfg, nil
 }
 
@@ -150,23 +164,28 @@ func loadMailConfig() (MailConfig, error) {
 	}, nil
 }
 
-func loadTelegramBotConfig() TelegramBotConfig {
+func loadTelegramBotConfig() (TelegramBotConfig, error) {
+	allowed, err := parseChatIDsStrict(os.Getenv("TELEGRAM_ALLOWED_CHATS"))
+	if err != nil {
+		return TelegramBotConfig{}, fmt.Errorf("TELEGRAM_ALLOWED_CHATS: %w", err)
+	}
 	return TelegramBotConfig{
 		Token:          os.Getenv("TELEGRAM_BOT_TOKEN"),
-		AllowedChats:   parseChatIDs(os.Getenv("TELEGRAM_ALLOWED_CHATS")),
+		AllowedChats:   allowed,
+		AllowAll:       parseBool(os.Getenv("ALLOW_ALL")),
 		PollingTimeout: 30 * time.Second,
 		Workers:        parseInt(os.Getenv("TELEGRAM_WORKERS"), 4),
 		RateLimit:      parseDurationMs(os.Getenv("TELEGRAM_RATE_LIMIT_MS")),
 		MediaDir:       getenvOrDefault("TELEGRAM_MEDIA_DIR", "data/telegram"),
-	}
+	}, nil
 }
 
 func loadLLMConfig() LLMConfig {
 	return LLMConfig{
-		Provider:   getenvOrDefault("LLM_PROVIDER", "openai"),
-		APIKey:     os.Getenv("DEEPSEEK_API_KEY"),
-		BaseURL:    getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
-		ChatModel:  getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
+		Provider:          getenvOrDefault("LLM_PROVIDER", "openai"),
+		APIKey:            os.Getenv("DEEPSEEK_API_KEY"),
+		BaseURL:           getenvOrDefault("LLM_BASE_URL", "https://api.deepseek.com/v1"),
+		ChatModel:         getenvOrDefault("LLM_CHAT_MODEL", "deepseek-chat"),
 		Timeout:           parseDurationSeconds(os.Getenv("LLM_TIMEOUT_SECONDS"), 30),
 		RetryCount:        parseInt(os.Getenv("LLM_RETRY_COUNT"), 0),
 		RetryBase:         parseDurationMs(os.Getenv("LLM_RETRY_BASE_MS")),
@@ -183,10 +202,13 @@ func loadLLMConfig() LLMConfig {
 	}
 }
 
-func parseChatIDs(raw string) []int64 {
+// parseChatIDsStrict не выбрасывает молча неразобранные записи: опечатка вроде
+// «12345;6789» иначе давала бы пустой список, а пустой список в RequireAllowedChats
+// открывает бота всем (и тихо сдвигает область плана на другой список).
+func parseChatIDsStrict(raw string) ([]int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]int64, 0, len(parts))
@@ -195,11 +217,21 @@ func parseChatIDs(raw string) []int64 {
 		if part == "" {
 			continue
 		}
-		if id, err := strconv.ParseInt(part, 10, 64); err == nil {
-			out = append(out, id)
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("запись %q не число (разделитель — запятая)", part)
 		}
+		out = append(out, id)
 	}
-	return out
+	return out, nil
+}
+
+func parseBool(raw string) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return v
 }
 
 func parseInt(raw string, def int) int {
@@ -239,5 +271,10 @@ func getenvOrDefault(key, def string) string {
 	return def
 }
 
-// ParseChatIDs разбирает список chat_id через запятую (для PLAN_CHAT_IDS и т. п.).
-func ParseChatIDs(raw string) []int64 { return parseChatIDs(raw) }
+// PlanScopeChats — область чатов плана: PLAN_CHAT_IDS, иначе TELEGRAM_ALLOWED_CHATS.
+func (c Config) PlanScopeChats() []int64 {
+	if len(c.PlanChatIDs) > 0 {
+		return c.PlanChatIDs
+	}
+	return c.Telegram.AllowedChats
+}

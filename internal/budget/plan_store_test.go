@@ -235,6 +235,16 @@ func TestSettlePlanItem(t *testing.T) {
 	if typ != "income" || minor != 123456 || cur != "THB" || added == nil || *added != "web" {
 		t.Errorf("факт: %s %d %s %v", typ, minor, cur, added)
 	}
+	// Факт помнит, какую плановую запись закрыл: по этой ссылке её потом вернут в план.
+	// Мутация: убрать planned_id из INSERT в SettlePlanItem — тест краснеет.
+	var linked *uuid.UUID
+	if err := s.pool.QueryRow(ctx, `SELECT planned_id FROM budget_transaction
+		WHERE description = 'plan-store-test' AND transaction_date = $1`, day).Scan(&linked); err != nil {
+		t.Fatalf("чтение planned_id: %v", err)
+	}
+	if linked == nil || *linked != withSum {
+		t.Errorf("planned_id факта = %v, ждали %s", linked, withSum)
+	}
 	if ok, err := s.SettlePlanItem(ctx, scope, withSum, nil, day); ok || err != nil {
 		t.Errorf("повторное закрытие: %v %v", ok, err)
 	}
@@ -342,5 +352,137 @@ func TestMovePlanItem(t *testing.T) {
 	}
 	if _, err := s.MovePlanItem(ctx, scope, own, &day, &day); err == nil {
 		t.Error("дата и окно вместе приняты")
+	}
+}
+
+// Признак «открывает окно» (ADR-019) сквозь хранилище: AddPlanItem пишет его, чтение видит, «пришло» копирует в факт,
+// факт правила прихода наследует флаг правила, строки без флага читаются как открывающие.
+//
+// Мутации: не писать opens_window в AddPlanItem (всё true), не копировать при Settle, не наследовать в
+// CreateRecurringTransaction, NOT $9 → $9 (инверсия) — краснеют соответствующие проверки.
+func TestOpensWindow_StoreRoundTrip(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	add := func(desc string, joins bool) uuid.UUID {
+		id, err := s.AddPlanItem(ctx, PlanItemInput{ChatID: planStoreChat, Direction: "income", Description: desc,
+			AmountMinor: ptrInt64(10000), Currency: "RUB", DueDate: &day, JoinsWindow: joins})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	salary, bike := add("plan-store-test зарплата", false), add("plan-store-test байк", true)
+	planned, err := s.PlanPlannedItems(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[uuid.UUID]bool{}
+	for _, p := range planned {
+		got[p.ID] = p.OpensWindow
+	}
+	if !got[salary] || got[bike] {
+		t.Errorf("плановые: зарплата opens=%v, байк opens=%v, ждали true/false", got[salary], got[bike])
+	}
+	for _, id := range []uuid.UUID{salary, bike} {
+		if ok, err := s.SettlePlanItem(ctx, []int64{planStoreChat}, id, nil, day); err != nil || !ok {
+			t.Fatalf("settle: %v %v", ok, err)
+		}
+	}
+	var openSalary, openBike bool
+	for id, dst := range map[uuid.UUID]*bool{salary: &openSalary, bike: &openBike} {
+		if err := s.pool.QueryRow(ctx, `SELECT opens_window FROM budget_transaction WHERE planned_id = $1`, id).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !openSalary || openBike {
+		t.Errorf("факты после «пришло»: зарплата opens=%v, байк opens=%v, ждали true/false", openSalary, openBike)
+	}
+
+	rule := uuid.New()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO budget_recurring (id, chat_id, name, type, amount, recurrence_type, day_of_month, next_date, opens_window)
+		VALUES ($1, $2, 'plan-store-test rule', 'income', 1, 'monthly', 1, '2026-03-01', false)`, rule, planStoreChat); err != nil {
+		t.Fatal(err)
+	}
+	fact := Transaction{ID: uuid.New(), Type: "income", Amount: 5, Currency: "RUB", Description: "plan-store-test fact rule", Date: day}
+	if err := s.CreateRecurringTransaction(ctx, fact, rule, day.AddDate(0, 1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var ruleFactOpens bool
+	if err := s.pool.QueryRow(ctx, `SELECT opens_window FROM budget_transaction WHERE id = $1`, fact.ID).Scan(&ruleFactOpens); err != nil || ruleFactOpens {
+		t.Errorf("факт правила прихода не унаследовал false: %v %v", ruleFactOpens, err)
+	}
+	txs, err := s.PlanTransactions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen bool
+	for _, x := range txs {
+		if x.ID == fact.ID {
+			seen = true
+			if x.OpensWindow {
+				t.Error("PlanTransactions отдал факт правила как открывающий")
+			}
+		}
+	}
+	if !seen {
+		t.Error("факт правила не прочитан")
+	}
+	rules, err := s.PlanRecurringRules(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.ID == rule && r.OpensWindow {
+			t.Error("PlanRecurringRules отдал правило как открывающее")
+		}
+	}
+}
+
+func ptrInt64(n int64) *int64 { return &n }
+
+// PlanRecurringRulesAll отдаёт и приостановленные правила (Enabled=false), но не
+// чужой чат; PlanRecurringRules по-прежнему только включённые.
+//
+// Мутация: убрать `OR NOT $2` из условия или поле Enabled из Scan — тест краснеет.
+func TestPlanRecurringRulesAll_IncludesPaused(t *testing.T) {
+	s, ctx := rateTestStore(t)
+	cleanPlanStore(t, s, ctx)
+	on, off, foreign := uuid.New(), uuid.New(), uuid.New()
+	for _, r := range []struct {
+		id      uuid.UUID
+		chat    int64
+		enabled bool
+	}{{on, planStoreChat, true}, {off, planStoreChat, false}, {foreign, planStoreChat - 1, false}} {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO budget_recurring (id, chat_id, name, amount, recurrence_type, next_date, enabled)
+			VALUES ($1, $2, 'правило', 10, 'monthly', '2026-03-12', $3)`, r.id, r.chat, r.enabled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := s.PlanRecurringRulesAll(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, x := range all {
+		seen[x.ID] = x.Enabled
+	}
+	if v, ok := seen[on]; !ok || !v {
+		t.Errorf("включённое правило: %v %v", v, ok)
+	}
+	if v, ok := seen[off]; !ok || v {
+		t.Errorf("приостановленное должно быть в списке с Enabled=false: %v %v", v, ok)
+	}
+	if _, ok := seen[foreign]; ok {
+		t.Error("чужой чат попал в список")
+	}
+	enabledOnly, err := s.PlanRecurringRules(ctx, []int64{planStoreChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range enabledOnly {
+		if x.ID == off {
+			t.Error("PlanRecurringRules отдал приостановленное правило")
+		}
 	}
 }

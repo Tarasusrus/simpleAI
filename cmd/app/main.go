@@ -33,6 +33,7 @@ import (
 	"simpleAI/internal/observability"
 	"simpleAI/internal/plugin"
 	"simpleAI/internal/rates"
+	"simpleAI/internal/receipt/seenstore"
 	budgetskill "simpleAI/internal/skills/budget"
 	"simpleAI/internal/telegram"
 	"simpleAI/internal/tools"
@@ -43,6 +44,10 @@ func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatal("failed to load config: ", err)
+	}
+	chatAccessMW, err := chatAccess(cfg.Telegram.AllowedChats, cfg.Telegram.AllowAll)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	logger := tools.NewLogger()
@@ -62,8 +67,12 @@ func main() {
 		log.Fatal("failed to init llm client: ", err)
 	}
 
+	// Лимиты из плана для бота и утреннего пуша (ADR-016/017); по умолчанию выключены.
+	bl := newBotLimits(cfg, logger, pool, os.Getenv)
+
 	// Единый реестр skills для всех компонентов.
-	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout)
+	registry, budgetSkill := appwiring.BuildRegistry(llmClient, logger, pool, cfg.LLM.AdvisorLLMTimeout, bl.options()...)
+	appwiring.AttachCategoryChooser(budgetSkill, pool, cfg.Classifier, logger)
 
 	// Контекст с graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -81,13 +90,13 @@ func main() {
 	)
 	defer obsTracer.Close()
 
-	receiptApp := appwiring.BuildReceipt(ctx, cfg.Receipt, registry, budget.NewStore(pool), logger)
+	receiptApp := appwiring.BuildReceipt(ctx, cfg.Receipt, registry, budget.NewStore(pool), seenstore.New(pool), logger)
 
 	// --- Telegram бот ---
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := runTelegram(ctx, cfg, logger, llmClient, registry, tracer, obsTracer, budgetSkill, budget.NewStore(pool), receiptApp); err != nil {
+		if err := runTelegram(ctx, cfg, chatAccessMW, logger, llmClient, registry, tracer, obsTracer, budgetSkill, budget.NewStore(pool), receiptApp); err != nil {
 			logger.Error("telegram stopped", "err", err)
 		}
 	}()
@@ -130,7 +139,7 @@ func main() {
 		// Утренние конверты: тело печатает тот же safe_to_spend, что отвечает на
 		// «сколько в конвертах» — формат живёт в скилле, воркер его не дублирует.
 		if skill, ok := registry.Get("safe_to_spend"); ok {
-			worker = worker.WithEnvelopes(envelopepush.New(budgetStore, skill))
+			worker = worker.WithEnvelopes(bl.pushSource(envelopepush.New(budgetStore, skill)))
 		} else {
 			logger.Warn("safe_to_spend skill not registered: morning envelope push disabled")
 		}
@@ -164,7 +173,7 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill, envelopeReminders notify.EnvelopeReminderStore, receiptApp appwiring.Receipt) error {
+func runTelegram(ctx context.Context, cfg config.Config, chatAccessMW telegram.Middleware, logger *slog.Logger, llmClient core.LLMClient, registry *plugin.Registry, tracer *trace.Store, obsTracer *observability.Tracer, budgetSkill telegram.BudgetCallbackSkill, envelopeReminders notify.EnvelopeReminderStore, receiptApp appwiring.Receipt) error {
 	if cfg.Telegram.Token == "" {
 		logger.Error("telegram bot token is empty, skipping")
 		return nil
@@ -196,7 +205,7 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 
 	router := telegram.NewRouter()
 	router.Use(telegram.DeduplicateUpdates(1000))
-	router.Use(telegram.RequireAllowedChats(cfg.Telegram.AllowedChats))
+	router.Use(chatAccessMW)
 	router.Use(telegram.LogUpdates())
 	router.Use(telegram.LogDuration())
 	router.Use(telegram.RateLimit(cfg.Telegram.RateLimit))
@@ -242,7 +251,6 @@ func runTelegram(ctx context.Context, cfg config.Config, logger *slog.Logger, ll
 					Logger:    logger,
 					Agent:     agentService,
 					Fetcher:   adapter,
-					Allowed:   cfg.Telegram.AllowedChats,
 					RequestID: uuid.NewString(),
 					MediaDir:  cfg.Telegram.MediaDir,
 					Registry:  registry,

@@ -14,6 +14,7 @@ import (
 
 type fakeSink struct {
 	added   []budget.PlanItemInput
+	addErr  error
 	delIDs  [][]int64
 	delOK   bool
 	delErr  error
@@ -53,6 +54,9 @@ type skipCall struct {
 
 func (f *fakeSink) AddPlanItem(_ context.Context, in budget.PlanItemInput) (uuid.UUID, error) {
 	f.added = append(f.added, in)
+	if f.addErr != nil {
+		return uuid.Nil, f.addErr
+	}
 	return uuid.New(), nil
 }
 
@@ -280,5 +284,29 @@ func TestMovePlanned(t *testing.T) {
 	}
 	if len(f.moveCalls) != 3 {
 		t.Errorf("до хранилища дошло %d вызовов, ждали 3", len(f.moveCalls))
+	}
+}
+
+// JoinsWindow доходит до хранилища аргументом вызова (спай на PlanItemInput, не подмена имени): у обычного прихода
+// true, у зарплаты и у платежа false (у платежа флаг не используется даже если выставлен).
+//
+// Мутации: не передавать JoinsWindow в PlanItemInput; убрать условие Kind==income — краснеют проверки.
+func TestAddPlanned_PassesJoinsWindow(t *testing.T) {
+	f := &fakeSink{}
+	w := NewWriter(f)
+	sc := plan.Scope{ChatIDs: []int64{7}}
+	amt := &plan.Money{Minor: 100, Cur: plan.CurRUB}
+	for _, n := range []plan.NewItem{
+		{Kind: plan.KindIncome, Name: "байк", Amount: amt, Date: dptr(2026, 3, 20), JoinsWindow: true},
+		{Kind: plan.KindIncome, Name: "зарплата", Amount: amt, Date: dptr(2026, 3, 21)},
+		{Kind: plan.KindPayment, Name: "аренда", Amount: amt, Date: dptr(2026, 3, 22), JoinsWindow: true},
+	} {
+		if _, err := w.AddPlanned(context.Background(), sc, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := []bool{f.added[0].JoinsWindow, f.added[1].JoinsWindow, f.added[2].JoinsWindow}
+	if got[0] != true || got[1] != false || got[2] != false {
+		t.Errorf("JoinsWindow у хранилища: %v, ждали [true false false]", got)
 	}
 }

@@ -17,9 +17,21 @@ const (
 	logShare     = "budget_envelope_share_category"
 	logShareDrop = "budget_envelope_share_category:dropped" // строка доли, схлопнутая с уже имеющейся целевой
 	logAlias     = "budget_category_alias"
+	logLimit     = "plan_category_limit"         // лимит плана (ADR-011), переехал на цель
+	logLimitDrop = "plan_category_limit:dropped" // лимит источника, уступивший лимиту цели; снимок в row_snapshot
+	limitLogCols = `(table_name, row_id, old_category_id, new_category_id, old_category_name,
+		merge_id, new_category_name, source_category_type, source_category_icon, source_category_sort, old_share_category_name, row_snapshot)`
 	mergeLogCols = `(table_name, row_id, old_category_id, new_category_id, old_category_name,
 		merge_id, new_category_name, source_category_type, source_category_icon, source_category_sort, old_share_category_name)`
 )
+
+// limitConflictSQL — условие «лимит l источника занимает ключ уникальности, уже занятый
+// лимитом категории dst» (dst — номер параметра с id цели). Ключи те же, что у индексов
+// 00024: повторяющийся — на чат; разовый — на чат и окно.
+func limitConflictSQL(dst string) string {
+	return `EXISTS (SELECT 1 FROM plan_category_limit o WHERE o.category_id = ` + dst + `::uuid AND o.chat_id = l.chat_id
+		AND o.repeat = l.repeat AND (l.repeat OR o.window_start = l.window_start))`
+}
 
 // Merge сливает Source в Target одной транзакцией (ADR-010 §3). Жёсткого удаления нет:
 // старое имя остаётся алиасом новой категории.
@@ -103,6 +115,20 @@ func (s *Store) Merge(ctx context.Context, req MergeRequest) (MergeResult, error
 		return MergeResult{}, fmt.Errorf("merge log aliases: %w", err)
 	}
 
+	// Лимиты плана (ADR-011): при конфликте ключа уникальности остаётся лимит цели, лимит
+	// источника уходит в журнал со снимком строки (откат вернёт его).
+	if _, err := tx.Exec(ctx, `INSERT INTO category_merge_log `+limitLogCols+`
+		SELECT CASE WHEN `+limitConflictSQL("$3")+` THEN $10::text ELSE $1::text END,
+		       l.id::text, $2::uuid, $3::uuid, $4::text, $5::uuid, $6::text, $7::text, $8::text, $9::int, NULL,
+		       CASE WHEN `+limitConflictSQL("$3")+` THEN to_jsonb(l) END
+		FROM plan_category_limit l WHERE l.category_id = $2`,
+		logLimit, src.ID, dst.ID, src.Name, mid, dst.Name, src.Type, src.Icon, src.SortOrder, logLimitDrop); err != nil {
+		return MergeResult{}, fmt.Errorf("merge log limits: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM plan_category_limit l WHERE l.category_id = $1 AND `+limitConflictSQL("$2"), src.ID, dst.ID); err != nil {
+		return MergeResult{}, fmt.Errorf("merge drop conflicting limits: %w", err)
+	}
+
 	var moved Counts
 	for _, u := range []struct {
 		table string
@@ -114,13 +140,18 @@ func (s *Store) Merge(ctx context.Context, req MergeRequest) (MergeResult, error
 		}
 		*u.n = int(tag.RowsAffected())
 	}
+	tag, err := tx.Exec(ctx, `UPDATE plan_category_limit SET category_id = $1 WHERE category_id = $2`, dst.ID, src.ID)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("merge move limits: %w", err)
+	}
+	moved.Limits = int(tag.RowsAffected())
 	// Доли: category_id и category_name меняются вместе; дубль по PK удаляется.
 	if _, err := tx.Exec(ctx, `DELETE FROM budget_envelope_share_category t WHERE t.category_id = $1
 		AND EXISTS (SELECT 1 FROM budget_envelope_share_category o WHERE o.share_id = t.share_id AND o.category_id = $2)`,
 		src.ID, dst.ID); err != nil {
 		return MergeResult{}, fmt.Errorf("merge drop duplicate shares: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `UPDATE budget_envelope_share_category SET category_id = $1, category_name = lower($3) WHERE category_id = $2`,
+	tag, err = tx.Exec(ctx, `UPDATE budget_envelope_share_category SET category_id = $1, category_name = lower($3) WHERE category_id = $2`,
 		dst.ID, src.ID, dst.Name)
 	if err != nil {
 		return MergeResult{}, fmt.Errorf("merge move shares: %w", err)
@@ -162,6 +193,7 @@ func (s *Store) Rollback(ctx context.Context, mergeID uuid.UUID) error {
 	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck // после commit откат — no-op
 
 	type logRow struct {
+		snapshot                 []byte
 		table, rowID, shareName  string
 		src, dst                 uuid.UUID
 		name, dstName, typ, icon string
@@ -169,7 +201,7 @@ func (s *Store) Rollback(ctx context.Context, mergeID uuid.UUID) error {
 	}
 	rows, err := tx.Query(ctx, `SELECT table_name, row_id, old_category_id, new_category_id, old_category_name,
 		COALESCE(new_category_name, ''), COALESCE(source_category_type, ''), COALESCE(source_category_icon, ''),
-		COALESCE(source_category_sort, 0), COALESCE(old_share_category_name, '')
+		COALESCE(source_category_sort, 0), COALESCE(old_share_category_name, ''), row_snapshot
 		FROM category_merge_log WHERE merge_id = $1 AND rolled_back_at IS NULL`, mergeID)
 	if err != nil {
 		return fmt.Errorf("rollback read log: %w", err)
@@ -177,7 +209,7 @@ func (s *Store) Rollback(ctx context.Context, mergeID uuid.UUID) error {
 	var log []logRow
 	for rows.Next() {
 		var r logRow
-		if err := rows.Scan(&r.table, &r.rowID, &r.src, &r.dst, &r.name, &r.dstName, &r.typ, &r.icon, &r.sort, &r.shareName); err != nil {
+		if err := rows.Scan(&r.table, &r.rowID, &r.src, &r.dst, &r.name, &r.dstName, &r.typ, &r.icon, &r.sort, &r.shareName, &r.snapshot); err != nil {
 			rows.Close()
 			return fmt.Errorf("rollback scan: %w", err)
 		}
@@ -230,6 +262,15 @@ func (s *Store) Rollback(ctx context.Context, mergeID uuid.UUID) error {
 			if _, err := tx.Exec(ctx, `INSERT INTO budget_envelope_share_category (share_id, category_id, category_name)
 				VALUES ($1::uuid, $2, $3) ON CONFLICT DO NOTHING`, r.rowID, r.src, r.shareName); err != nil {
 				return fmt.Errorf("rollback dropped share: %w", err)
+			}
+		case logLimit:
+			if _, err := tx.Exec(ctx, `UPDATE plan_category_limit SET category_id = $1 WHERE id = $2::uuid AND category_id = $3`, r.src, r.rowID, r.dst); err != nil {
+				return fmt.Errorf("rollback limits: %w", err)
+			}
+		case logLimitDrop:
+			if _, err := tx.Exec(ctx, `INSERT INTO plan_category_limit SELECT * FROM jsonb_populate_record(NULL::plan_category_limit, $1::jsonb)
+				ON CONFLICT DO NOTHING`, r.snapshot); err != nil {
+				return fmt.Errorf("rollback dropped limit: %w", err)
 			}
 		case logAlias:
 			if _, err := tx.Exec(ctx, `UPDATE budget_category_alias SET category_id = $1 WHERE id = $2::uuid AND category_id = $3`, r.src, r.rowID, r.dst); err != nil {

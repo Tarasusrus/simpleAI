@@ -159,3 +159,22 @@ func TestUpdateRule(t *testing.T) {
 		t.Error("пустая область принята")
 	}
 }
+
+// Вид поступления (ADR-019) доходит до хранилища аргументом вызова: false, true и nil передаются как есть.
+//
+// Мутация: не передавать OpensWindow в PlanItemEdit — краснеет.
+func TestUpdatePlanned_PassesOpensWindow(t *testing.T) {
+	f, tr := false, true
+	for _, v := range []*bool{&f, &tr, nil} {
+		sink := &editSink{ok: true}
+		e := plan.PlannedEdit{OpensWindow: v, Item: plan.NewItem{Kind: plan.KindIncome, Name: "байк",
+			Amount: &plan.Money{Minor: 100, Cur: plan.CurRUB}, Date: dptr(2026, 3, 20)}}
+		if err := NewWriter(sink).UpdatePlanned(context.Background(), plan.Scope{ChatIDs: []int64{7}}, uuid.New().String(), e); err != nil {
+			t.Fatal(err)
+		}
+		got := sink.items[0].OpensWindow
+		if (got == nil) != (v == nil) || (v != nil && *got != *v) {
+			t.Errorf("вид у хранилища %v, ждали %v", got, v)
+		}
+	}
+}

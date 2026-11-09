@@ -28,7 +28,7 @@ const (
 )
 
 // Тексты сценария чека живут здесь, а не в constants/messages.go: так
-// эпик фото не правит файл, общий с параллельной работой (ADR-010).
+// эпик фото не правит файл, общий с параллельной работой (ADR-014).
 const (
 	msgReceiptDraftGone   = "Черновик чека устарел — пришли фото ещё раз."
 	msgReceiptCancelled   = "Отменено, расход не записан."
@@ -99,6 +99,8 @@ func NewHandleReceiptCallback(svc ReceiptService) Handler {
 			switch {
 			case errors.Is(err, receipt.ErrDraftNotFound):
 				return tctx.EditWithButtons(ctx, msgReceiptDraftGone, nil)
+			case errors.Is(err, receipt.ErrDuplicate):
+				return tctx.EditWithButtons(ctx, msgReceiptDuplicate, nil)
 			case err != nil:
 				if tctx.Logger != nil {
 					tctx.Logger.ErrorContext(ctx, "receipt confirm failed", "err", err)

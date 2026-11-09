@@ -242,3 +242,14 @@ func TestRunRemaining_NotHijackedBySharesMode(t *testing.T) {
 		t.Errorf("ожидался общий режим остатка, got: %q", out)
 	}
 }
+
+// ADR-017: в Manifest safe_to_spend нет отсылок к снятому budget.start_envelope.
+func TestManifest_NoStartEnvelope(t *testing.T) {
+	m := NewSafeToSpendSkill(nil, nil, nil).Manifest()
+	if strings.Contains(m.Description, "start_envelope") {
+		t.Error("в описании safe_to_spend остался start_envelope")
+	}
+	if !strings.Contains(m.Description, "Конверты больше не заводятся") {
+		t.Error("нет указания, куда идут просьбы про конверты")
+	}
+}

@@ -1,0 +1,36 @@
+{"id":"c001","input":"поход в кафе","expected":"Рестораны","tags":["ru","cafe"],"notes":"случай 643 ₽ 2026-10-21, ушёл в Еду"}
+{"id":"c002","input":"завтрак в кафе","expected":"Рестораны","tags":["ru","cafe"],"notes":"из истории Еды"}
+{"id":"c003","input":"макдональдс","expected":"Рестораны","tags":["ru","fastfood"]}
+{"id":"c004","input":"kfc - kad farang village","expected":"Рестораны","tags":["en","fastfood"]}
+{"id":"c005","input":"кофе","expected":"Рестораны","tags":["ru","coffee"]}
+{"id":"c006","input":"lunch (orange juice, tuna sandwich, prawn rice, latte) — black canyon coffee","expected":"Рестораны","tags":["en","cafe"]}
+{"id":"c007","input":"доставка еды","expected":"Рестораны","tags":["ru","delivery"]}
+{"id":"c008","input":"kao soi, fried rice (delivery) — judy's kitchen через grab","expected":"Рестораны","tags":["en","delivery"]}
+{"id":"c009","input":"яндекс еда","expected":"Рестораны","tags":["ru","delivery"]}
+{"id":"c010","input":"шаурма","expected":"Рестораны","tags":["ru","streetfood"]}
+{"id":"c011","input":"pad thai-hoi thot srisan - hang dong","expected":"Рестораны","tags":["en","streetfood"]}
+{"id":"c012","input":"десерт","expected":"Рестораны","tags":["ru","dessert"]}
+{"id":"c013","input":"роллы","expected":"Рестораны","tags":["ru","delivery"]}
+{"id":"c014","input":"ужин","expected":"Рестораны","tags":["ru","vague"],"notes":"неочевидно, но чаще ресторан"}
+{"id":"c015","input":"Пятёрочка","expected":"Продукты","tags":["ru","supermarket"]}
+{"id":"c016","input":"bigc - ห้างดัง 2","expected":"Продукты","tags":["th","supermarket"]}
+{"id":"c017","input":"rimping — nutella hazelnut spread, salmon sashimi, tuna sandwich","expected":"Продукты","tags":["en","supermarket"]}
+{"id":"c018","input":"макро продукты","expected":"Продукты","tags":["ru","supermarket"]}
+{"id":"c019","input":"tops - robinson airport","expected":"Продукты","tags":["en","supermarket"]}
+{"id":"c020","input":"cp freshmart","expected":"Продукты","tags":["en","supermarket"]}
+{"id":"c021","input":"рынок овощи","expected":"Продукты","tags":["ru","market"]}
+{"id":"c022","input":"фрукты — watermelon, strawberry","expected":"Продукты","tags":["ru","market"]}
+{"id":"c023","input":"творог","expected":"Продукты","tags":["ru","grocery"]}
+{"id":"c024","input":"покупка продуктов","expected":"Продукты","tags":["ru","grocery"]}
+{"id":"c025","input":"groceries (sausage, potato, eggs) — rimping supermarket","expected":"Продукты","tags":["en","grocery"]}
+{"id":"c026","input":"บ้านผักมาดาม","expected":"Продукты","tags":["th","market"]}
+{"id":"c027","input":"такси в аэропорт","expected":"Транспорт","tags":["ru","taxi"]}
+{"id":"c028","input":"grab до дома","expected":"Транспорт","tags":["ru","taxi"]}
+{"id":"c029","input":"заправка бензин","expected":"Транспорт","tags":["ru","fuel"]}
+{"id":"c030","input":"аптека, лекарства от простуды","expected":"Здоровье","tags":["ru","pharmacy"]}
+{"id":"c031","input":"стрижка","expected":"Красота","tags":["ru","beauty"]}
+{"id":"c032","input":"билеты в кино","expected":"Развлечения","tags":["ru","entertainment"]}
+{"id":"c033","input":"подписка spotify","expected":"Подписки","tags":["ru","subscription"]}
+{"id":"c034","input":"футболка и шорты","expected":"Одежда","tags":["ru","clothes"]}
+{"id":"c035","input":"аренда квартиры","expected":"Жильё","tags":["ru","housing"]}
+{"id":"c036","input":"краски для рисования","expected":"Прочее","tags":["ru","other"],"notes":"нет подходящей категории: допустим Прочее или деградация"}

@@ -31,7 +31,6 @@ type Context struct {
 	Logger    *slog.Logger
 	Agent     AgentService
 	Fetcher   AttachmentFetcher
-	Allowed   []int64
 	RequestID string
 	MediaDir  string
 	Registry  *plugin.Registry

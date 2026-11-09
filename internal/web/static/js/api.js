@@ -54,4 +54,35 @@ export const moveItem = (cur, key, body) => call('POST', '/api/plan/item/' + enc
 export const settleItem = (cur, key, body) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/done' + q(cur), body);
 export const getItem = (key) => call('GET', '/api/plan/item/' + encodeURIComponent(key));
 export const editItem = (cur, key, body) => call('PATCH', '/api/plan/item/' + encodeURIComponent(key) + q(cur), body);
+export const reopenItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/reopen' + q(cur));
 export const skipItem = (cur, key) => call('POST', '/api/plan/item/' + encodeURIComponent(key) + '/skip' + q(cur));
+
+// Правка окна (ADR-020, ADR-021): продлить или сократить на N дней, задать первый или последний день, удалить.
+export const resizeWindow = (cur, days) => call('POST', '/api/plan/window/resize' + q(cur), { days });
+export const setWindowEnd = (cur, end) => call('PUT', '/api/plan/window/end' + q(cur), { end });
+export const setWindowStart = (cur, start) => call('PUT', '/api/plan/window/start' + q(cur), { start });
+export const deleteWindow = (cur) => call('DELETE', '/api/plan/window' + q(cur));
+
+// Регулярные платежи: список правил повтора, включая приостановленные.
+export const getRecurring = (cur) => call('GET', '/api/plan/recurring' + q(cur));
+
+// Лимиты категорий (ADR-011). Эффект лимита (предпросмотр) и подсказку суммы считает сервер.
+export const addLimit = (cur, body) => call('POST', '/api/plan/limits' + q(cur), body);
+export const editLimit = (cur, id, body) => call('PUT', '/api/plan/limits/' + encodeURIComponent(id) + q(cur), body);
+export const deleteLimit = (cur, id) => call('DELETE', '/api/plan/limits/' + encodeURIComponent(id) + q(cur));
+export const previewLimit = (cur, body) => call('POST', '/api/plan/limits/preview' + q(cur), body);
+// Траты вне плана (ADR-015): скрытие категории, возврат, список трат категории окна (страницами).
+export const dismissCategory = (cur, category) => call('POST', '/api/plan/categories/dismissed' + q(cur), { category });
+export const restoreCategory = (cur, category) => call('DELETE', '/api/plan/categories/dismissed' + q(cur) + '&category=' + encodeURIComponent(category));
+export const getCategoryTransactions = (cur, category, cursor) => call('GET', '/api/plan/categories/transactions' + q(cur)
+  + '&category=' + encodeURIComponent(category) + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+export const suggestLimit = (cur, category) => call('GET', '/api/plan/limits/suggest' + q(cur) + '&category=' + encodeURIComponent(category));
+
+// Страница «Транзакции» (ADR-018). Суммы приходят и уходят десятичной строкой в валюте самой транзакции;
+// version — версия строки: сервер откажет в правке, если строку успели изменить.
+export const listTransactions = (params) => call('GET', '/api/plan/transactions?' + new URLSearchParams(
+  Object.entries(params || {}).filter(([, v]) => v !== '' && v != null)).toString());
+export const getTransaction = (id) => call('GET', '/api/plan/transactions/' + encodeURIComponent(id));
+export const editTransaction = (id, body) => call('PATCH', '/api/plan/transactions/' + encodeURIComponent(id), body);
+export const deleteTransaction = (id, version) => call('DELETE', '/api/plan/transactions/' + encodeURIComponent(id)
+  + '?version=' + encodeURIComponent(version));

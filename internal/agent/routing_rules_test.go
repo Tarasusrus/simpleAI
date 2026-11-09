@@ -79,7 +79,7 @@ func TestBuildToolsSystemPrompt_RateRuleSeparatedFromDisplayAndLimit(t *testing.
 	// лимит: разграничение читается как уточнение к ним, а не наоборот.
 	rateAt := strings.Index(rules, "КУРС БАТА")
 	displayAt := strings.Index(rules, "ВАЛЮТА КОНВЕРТОВ")
-	limitAt := strings.Index(rules, "Правка ЛИМИТА конверта")
+	limitAt := strings.Index(rules, "Правка ЛИМИТА категории")
 	if rateAt < 0 || displayAt < 0 || limitAt < 0 {
 		t.Fatalf("не найдены заголовки правил: курс=%d показ=%d лимит=%d", rateAt, displayAt, limitAt)
 	}
@@ -101,4 +101,42 @@ func rulesBlock(t *testing.T, prompt string) string {
 		t.Fatal("в промпте нет блока правил до списка инструментов")
 	}
 	return prompt[:at]
+}
+
+// ADR-017: действие start_envelope снято из ROUTING RULES; «разложи по конвертам» уходит в safe_to_spend без суммы.
+//
+// Мутация: вернуть start_envelope в router.go — тест краснеет.
+func TestBuildToolsSystemPrompt_StartEnvelopeRemoved(t *testing.T) {
+	prompt := buildToolsSystemPrompt([]plugin.Manifest{{ID: "budget", Description: "b"}, {ID: "safe_to_spend", Description: "s"}})
+	rules := rulesBlock(t, prompt)
+	if strings.Contains(prompt, "start_envelope") {
+		t.Error("в промпте остался start_envelope (ADR-017)")
+	}
+	for _, want := range []string{"разложи по конвертам", "skill=safe_to_spend, сумму НЕ передавать", "Конверты больше не заводятся"} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("в ROUTING RULES нет %q", want)
+		}
+	}
+}
+
+// Краткая запись «1570 бат шлем» (simpleAI-4w5t): без глагола правило 8 отбрасывало
+// её, а слово «шлем» модель читала как «шлём» и записывала перевод. Тест держит, что
+// правило про запись без глагола есть, стоит в блоке правил и называет оба пути
+// ошибки; что модель ему следует, доказывают golden-кейсы r057-r059 на боевой модели.
+func TestBuildToolsSystemPrompt_ShortFormExpenseWithoutVerb(t *testing.T) {
+	prompt := buildToolsSystemPrompt([]plugin.Manifest{{ID: "budget", Description: "budget tracker"}})
+	rules := rulesBlock(t, prompt)
+
+	mustContain := map[string]string{
+		"1570 бат шлем":     "нет примера краткой записи — именно он ушёл в переводы",
+		"НАЗВАНИЕ траты":    "нет указания, что слово после суммы — название, а не глагол",
+		"не сочиняй":        "нет запрета придумывать description («перевод»)",
+		"краткая запись из": "правило 8 не отсылает краткую запись к правилу 2",
+		"«курс 2,7», «пришло 127000», «на еду хватит 15000», «хочу блендер 3000» — не траты": "краткая запись не уступает правилам 1, 3, 4, 7",
+	}
+	for marker, why := range mustContain {
+		if !strings.Contains(rules, marker) {
+			t.Errorf("%s: в ROUTING RULES нет %q", why, marker)
+		}
+	}
 }

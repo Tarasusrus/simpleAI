@@ -2,6 +2,7 @@ package budgetskill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/botlimits"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/skills/safetospend"
 )
@@ -56,6 +58,11 @@ func (s *BudgetSkill) setShareLimit(ctx context.Context, req budgetInput) (strin
 		currency = "RUB"
 	}
 
+	// ADR-016 §6: при BOT_LIMITS_FROM_PLAN лимит пишет ядро плана. Откат только вперёд: в
+	// budget_envelope_limit_override параллельно не пишем (dual-write не делается, решение задачи ovvt.5).
+	if reply, done := s.setPlanLimit(ctx, chatID, name, req.Amount, currency); done {
+		return reply, nil
+	}
 	if err := s.store.SetOverride(ctx, chatID, name, req.Amount, currency); err != nil {
 		slog.Default().ErrorContext(ctx, "set_share_limit: save override", "err", err, "chat_id", chatID, "share", name)
 		return "Не удалось сохранить лимит — попробуй ещё раз.", nil
@@ -83,6 +90,9 @@ func (s *BudgetSkill) clearShareLimit(ctx context.Context, req budgetInput) (str
 		return "С какого конверта снять лимит? Назови категорию — например «убери лимит на еду».", nil
 	}
 
+	if reply, done := s.clearPlanLimit(ctx, chatID, name); done {
+		return reply, nil
+	}
 	if err := s.store.DeleteOverride(ctx, chatID, name); err != nil {
 		slog.Default().ErrorContext(ctx, "clear_share_limit: delete override", "err", err, "chat_id", chatID, "share", name)
 		return "Не удалось снять лимит — попробуй ещё раз.", nil
@@ -274,4 +284,51 @@ func formatReplan(r replan) string {
 		fmt.Fprintf(&b, "⚠️ %s\n", w)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// setPlanLimit пишет лимит категории через ядро плана. done=false — отвечать старым путём (флаг выключен,
+// чат вне области плана, окна с приходом нет).
+func (s *BudgetSkill) setPlanLimit(ctx context.Context, chatID int64, name string, amount float64, currency string) (string, bool) {
+	if !s.limitsFromPlan || s.limitsWriter == nil {
+		return "", false
+	}
+	ok, err := s.limitsWriter.SetLimit(ctx, chatID, name, amount, currency)
+	if !ok && err == nil {
+		return "", false
+	}
+	if err != nil {
+		return planLimitError(ctx, err, "set_share_limit", chatID, name, "поставить"), true
+	}
+	slog.Default().InfoContext(ctx, "set_share_limit.plan", "chat_id", chatID, "category", name, "amount", amount, "currency", currency)
+	return fmt.Sprintf("📌 Лимит на «%s» — %s на окно плана. Он повторяется каждое окно, пока не скажешь «убери лимит на %s».",
+		name, safetospend.FmtAmount(amount, currency), name), true
+}
+
+// clearPlanLimit снимает лимит категории в плане. Идемпотентно: «убери лимит» там, где его нет, не ошибка.
+func (s *BudgetSkill) clearPlanLimit(ctx context.Context, chatID int64, name string) (string, bool) {
+	if !s.limitsFromPlan || s.limitsWriter == nil {
+		return "", false
+	}
+	ok, found, err := s.limitsWriter.ClearLimit(ctx, chatID, name)
+	if !ok && err == nil {
+		return "", false
+	}
+	if err != nil {
+		return planLimitError(ctx, err, "clear_share_limit", chatID, name, "снять"), true
+	}
+	slog.Default().InfoContext(ctx, "clear_share_limit.plan", "chat_id", chatID, "category", name, "found", found)
+	if !found {
+		return fmt.Sprintf("Лимита на «%s» в плане и так нет.", name), true
+	}
+	return fmt.Sprintf("🧹 Лимит на «%s» снят.", name), true
+}
+
+// planLimitError — ответ при отказе плана: неизвестная категория объясняется, остальное — общим текстом
+// (подробности только в лог).
+func planLimitError(ctx context.Context, err error, action string, chatID int64, name, verb string) string {
+	if errors.Is(err, botlimits.ErrUnknownCategory) {
+		return fmt.Sprintf("Не нашёл категорию расходов «%s» — лимит можно поставить только на существующую категорию.", name)
+	}
+	slog.Default().ErrorContext(ctx, action+": plan", "err", err, "chat_id", chatID, "category", name)
+	return fmt.Sprintf("Не удалось %s лимит — попробуй ещё раз.", verb)
 }

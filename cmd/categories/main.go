@@ -25,6 +25,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "split" {
+		return runSplit(os.Args[2:])
+	}
 	apply := flag.Bool("apply", false, "выполнить слияния (без флага — только план)")
 	rollback := flag.String("rollback", "", "merge_id слияния для отката")
 	flag.Parse()

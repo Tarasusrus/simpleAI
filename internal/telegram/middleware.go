@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
+// RequireAllowedChats пускает только чаты из списка. Пустой список не пускает никого:
+// «открыт всем» — отдельное явное решение (AllowAnyChat), а не следствие пустого списка.
 func RequireAllowedChats(allowed []int64) Middleware {
-	allowAll := len(allowed) == 0
 	allowedSet := make(map[int64]struct{}, len(allowed))
 	for _, id := range allowed {
 		allowedSet[id] = struct{}{}
@@ -17,9 +18,6 @@ func RequireAllowedChats(allowed []int64) Middleware {
 
 	return func(next Handler) Handler {
 		return func(ctx context.Context, tctx *Context) error {
-			if allowAll {
-				return next(ctx, tctx)
-			}
 			chatID, err := tctx.ChatID()
 			if err != nil {
 				return err
@@ -35,6 +33,11 @@ func RequireAllowedChats(allowed []int64) Middleware {
 			return next(ctx, tctx)
 		}
 	}
+}
+
+// AllowAnyChat — явный выбор «бот открыт всем чатам» (ALLOW_ALL=true при пустом списке).
+func AllowAnyChat() Middleware {
+	return func(next Handler) Handler { return next }
 }
 
 func LogUpdates() Middleware {
