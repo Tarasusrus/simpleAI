@@ -154,8 +154,9 @@ func (s *BudgetSkill) WithBuckets(cfg BucketConfig) (*BudgetSkill, error) {
 // Manifest возвращает описание скилла для registry и LLM.
 func (s *BudgetSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
-		ID:   "budget",
-		Name: "Budget Tracker",
+		ID:          "budget",
+		DirectReply: true,
+		Name:        "Budget Tracker",
 		Description: "Personal finance TRACKER: record COMPLETED expenses/income (past tense: 'купил', 'потратил', 'заплатил', 'получил'), get spending summaries, manage savings goals, debts, and recurring payments. " +
 			"Use when user RECORDS a transaction or asks to SHOW data (summary, list, forecast, debt status). " +
 			"action='summary' shows aggregate totals for a period. Pass transaction_type='income' when user asks ONLY about income ('покажи доходы за <период>', 'сколько я заработал'); pass transaction_type='expense' when user asks ONLY about expenses ('покажи траты / расходы за <период>'); omit transaction_type for a general overview ('итоги за <период>', 'сводка'). " +

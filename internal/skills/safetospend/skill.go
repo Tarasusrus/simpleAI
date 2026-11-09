@@ -57,9 +57,10 @@ func (s *SafeToSpendSkill) WithLLMTimeout(d time.Duration) *SafeToSpendSkill {
 
 func (s *SafeToSpendSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
-		ID:      "safe_to_spend",
-		Name:    "Safe to Spend",
-		Version: "1.0.0",
+		ID:          "safe_to_spend",
+		DirectReply: true,
+		Name:        "Safe to Spend",
+		Version:     "1.0.0",
 		Description: "Считает СКОЛЬКО СВОБОДНЫХ ДЕНЕГ останется из ПРИШЕДШЕГО дохода на период, " +
 			"после известных обязательств (регулярные платежи, долги) и прогноза трат. Приход берётся из вопроса и НЕ записывается. " +
 			"Триггеры RU: «пришло X, сколько свободно?», «получил X, сколько могу потратить?», «пришла зарплата/аванс X, сколько останется?», " +

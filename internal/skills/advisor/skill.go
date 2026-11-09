@@ -52,9 +52,10 @@ func (s *AdvisorSkill) WithLLMTimeout(d time.Duration) *AdvisorSkill {
 // Manifest описывает skill для LLM-роутера.
 func (s *AdvisorSkill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
-		ID:      "advisor",
-		Name:    "Financial Advisor",
-		Version: "1.0.0",
+		ID:          "advisor",
+		DirectReply: true,
+		Name:        "Financial Advisor",
+		Version:     "1.0.0",
 		Description: "Financial advisor for purchase decisions, affordability checks and expense prioritization. Two actions. " +
 			"action='advice' — affordability/purchase decision for a SPECIFIC item (planned purchase). " +
 			"Triggers EN: 'can we afford X?', 'should I buy this now?', 'do we have enough money for X?', 'is it worth buying?', 'what should I prioritize?'. " +
