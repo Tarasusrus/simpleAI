@@ -267,6 +267,9 @@ func TestPlanDayLines_Carry(t *testing.T) {
 	if !strings.Contains(with, "перенос из прошлого окна") {
 		t.Fatalf("нет строки переноса: %q", with)
 	}
+	if plus := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per, Carry: 700}, m); !strings.Contains(plus, "окна: +") {
+		t.Fatalf("плюс без знака: %q", plus)
+	}
 	if without := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per}, m); strings.Contains(without, "перенос") {
 		t.Fatalf("нулевой перенос показан: %q", without)
 	}

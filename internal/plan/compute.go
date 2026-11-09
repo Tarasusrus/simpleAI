@@ -308,11 +308,14 @@ func (c calc) core() (View, error) {
 // carry — остаток прошлых окон, переходящий в описываемое (ADR-023): по цепочке всех окон до него
 // carry(k) = carry(k−1) + пришло(k) − потрачено(k) − резерв(k), и плюс, и минус. Считается только по факту:
 // ожидаемое, но не пришедшее в остаток не входит, а неоплаченные разовые платежи и так переезжают в текущее окно как
-// просроченные — второй раз их не вычитаем. Резерв — от пришедшего: он отложен и не переносится.
+// просроченные — второй раз их не вычитаем. Резерв — от пришедшего: он отложен и не переносится. Траты в зазоре
+// после окна (до начала следующего) относятся к нему: иначе они не вошли бы ни в одно окно. Траты до первого окна
+// в перенос не входят.
 func (c calc) carry() (int64, error) {
 	var total int64
 	for k := 0; k < c.st.Index; k++ {
 		w := c.in.Windows[k]
+		last := c.in.Windows[k+1].Start.AddDays(-1) // k < Index, следующее окно есть
 		var received, spent int64
 		for i := range w.Incomes {
 			e := w.Incomes[i]
@@ -328,7 +331,7 @@ func (c calc) carry() (int64, error) {
 			}
 		}
 		for _, e := range c.in.Events {
-			if e.State != StateDone || e.Date == nil || e.Date.Compare(w.Start) < 0 || e.Date.Compare(w.End()) > 0 {
+			if e.State != StateDone || e.Date == nil || e.Date.Compare(w.Start) < 0 || e.Date.Compare(last) > 0 {
 				continue
 			}
 			n, err := c.money(e.Amount)

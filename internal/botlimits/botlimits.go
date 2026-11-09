@@ -36,8 +36,8 @@ type Snapshot struct {
 	// LimitHold — сумма остатков лимитов (уже вычтена из CanSpend).
 	LimitHold int64
 	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый; уже учтён в CanSpend.
-	Carry int64
-	Limits    []Limit
+	Carry  int64
+	Limits []Limit
 }
 
 // ForCategory возвращает лимит категории (без учёта регистра и пробелов, как plan.CategoryKey).

@@ -26,6 +26,8 @@ type Window struct {
 	Extra int
 	// Ongoing — последнее окно закончилось, а новой зарплаты нет: окно идёт и растёт до сегодня (ADR-022).
 	Ongoing bool
+	// shortened — окно закрыто ранней зарплатой (ADR-023): сохранённое окно надо переписать с новым концом.
+	shortened bool
 }
 
 // baseDays — заданная длина без автоматического роста.
@@ -42,9 +44,9 @@ func (w Window) Days() int { return w.baseDays() + w.Extra }
 // BaseEnd — заданный конец окна, без автоматического роста: его хранит база и его правит владелец.
 func (w Window) BaseEnd() Date { return w.Start.AddDays(w.baseDays() - 1) }
 
-// Adjusted — заданная длина окна отличается от стандартной: её поправил владелец. Окно, которое просто выросло
-// само до следующего поступления, поправленным не считается.
-func (w Window) Adjusted() bool { return w.baseDays() != windowDays }
+// Adjusted — конец окна поставил владелец (±день, «до даты»). Окно, которое выросло само или закрылось ранней
+// зарплатой, поправленным не считается.
+func (w Window) Adjusted() bool { return w.FixedEnd }
 
 // Stored — окно сохранено в базе.
 func (w Window) Stored() bool { return w.ID != "" }
@@ -112,10 +114,11 @@ func buildWindows(incomes []Event, stored []StoredWindow, grow bool) []Window {
 		w := Window{ID: sw.ID, Start: sw.Start, Length: DaysBetween(sw.Start, sw.End) + 1, FixedEnd: sw.FixedEnd}
 		if n := len(ws); n > 0 && sw.Start.Compare(ws[n-1].End()) <= 0 {
 			prev := &ws[n-1]
-			// Окна пересекаются. Окно, закрытое ранней зарплатой (ADR-023), хранит прежний конец, а следующее уже
-			// сохранено с её даты: прежнее заканчивается накануне. Конец владельца так не обрезается — тогда (и при
-			// окнах разных чатов области с одним началом) остаётся раннее, расчёт не падает.
-			if !grow || prev.FixedEnd || sw.Start.Compare(prev.Start) <= 0 {
+			// Окна пересекаются. Если следующее начинается в последние дни прежнего — это окно ранней зарплаты
+			// (ADR-023), а прежнее не успели переписать: оно заканчивается накануне. Иначе (окна разных чатов области,
+			// конец владельца) остаётся раннее, расчёт не падает.
+			early := sw.Start.Compare(prev.Start) > 0 && DaysBetween(sw.Start, prev.BaseEnd()) < earlyCloseDays
+			if !grow || prev.FixedEnd || !early {
 				continue
 			}
 			prev.Length = DaysBetween(prev.Start, sw.Start)
@@ -157,8 +160,9 @@ func buildWindows(incomes []Event, stored []StoredWindow, grow bool) []Window {
 	sortIncomes(joining)
 	for _, e := range opening {
 		if i, ok := containing(ws, *e.Date); ok {
-			if grow && closesEarly(ws, i, *e.Date) {
+			if grow && closesEarly(ws, i, e) {
 				ws[i].Length = DaysBetween(ws[i].Start, *e.Date) // окно кончается накануне зарплаты
+				ws[i].shortened = true
 				ws = append(ws, provisional(*e.Date, e))
 				continue
 			}
@@ -215,11 +219,13 @@ func ExtendLast(ws []Window, today Date) {
 	}
 }
 
-// closesEarly — зарплата в последние earlyCloseDays дней последнего окна закрывает его (ADR-023): выплата раньше
-// срока из-за выходных. Не трогаем окно с концом владельца и не режем окно в день его собственного начала.
-func closesEarly(ws []Window, i int, d Date) bool {
-	w := ws[i]
-	return i == len(ws)-1 && !w.FixedEnd && d.Compare(w.Start) > 0 && DaysBetween(d, w.BaseEnd()) < earlyCloseDays
+// closesEarly — пришедшая зарплата в последние earlyCloseDays дней последнего окна закрывает его (ADR-023): выплата
+// раньше срока из-за выходных. Ожидаемая зарплата окно не режет — деньги могут и не прийти. Не трогаем окно с концом
+// владельца и не режем окно в день его собственного начала.
+func closesEarly(ws []Window, i int, e Event) bool {
+	w, d := ws[i], *e.Date
+	return e.State == StateDone && i == len(ws)-1 && !w.FixedEnd && d.Compare(w.Start) > 0 &&
+		DaysBetween(d, w.BaseEnd()) < earlyCloseDays
 }
 
 func inAny(ws []Window, d Date) bool {

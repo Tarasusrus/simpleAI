@@ -225,6 +225,13 @@ func (s *Service) materialize(ctx context.Context, ws []Window, today Date) erro
 		return nil
 	}
 	for i := range ws {
+		if ws[i].Stored() && ws[i].shortened {
+			// Окно закрыто ранней зарплатой: переписываем его конец, чтобы в базе окна не пересекались.
+			if err := s.windows.UpdateWindow(ctx, s.scope, ws[i].ID, ws[i].Start, ws[i].BaseEnd(), ws[i].FixedEnd); err != nil {
+				return fmt.Errorf("plan: обрезать окно %v: %w", ws[i].Start, err)
+			}
+			ws[i].shortened = false
+		}
 		if ws[i].Stored() || ws[i].Start.Compare(today) > 0 {
 			continue
 		}

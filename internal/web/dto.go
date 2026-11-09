@@ -82,12 +82,12 @@ type KPIDTO struct {
 	SpentBeforeFrom *string `json:"spentBeforeFrom"`
 	Reserve         int64   `json:"reserve"`
 	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый; уже учтён в canSpend.
-	Carry int64 `json:"carry"`
-	Received        int64   `json:"received"`
-	ExpectedIncome  int64   `json:"expectedIncome"`
-	Unpriced        int     `json:"unpriced"`
-	UndatedCount    int     `json:"undatedCount"`
-	UndatedSum      int64   `json:"undatedSum"`
+	Carry          int64 `json:"carry"`
+	Received       int64 `json:"received"`
+	ExpectedIncome int64 `json:"expectedIncome"`
+	Unpriced       int   `json:"unpriced"`
+	UndatedCount   int   `json:"undatedCount"`
+	UndatedSum     int64 `json:"undatedSum"`
 	// LimitHold — сумма остатков лимитов: отложена и уже вычтена из canSpend.
 	LimitHold        int64 `json:"limitHold"`
 	LimitsExceedFree bool  `json:"limitsExceedFree"`
