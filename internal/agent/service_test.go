@@ -48,14 +48,19 @@ type mockSkill struct {
 	id      string
 	result  string
 	callLog []string
+	direct  bool
+	err     error
 }
 
 func (ms *mockSkill) Manifest() plugin.Manifest {
-	return plugin.Manifest{ID: ms.id, Name: ms.id, Description: "test skill"}
+	return plugin.Manifest{ID: ms.id, Name: ms.id, Description: "test skill", DirectReply: ms.direct}
 }
 
 func (ms *mockSkill) Run(_ context.Context, input string) (string, error) {
 	ms.callLog = append(ms.callLog, input)
+	if ms.err != nil {
+		return "", ms.err
+	}
 	return ms.result, nil
 }
 

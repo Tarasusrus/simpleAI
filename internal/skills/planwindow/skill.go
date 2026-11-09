@@ -43,8 +43,9 @@ const (
 // Manifest — описание для реестра, LLM и MCP.
 func (s *Skill) Manifest() plugin.Manifest {
 	return plugin.Manifest{
-		ID:   "plan_window",
-		Name: "Plan Window",
+		ID:          "plan_window",
+		DirectReply: true,
+		Name:        "Plan Window",
 		Description: "Shows and CHANGES the length of the current plan WINDOW (окно плана, by default 14 days from salary/advance). " +
 			"action='extend' — make the window longer by `days` (default 1): 'добавь день', 'продли окно на 3 дня', 'плюс день к окну'. " +
 			"action='shrink' — make it shorter by `days` (default 1): 'убери день', 'сократи окно на 2 дня', 'минус день'. " +

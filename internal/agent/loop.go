@@ -78,6 +78,11 @@ func (s *Service) runAgentLoop(
 			continue
 		}
 
+		// directResults — «чистые» тексты навыков (без префикса [i] skill →) для прямого ответа;
+		// allOK/allDirect — все вызовы итерации успешны и все навыки DirectReply.
+		var directResults []string
+		allOK, allDirect := true, true
+
 		for i, call := range calls {
 			inputJSON, err := json.Marshal(call.Input)
 			if err != nil {
@@ -89,6 +94,15 @@ func (s *Service) runAgentLoop(
 			result, err := s.runSkill(ctx, call)
 			sp.End(result, err)
 			skillDuration := time.Since(skillStart).Milliseconds()
+			switch {
+			case err != nil:
+				allOK = false
+			case !s.isDirectReply(call.Skill) || strings.TrimSpace(result) == "":
+				// пустой результат пользователю не отдать: ответ соберёт LLM
+				allDirect = false
+			default:
+				directResults = append(directResults, result)
+			}
 
 			skillName := call.Skill
 			var skillResult *string
@@ -134,6 +148,19 @@ func (s *Service) runAgentLoop(
 			})
 		}
 
+		if allOK && allDirect {
+			final := strings.Join(directResults, "\n\n")
+			s.appendTrace(ctx, trace.Entry{
+				SessionID:   sessionID,
+				ChatID:      chatID,
+				UserInput:   input,
+				Iteration:   iteration,
+				LLMResponse: final,
+				IsFinal:     true,
+			})
+			return final, nil
+		}
+
 		currentPrompt = fmt.Sprintf(
 			"Инструменты уже выполнены. Результаты:\n%s\n\nВерни результат инструмента пользователю дословно, без изменений и пересказа. НЕ вызывай инструменты повторно.",
 			strings.Join(accumulatedResults, "\n"),
@@ -145,6 +172,12 @@ func (s *Service) runAgentLoop(
 	resp, err := s.client.Ask(ctx, currentPrompt)
 	gen.End(resp, err)
 	return resp, err
+}
+
+// isDirectReply — навык заявил, что его результат можно отдать пользователю как есть.
+func (s *Service) isDirectReply(name string) bool {
+	skill, ok := s.registry.Get(name)
+	return ok && skill.Manifest().DirectReply
 }
 
 // runSkill выполняет skill по toolCall.
