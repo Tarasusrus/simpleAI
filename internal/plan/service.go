@@ -210,6 +210,7 @@ func viewOf(ld state, cur Currency, opt ViewOptions) (Result, error) {
 		ReservePct: ld.snap.ReservePct,
 		Limits:     ld.limits,
 		Dismissed:  ld.snap.Dismissed,
+		Carry:      true,
 	})
 	if err != nil {
 		return Result{}, err
@@ -277,7 +278,7 @@ func checkInvariant(v View) error {
 	if v.State == StateNone || v.Window == nil {
 		return nil
 	}
-	want := v.Income.Received + v.Income.Expected - v.Payments - v.Spent - v.Reserve - v.LimitHold
+	want := v.Income.Received + v.Income.Expected + v.Carry - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	if v.CanSpend != want {
 		return fmt.Errorf("%w: canSpend=%d, по слагаемым %d", ErrInvariant, v.CanSpend, want)
 	}

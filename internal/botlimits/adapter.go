@@ -76,7 +76,7 @@ func (p *Plan) Snapshot(ctx context.Context, chatID int64, cur string) (Snapshot
 	}
 	s := Snapshot{
 		Cur: string(c), WindowStart: day(v.Window.Start), WindowEnd: day(v.Window.End), DaysLeft: v.Window.DaysLeft,
-		CanSpend: v.CanSpend, PerDay: v.PerDay, LimitHold: v.LimitHold,
+		CanSpend: v.CanSpend, PerDay: v.PerDay, LimitHold: v.LimitHold, Carry: v.Carry,
 	}
 	for _, l := range v.Limits {
 		s.Limits = append(s.Limits, Limit{Category: l.Category, Repeat: l.Repeat, Amount: l.Amount, Spent: l.Spent, Planned: l.Planned, Left: l.Left, Over: l.Over})

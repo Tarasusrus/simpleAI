@@ -13,6 +13,8 @@ type View struct {
 	AvgDays int
 
 	Income IncomeSum
+	// Carry — остаток прошлых окон, перенесённый в это (ADR-023), знаковый: минус — перерасход прошлых окон.
+	Carry int64
 	// CanSpend знаковое: отрицательное значение — недостача.
 	CanSpend, Payments, Spent, Reserve int64
 	// LimitHold — сумма остатков лимитов категорий: отложена и из CanSpend вычтена.

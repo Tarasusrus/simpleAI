@@ -30,10 +30,16 @@ export function render(view, cur) {
   if (k.unplannedSpent > 0 && !closed) main.append(h('div', { class: 's note' }, 'В том числе ' + money(k.unplannedSpent, cur) + ' потрачено вне плана'));
   if (limited && !closed && !short) main.append(h('div', { class: 's note' }, 'свободные деньги вне лимитов: можно тратить на что угодно'));
   const income = card('', 'Поступления', money(k.received + k.expectedIncome, cur),
-    k.expectedIncome > 0 ? 'из них ожидается ' + money(k.expectedIncome, cur) : 'получено');
+    (k.expectedIncome > 0 ? 'из них ожидается ' + money(k.expectedIncome, cur) : 'получено') + carryNote(k, cur));
   const out = card('', 'Платежи и траты', money(k.payments + k.spent, cur),
     'платежи ' + money(k.payments, cur) + ' · потрачено ' + money(k.spent, cur)
       + (k.reserve ? ' · резерв ' + money(k.reserve, cur) : '')
       + (k.spentBefore > 0 ? ' · до начала окна (с ' + shortDate(k.spentBeforeFrom) + ') потрачено ' + money(k.spentBefore, cur) + ', в окно не входит' : ''));
   return h('div', { class: 'kpis' }, main, income, out);
+}
+
+// Подпись переноса остатка прошлых окон (ADR-023): плюс — неистраченное, минус — перерасход; уже учтён в главном числе.
+export function carryNote(k, cur) {
+  if (!k || !k.carry) return '';
+  return ' · перенос из прошлого окна ' + (k.carry > 0 ? '+' : '−') + money(Math.abs(k.carry), cur);
 }

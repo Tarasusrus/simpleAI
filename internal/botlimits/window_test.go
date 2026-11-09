@@ -99,3 +99,15 @@ func TestWindow_OutOfScopeAndErrors(t *testing.T) {
 		t.Fatalf("окон нет: %v", err)
 	}
 }
+
+// Перенос остатка прошлых окон доходит до бота (ADR-023).
+func TestSnapshot_Carry(t *testing.T) {
+	f := &fakeReader{snap: fixture()}
+	prev := d(2026, 2, 19) // окно 19.02–04.03 перед окном 05.03: пришло 1000 ₽, трат нет
+	f.snap.Incomes = append(f.snap.Incomes, plan.Event{Key: "transaction:prev", Kind: plan.KindIncome, State: plan.StateDone, Name: "зп",
+		Amount: &plan.Money{Minor: 100_000, Cur: plan.CurRUB}, Date: &prev, Source: plan.SourceTransaction})
+	snap, ok, err := newPlan(f, 42).Snapshot(context.Background(), 42, "RUB")
+	if err != nil || !ok || snap.Carry != 1000 || snap.CanSpend != 81000 {
+		t.Fatalf("snap=%+v ok=%v err=%v", snap, ok, err)
+	}
+}

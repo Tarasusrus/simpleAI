@@ -148,3 +148,17 @@ func TestJS_WindowEdit(t *testing.T) {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 }
+
+// Подпись переноса остатка (ADR-023). Без node тест пропускается (это НЕ зелёный результат).
+//
+// Мутация: убрать знак или проверку нуля в carryNote — краснеет kpi_carry_test.mjs.
+func TestJS_CarryNote(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node не найден — JS-тест переноса пропущен")
+	}
+	out, err := exec.Command(node, "jstest/kpi_carry_test.mjs").CombinedOutput() //nolint:gosec // фиксированный скрипт из репозитория
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+}

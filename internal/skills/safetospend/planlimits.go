@@ -170,6 +170,13 @@ func planDayLines(snap botlimits.Snapshot, m Display) string {
 	if snap.LimitHold > 0 {
 		fmt.Fprintf(&b, " (ещё %s отложено на лимиты категорий)", m.Signed(int(snap.LimitHold)))
 	}
+	if snap.Carry != 0 {
+		sign := ""
+		if snap.Carry > 0 {
+			sign = "+"
+		}
+		fmt.Fprintf(&b, "\nВ том числе перенос из прошлого окна: %s%s", sign, m.Signed(int(snap.Carry)))
+	}
 	return b.String()
 }
 

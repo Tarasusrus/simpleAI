@@ -24,6 +24,9 @@ type ComputeInput struct {
 	Limits []Limit
 	// Dismissed — названия скрытых категорий: их строки уходят из View.Unplanned в View.Hidden.
 	Dismissed []string
+	// Carry — переносить остаток закончившихся окон в описываемое (ADR-023). Сервис включает всегда; выключенный
+	// оставляет расчёт одного окна, как до ADR-023 (на этом стоят тесты расчёта).
+	Carry bool
 }
 
 // defaultAvgDays — окно усреднения «обычных» трат по умолчанию.
@@ -279,7 +282,12 @@ func (c calc) core() (View, error) {
 	if v.Unplanned, v.Hidden, v.UnplannedSpent, err = c.unplanned(); err != nil {
 		return View{}, err
 	}
-	out := income - v.Payments - v.Spent - v.Reserve - v.LimitHold
+	if c.in.Carry {
+		if v.Carry, err = c.carry(); err != nil {
+			return View{}, err
+		}
+	}
+	out := income + v.Carry - v.Payments - v.Spent - v.Reserve - v.LimitHold
 	v.CanSpend = out
 	v.LimitsExceedFree = v.LimitHold > max(out+v.LimitHold, 0)
 	if out >= 0 && c.st.DaysLeft > 0 {
@@ -295,6 +303,57 @@ func (c calc) core() (View, error) {
 		return View{}, err
 	}
 	return v, nil
+}
+
+// carry — остаток прошлых окон, переходящий в описываемое (ADR-023): по цепочке всех окон до него
+// carry(k) = carry(k−1) + пришло(k) − потрачено(k) − резерв(k), и плюс, и минус. Считается только по факту:
+// ожидаемое, но не пришедшее в остаток не входит, а неоплаченные разовые платежи и так переезжают в текущее окно как
+// просроченные — второй раз их не вычитаем. Резерв — от пришедшего: он отложен и не переносится. Траты в зазоре
+// после окна (до начала следующего) относятся к нему: иначе они не вошли бы ни в одно окно. Траты до первого окна
+// в перенос не входят.
+func (c calc) carry() (int64, error) {
+	var total int64
+	for k := 0; k < c.st.Index; k++ {
+		w := c.in.Windows[k]
+		last := c.in.Windows[k+1].Start.AddDays(-1) // k < Index, следующее окно есть
+		var received, spent int64
+		for i := range w.Incomes {
+			e := w.Incomes[i]
+			if e.State != StateDone {
+				continue
+			}
+			n, err := c.money(e.Amount)
+			if err != nil {
+				return 0, err
+			}
+			if received, err = addI64(received, n); err != nil {
+				return 0, err
+			}
+		}
+		for _, e := range c.in.Events {
+			if e.State != StateDone || e.Date == nil || e.Date.Compare(w.Start) < 0 || e.Date.Compare(last) > 0 {
+				continue
+			}
+			n, err := c.money(e.Amount)
+			if err != nil {
+				return 0, err
+			}
+			if spent, err = addI64(spent, n); err != nil {
+				return 0, err
+			}
+		}
+		if received > math.MaxInt64/100 {
+			return 0, ErrOverflow
+		}
+		reserve := roundDivHalfAway(received*int64(c.in.ReservePct), 100)
+		var err error
+		for _, d := range []int64{received, -spent, -reserve} {
+			if total, err = addI64(total, d); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return total, nil
 }
 
 // roundDivHalfAway — num/den с округлением от нуля (num ≥ 0, den > 0).
