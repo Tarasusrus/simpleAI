@@ -46,7 +46,9 @@ func TestLoadConfigRejectsBadPlanChatIDs(t *testing.T) {
 		t.Fatalf("fallback на TELEGRAM_ALLOWED_CHATS: %v", got)
 	}
 	t.Setenv("PLAN_CHAT_IDS", "5, 6")
-	cfg, _ = LoadConfig()
+	if cfg, err = LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
 	if got := cfg.PlanScopeChats(); len(got) != 2 {
 		t.Fatalf("PLAN_CHAT_IDS приоритетнее: %v", got)
 	}

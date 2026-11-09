@@ -227,7 +227,10 @@ func parseChatIDsStrict(raw string) ([]int64, error) {
 }
 
 func parseBool(raw string) bool {
-	v, _ := strconv.ParseBool(strings.TrimSpace(raw))
+	v, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
 	return v
 }
 
