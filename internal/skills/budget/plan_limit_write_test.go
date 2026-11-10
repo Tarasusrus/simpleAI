@@ -49,10 +49,10 @@ func TestSetShareLimit_WritesThroughPlan(t *testing.T) {
 			t.Errorf("в ответе нет %q: %s", want, out)
 		}
 	}
-	// валюта не названа — пустая строка уходит в план, дефолт RUB выбирает ядро; в ответе — рубли
+	// валюта не названа — дефолт budget.DefaultCurrency (баты); в ответе — баты
 	w2 := &fakePlanWriter{ok: true}
 	out, _ = writerSkill(w2, true).setShareLimit(warnCtx(), budgetInput{Category: "Еда", Amount: 15000}) //nolint:errcheck // текст проверяется ниже
-	if !strings.Contains(out, "15 000 ₽") || w2.setCalls[0] != fmt.Sprintf("%d|Еда|15000|RUB", warnChatID) {
+	if !strings.Contains(out, "15 000 ฿") || w2.setCalls[0] != fmt.Sprintf("%d|Еда|15000|THB", warnChatID) {
 		t.Fatalf("без валюты: %q %v", out, w2.setCalls)
 	}
 }

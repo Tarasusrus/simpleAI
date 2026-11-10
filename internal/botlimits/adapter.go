@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"simpleAI/internal/budget"
 	"simpleAI/internal/plan"
 )
 
@@ -117,7 +118,7 @@ func (p *Plan) SetLimit(ctx context.Context, chatID int64, category string, amou
 		return false, nil
 	}
 	if strings.TrimSpace(currency) == "" {
-		currency = string(plan.CurRUB)
+		currency = string(budget.DefaultCurrency)
 	}
 	c, err := parseCur(currency)
 	if err != nil {

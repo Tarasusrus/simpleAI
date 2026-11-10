@@ -71,7 +71,7 @@ func (s *Store) AddTransaction(ctx context.Context, t Transaction) error {
 		t.ID = uuid.New()
 	}
 	if t.Currency == "" {
-		t.Currency = "RUB"
+		t.Currency = string(DefaultCurrency)
 	}
 
 	var exists bool
@@ -599,7 +599,7 @@ func (s *Store) AddRecurring(ctx context.Context, r RecurringPayment) error {
 		r.ID = uuid.New()
 	}
 	if r.Currency == "" {
-		r.Currency = "RUB"
+		r.Currency = string(DefaultCurrency)
 	}
 	if r.Type == "" {
 		r.Type = "expense"
@@ -706,7 +706,7 @@ func (s *Store) CreateRecurringTransaction(ctx context.Context, t Transaction, r
 		t.ID = uuid.New()
 	}
 	if t.Currency == "" {
-		t.Currency = "RUB"
+		t.Currency = string(DefaultCurrency)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -955,7 +955,7 @@ func (s *Store) AddPlannedExpense(ctx context.Context, chatID int64, amount floa
 		return fmt.Errorf("AddPlannedExpense: amount must be > 0")
 	}
 	if currency == "" {
-		currency = "RUB"
+		currency = string(DefaultCurrency)
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO budget_planned_expense (chat_id, amount, currency, description)

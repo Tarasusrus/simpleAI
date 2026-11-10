@@ -142,8 +142,8 @@ func TestSetLimit_EditsExistingAddsRepeatingNew(t *testing.T) {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	e, edited := w.edited["L1"]
-	if !edited || e.Amount != (plan.Money{Minor: 1500001, Cur: plan.CurRUB}) || !e.Repeat {
-		t.Fatalf("правка существующего: %+v (ждали 15000,01 ₽ и Repeat=true как у лимита)", w.edited)
+	if !edited || e.Amount != (plan.Money{Minor: 1500001, Cur: plan.CurTHB}) || !e.Repeat {
+		t.Fatalf("правка существующего: %+v (ждали 15000,01 ฿ — валюта по умолчанию — и Repeat=true как у лимита)", w.edited)
 	}
 	if ok, err := p.SetLimit(ctx, 42, "кино", 500, "RUB"); err != nil || !ok || w.edited["L2"].Repeat {
 		t.Fatalf("разовый лимит стал повторяющимся: ok=%v err=%v %+v", ok, err, w.edited)
