@@ -23,6 +23,10 @@ const (
 	CurrencyTHB Currency = "THB"
 )
 
+// DefaultCurrency — валюта суммы, если пользователь её не назвал («кафе 405»). Владелец живёт в Таиланде, поэтому
+// баты. Одно место для бота, навыков и хранилища: менять дефолт — только здесь.
+const DefaultCurrency = CurrencyTHB
+
 // TransactionDirection — направление транзакции.
 type TransactionDirection string
 

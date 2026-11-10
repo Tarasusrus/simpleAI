@@ -237,7 +237,7 @@ func (s *BudgetSkill) Manifest() plugin.Manifest {
 					},
 					"currency": map[string]any{
 						"type":        "string",
-						"description": "Currency of the AMOUNT in the message: RUB (default), USD, EUR, THB, etc. (ISO 4217). For set_share_limit pass THB when the user names the limit in baht ('на еду хватит 5000 бат') and RUB when in roubles ('на еду хватит 15000 рублей').",
+						"description": "Currency of the AMOUNT in the message: THB (default — Thai baht), RUB, USD, EUR, etc. (ISO 4217). If the user did NOT name a currency ('кафе 405', 'на еду хватит 5000'), leave this field EMPTY — the system uses THB. Pass RUB only when roubles are named ('405 рублей', '₽'), THB when baht are named ('бат', '฿').",
 					},
 					"display_currency": map[string]any{
 						"type":        "string",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"simpleAI/internal/agent"
+	"simpleAI/internal/budget"
 )
 
 // addPlannedExpense записывает ручную разовую плановую трату (ADR-007 §6).
@@ -19,7 +20,7 @@ func (s *BudgetSkill) addPlannedExpense(ctx context.Context, req budgetInput) (s
 	}
 	currency := req.Currency
 	if currency == "" {
-		currency = "RUB"
+		currency = string(budget.DefaultCurrency)
 	}
 	if err := s.store.AddPlannedExpense(ctx, chatID, req.Amount, currency, req.Description); err != nil {
 		return "", err

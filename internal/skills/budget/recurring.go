@@ -26,7 +26,7 @@ func (s *BudgetSkill) addRecurring(ctx context.Context, req budgetInput) (string
 
 	currency := req.Currency
 	if currency == "" {
-		currency = "RUB"
+		currency = string(budget.DefaultCurrency)
 	}
 
 	txType := req.TransactionType

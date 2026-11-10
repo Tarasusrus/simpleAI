@@ -140,3 +140,13 @@ func TestBuildToolsSystemPrompt_ShortFormExpenseWithoutVerb(t *testing.T) {
 		}
 	}
 }
+
+// Сумма без валюты — баты: правило в промпте велит не заполнять currency, дефолт подставит система.
+func TestBuildToolsSystemPrompt_DefaultCurrencyBaht(t *testing.T) {
+	rules := rulesBlock(t, buildToolsSystemPrompt([]plugin.Manifest{{ID: "budget", Description: "budget"}}))
+	for _, marker := range []string{"кафе 405", "БАТЫ", "currency НЕ заполняй"} {
+		if !strings.Contains(rules, marker) {
+			t.Errorf("в ROUTING RULES нет %q", marker)
+		}
+	}
+}

@@ -46,16 +46,14 @@ func (s *BudgetSkill) setShareLimit(ctx context.Context, req budgetInput) (strin
 	}
 	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
 	if currency == "" {
-		// Тот же дефолт, что у add_expense и start_envelope: НЕназванная валюта
-		// суммы — рубли. Это про сумму в сообщении, а не про валюту показа:
-		// показ по умолчанию батовый (display_currency), и путать их нельзя —
-		// иначе «на еду хватит 15000» без валюты молча стало бы 15000 ฿.
+		// Тот же дефолт, что у add_expense: НЕназванная валюта суммы — budget.DefaultCurrency (баты). Это про сумму в
+		// сообщении, а не про валюту показа (display_currency).
 		//
-		// Названную валюту («5000 бат») сюда доносит поле currency, и дальше
+		// Названную валюту («15000 рублей») сюда доносит поле currency, и дальше
 		// она конвертируется РОВНО ОДИН раз — в shareOverrides при раскладке
 		// (budget.ToTHB). Здесь сумма сохраняется как сказана, вместе с кодом
 		// валюты: конвертировать и тут, и там значило бы задвоить курс.
-		currency = "RUB"
+		currency = string(budget.DefaultCurrency)
 	}
 
 	// ADR-016 §6: при BOT_LIMITS_FROM_PLAN лимит пишет ядро плана. Откат только вперёд: в
