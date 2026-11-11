@@ -29,11 +29,17 @@ func (s *BudgetSkill) addTransaction(ctx context.Context, req budgetInput, typ s
 		}
 	}
 
+	// Валюта не названа — дефолт ставится здесь, а не только в хранилище: ответ бота собирается из той же
+	// транзакции, и пустая валюта показывалась бы как «₽», хотя записаны баты.
+	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
+	if currency == "" {
+		currency = string(budget.DefaultCurrency)
+	}
 	t := budget.Transaction{
 		ID:          uuid.New(),
 		Type:        typ,
 		Amount:      req.Amount,
-		Currency:    req.Currency,
+		Currency:    currency,
 		Description: req.Description,
 		Date:        date,
 	}

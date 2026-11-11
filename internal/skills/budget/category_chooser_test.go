@@ -122,3 +122,27 @@ func TestAddExpense_WithoutChooserKeepsLegacy_Integration(t *testing.T) {
 		t.Fatalf("reply=%q err=%v", reply, err)
 	}
 }
+
+// «Кофейня 260» без валюты: и в базе, и в ответе бота — баты (валюта по умолчанию). Раньше в базу шли баты, а ответ
+// показывал «₽»: пустую валюту рисовали как рубли.
+//
+// Мутация: убрать подстановку budget.DefaultCurrency в addTransaction — в ответе «₽», тест краснеет.
+func TestAddExpense_NoCurrency_ReplyAndStoreInBaht_Integration(t *testing.T) {
+	skill, pool, ctx := newEnvelopeTestSkill(t)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM budget_transaction WHERE description = 'default-thb-test кофейня'`); err != nil {
+			t.Logf("cleanup: %v", err)
+		}
+	})
+	reply, err := skill.Run(ctx, `{"action":"add_expense","amount":260,"description":"default-thb-test кофейня"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "260 ฿") || strings.Contains(reply, "₽") {
+		t.Fatalf("ответ: %s", reply)
+	}
+	var cur string
+	if err := pool.QueryRow(ctx, `SELECT currency FROM budget_transaction WHERE description = 'default-thb-test кофейня'`).Scan(&cur); err != nil || cur != "THB" {
+		t.Fatalf("в базе %q (err %v)", cur, err)
+	}
+}
