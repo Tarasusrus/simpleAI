@@ -1,0 +1,46 @@
+name: Prod read (temporary, encrypted) — recent transactions
+
+# Временный: одна зашитая выборка только на чтение из прод-базы — последние транзакции. Репозиторий публичный,
+# поэтому результат шифруется переданным открытым ключом: в логах только шифр. Удаляется после использования.
+on:
+  workflow_dispatch:
+    inputs:
+      pubkey:
+        description: base64 PEM открытого RSA-ключа
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read and encrypt
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          PUBKEY: ${{ inputs.pubkey }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > q.sql <<'SQL'
+          BEGIN READ ONLY;
+          \echo == last transactions
+          SELECT left(t.id::text,8), t.transaction_date, t.type, t.amount, t.currency, coalesce(c.name,''), t.description, t.created_at
+          FROM budget_transaction t LEFT JOIN budget_category c ON c.id = t.category_id
+          WHERE t.created_at >= now() - interval '2 days' ORDER BY t.created_at;
+          COMMIT;
+          SQL
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'docker exec -i simpleai-postgres psql -U simpleai -d simpleai -At -F " | " -v ON_ERROR_STOP=1' < q.sql > out.txt
+          printf '%s' "$PUBKEY" | base64 -d > pub.pem
+          openssl rand -hex 32 > k
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:k -in out.txt -out out.enc
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k -out k.enc
+          echo "KEY_B64=$(base64 -w0 k.enc)"
+          echo "DATA_B64=$(base64 -w0 out.enc)"
+          rm -f out.txt k
