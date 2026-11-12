@@ -34,7 +34,7 @@ jobs:
             echo "== processes"; ps -eo pid,user,etime,cmd | grep -iE "mailguard|imap" | grep -v grep
             echo "== crontab"; crontab -l 2>/dev/null | grep -iE "mail|guard"
             echo "== k8s"; command -v kubectl k3s microk8s 2>/dev/null; kubectl get deploy -A 2>/dev/null | grep -i mail
-            echo "== dirs"; ls -d ~/mailguard* /opt/mailguard* /srv/mailguard* 2>/dev/null' > out.txt
+            echo "== dirs"; ls -d ~/mailguard* /opt/mailguard* /srv/mailguard* 2>/dev/null; true' > out.txt
           printf '%s' "$PUBKEY" | base64 -d > pub.pem
           openssl rand -hex 32 > k
           openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:k -in out.txt -out out.enc
