@@ -1,5 +1,5 @@
 [Unit]
-Description=SimpleAI — Telegram bot + MCP + mail worker
+Description=SimpleAI — Telegram bot + MCP
 After=network.target docker.service
 Requires=docker.service
 
