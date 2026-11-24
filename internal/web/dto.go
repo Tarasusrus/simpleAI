@@ -170,7 +170,7 @@ func toWindowView(res plan.Result, cur plan.Currency) WindowView {
 		},
 		State: string(v.State),
 		KPI: KPIDTO{
-			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, Reserve: v.Reserve, Carry: v.Carry,
+			CanSpend: v.CanSpend, PerDay: v.PerDay, Payments: v.Payments, Spent: v.Spent, SpentBefore: v.SpentBefore, SpentBeforeFrom: datePtr(v.SpentBeforeFrom), Reserve: v.Reserve, Carry: v.Carry,
 			Received: v.Income.Received, ExpectedIncome: v.Income.Expected, Unpriced: v.Unpriced,
 			UndatedCount: v.Undated.Count, UndatedSum: v.Undated.Sum,
 			LimitHold: v.LimitHold, LimitsExceedFree: v.LimitsExceedFree,
