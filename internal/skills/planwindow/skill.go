@@ -247,7 +247,7 @@ func (s *Skill) reply(ctx context.Context, chatID int64, in input, w botlimits.W
 	return b.String()
 }
 
-// numbersLine — «Свободно» и «на день» по новому окну: ради них окно обычно и правят. Не получилось — без строки:
+// numbersLine — «Свободно» по новому окну: ради них окно обычно и правят. Не получилось — без строки:
 // правка уже сохранена, и ответ о ней важнее чисел.
 func (s *Skill) numbersLine(ctx context.Context, chatID int64) string {
 	if s.numbers == nil {
@@ -258,9 +258,5 @@ func (s *Skill) numbersLine(ctx context.Context, chatID int64) string {
 		return ""
 	}
 	m := safetospend.NewDisplay(snap.Cur, 0)
-	per := "—"
-	if snap.PerDay != nil {
-		per = m.Signed(int(*snap.PerDay))
-	}
-	return fmt.Sprintf("Свободно до конца окна: %s · на день: %s", m.Signed(int(snap.CanSpend)), per)
+	return fmt.Sprintf("Свободно: %s", m.Signed(int(snap.CanSpend)))
 }

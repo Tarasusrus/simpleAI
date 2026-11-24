@@ -102,7 +102,7 @@ func TestRun_ReplyHasDatesAndNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Окно продлено", "05.10 — 19.10", "15 дней", "изменено", "осталось 10 дней", "на день"} {
+	for _, want := range []string{"Окно продлено", "05.10 — 19.10", "15 дней", "изменено", "осталось 10 дней", "Свободно: 12 000"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в ответе нет %q: %s", want, out)
 		}

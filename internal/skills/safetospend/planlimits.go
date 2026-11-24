@@ -120,7 +120,7 @@ func (s *SafeToSpendSkill) shadowRemaining(ctx context.Context, chatID int64, ol
 }
 
 // formatPlanLimits печатает лимиты окна плана в том же виде, что прежние «конверты»: потрачено и осталось по
-// категориям, «на день», пробитые отдельной строкой. Остаток не бывает отрицательным — пробитие печатается
+// категориям, итог «Свободно», пробитые отдельной строкой. Остаток не бывает отрицательным — пробитие печатается
 // минусом из Over (ADR-016 §5). Все числа — готовые, целые, в валюте Snapshot.Cur.
 func formatPlanLimits(snap botlimits.Snapshot, m Display, now time.Time) string {
 	var b strings.Builder
@@ -158,43 +158,29 @@ func formatPlanLimits(snap botlimits.Snapshot, m Display, now time.Time) string 
 	return b.String()
 }
 
-// planDayLines — главное число и «Свободно»: одно и то же число на экране, в боте и в пуше (ADR-016, решение 2).
+// planDayLines — единственное число ответа: «Свободно» (CanSpend). Оно уже за вычетом лимитов категорий и переноса из
+// прошлых окон, поэтому подпись и разбивка не нужны (решение владельца 2026-11-24; детали — на сайте). Одно и то же
+// число на экране, в боте и в пуше (ADR-016, решение 2).
 func planDayLines(snap botlimits.Snapshot, m Display) string {
-	var b strings.Builder
-	if snap.PerDay != nil {
-		fmt.Fprintf(&b, "\n**На день: %s**\n", m.Signed(int(*snap.PerDay)))
-	} else {
-		b.WriteString("\n**На день: —** (свободных денег на оставшиеся дни нет)\n")
-	}
-	fmt.Fprintf(&b, "Свободно до конца окна: %s", m.Signed(int(snap.CanSpend)))
-	if snap.LimitHold > 0 {
-		fmt.Fprintf(&b, " (ещё %s отложено на лимиты категорий)", m.Signed(int(snap.LimitHold)))
-	}
-	if snap.Carry != 0 {
-		sign := ""
-		if snap.Carry > 0 {
-			sign = "+"
-		}
-		fmt.Fprintf(&b, "\nВ том числе перенос из прошлого окна: %s%s", sign, m.Signed(int(snap.Carry)))
-	}
-	return b.String()
+	return fmt.Sprintf("\n**Свободно: %s**", m.Signed(int(snap.CanSpend)))
 }
 
-// formatPlanFree — режим общего остатка («сколько свободно осталось») из плана.
+// balanceBlock — «Свободно» крупно и мелкая подпись с концом окна (вариант 2, выбор владельца 2026-11-24).
+func balanceBlock(snap botlimits.Snapshot, m Display) string {
+	return strings.TrimPrefix(planDayLines(snap, m), "\n") + "\nдо " + snap.WindowEnd.Format("02.01")
+}
+
+// formatPlanFree — режим общего остатка («сколько свободно осталось») из плана: число и конец окна.
 func formatPlanFree(snap botlimits.Snapshot, m Display) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "🧧 Окно плана: %s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, PluralDays(snap.DaysLeft))
-	b.WriteString(strings.TrimPrefix(planDayLines(snap, m), "\n"))
-	return b.String()
+	return balanceBlock(snap, m)
 }
 
-// FormatPlanDigest — короткая сводка окна плана для утреннего пуша (ADR-017 §2): окно, «на день», «Свободно» и лимиты
+// FormatPlanDigest — короткая сводка окна плана для утреннего пуша (ADR-017 §2): «Свободно» и лимиты
 // категорий строками. Те же числа и те же форматтеры, что в ответе бота; без таблицы, чтобы влезать в уведомление.
 func FormatPlanDigest(snap botlimits.Snapshot) string {
 	m := NewDisplay(snap.Cur, 0)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — %s · осталось %d %s\n", snap.WindowStart.Format("02.01"), snap.WindowEnd.Format("02.01"), snap.DaysLeft, PluralDays(snap.DaysLeft))
-	b.WriteString(planDayLines(snap, m))
+	b.WriteString(balanceBlock(snap, m))
 	if len(snap.Limits) > 0 {
 		b.WriteString("\n\nЛимиты:")
 		for _, l := range snap.Limits {

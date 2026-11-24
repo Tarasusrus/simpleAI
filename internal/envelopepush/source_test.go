@@ -127,7 +127,7 @@ func TestMorningEnvelopes_FromPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{PlanHeader, "05.03 — 18.03 · осталось 9 дней", "**На день: 8 888 ฿**", "Свободно до конца окна: 80 000 ฿",
+	for _, want := range []string{PlanHeader, "**Свободно: 80 000 ฿**",
 		"• Еда — осталось 13 000 ฿ из 20 000 ฿", "• Такси — пробито на 300 ฿ (лимит 1 000 ฿)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("в пуше нет %q:\n%s", want, body)
