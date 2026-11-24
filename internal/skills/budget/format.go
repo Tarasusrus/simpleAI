@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"simpleAI/internal/agent"
 	"simpleAI/internal/budget"
 	"simpleAI/internal/core"
 )
@@ -250,8 +251,7 @@ func (s *BudgetSkill) summary(ctx context.Context, req budgetInput) (string, err
 	// Всегда кодируем конкретный период YYYY-MM чтобы callback_data не зависел от времени открытия.
 	if filter == "" {
 		period := p.From.Format("2006-01")
-		avg := s.threeMonthAvg(ctx, p, rates)
-		text, buttons := formatSummaryL1(curr, avg, pendingForecast{}, rates, period)
+		text, buttons := s.summaryL1(ctx, curr, p, rates, period)
 		StoreButtons(ctx, buttons)
 		return text, nil
 	}
@@ -453,8 +453,14 @@ func monthsUntil(deadline time.Time) int {
 	return months
 }
 
-// formatSummaryL1 форматирует Level 1: income, balance, 3-month avg + кнопки drill-down.
-func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, pending pendingForecast, rates map[string]float64, period string) (string, [][]core.Button) {
+// summaryL1 — первый ответ «Итоги»: прогноз recurring по chatID из контекста (тот же путь, что у кнопок).
+func (s *BudgetSkill) summaryL1(ctx context.Context, curr *budget.Summary, p budget.Period, rates map[string]float64, period string) (string, [][]core.Button) {
+	chatID, _ := ctx.Value(agent.ChatIDKey{}).(int64)
+	return formatSummaryL1(curr, s.pendingOrUnavailable(ctx, chatID, p, rates), rates, period)
+}
+
+// formatSummaryL1 форматирует Level 1: доходы, фонд, прогноз + кнопки drill-down.
+func formatSummaryL1(s *budget.Summary, pending pendingForecast, rates map[string]float64, period string) (string, [][]core.Button) {
 	incomeRUB := summaryIncomeRUB(s, rates)
 	totalRUB := summaryTotalRUB(s, rates)
 	balance := incomeRUB - totalRUB
@@ -504,10 +510,6 @@ func formatSummaryL1(s *budget.Summary, avgThreeMonths float64, pending pendingF
 			sb.WriteString(" ⚠️")
 		}
 		sb.WriteString("\n")
-	}
-
-	if avgThreeMonths > 0 {
-		fmt.Fprintf(&sb, "📉 Средний расход (3 мес): ~%.0f ₽\n", avgThreeMonths)
 	}
 
 	rows := [][]core.Button{
