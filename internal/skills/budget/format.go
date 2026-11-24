@@ -455,7 +455,10 @@ func monthsUntil(deadline time.Time) int {
 
 // summaryL1 — первый ответ «Итоги»: прогноз recurring по chatID из контекста (тот же путь, что у кнопок).
 func (s *BudgetSkill) summaryL1(ctx context.Context, curr *budget.Summary, p budget.Period, rates map[string]float64, period string) (string, [][]core.Button) {
-	chatID, _ := ctx.Value(agent.ChatIDKey{}).(int64)
+	chatID, ok := ctx.Value(agent.ChatIDKey{}).(int64)
+	if !ok {
+		chatID = 0 // без чата pendingOrUnavailable вернёт «недоступен»
+	}
 	return formatSummaryL1(curr, s.pendingOrUnavailable(ctx, chatID, p, rates), rates, period)
 }
 
