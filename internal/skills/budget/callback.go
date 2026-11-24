@@ -47,20 +47,11 @@ func (s *BudgetSkill) HandleCallbackData(ctx context.Context, chatID int64, data
 		return core.CallbackResult{}, fmt.Errorf("get summary: %w", err)
 	}
 
-	pending, err := s.pendingRecurring(ctx, chatID, p, rates)
-	if err != nil {
-		slog.WarnContext(ctx, "pending recurring forecast unavailable",
-			"chat_id", chatID,
-			"period", period,
-			"err", err,
-		)
-		pending = pendingForecast{Available: false}
-	}
+	pending := s.pendingOrUnavailable(ctx, chatID, p, rates)
 
 	switch action {
 	case "summary":
-		avg := s.threeMonthAvg(ctx, p, rates)
-		text, buttons := formatSummaryL1(curr, avg, pending, rates, period)
+		text, buttons := formatSummaryL1(curr, pending, rates, period)
 		return core.CallbackResult{Text: text, Buttons: buttons}, nil
 
 	case "buckets":
@@ -87,6 +78,30 @@ type pendingForecast struct {
 	ExpenseRUB float64
 	// суммы по категориям (lowercase) для bucket-overlay
 	ByCategory map[string]float64
+}
+
+// pendingOrUnavailable — прогноз ещё не исполненных recurring для итогов месяца. Один путь и для первого ответа
+// «Итоги», и для кнопок: раньше первый ответ получал пустой прогноз и всегда писал «Прогноз временно недоступен».
+// Ошибка не валит ответ: итоги показываются без прогноза.
+func (s *BudgetSkill) pendingOrUnavailable(ctx context.Context, chatID int64, p budget.Period, rates map[string]float64) pendingForecast {
+	if chatID == 0 {
+		// Без чата прогноз не посчитать: ListRecurring(0) вернул бы пусто и выдал бы это за «ничего не ждём».
+		return pendingForecast{Available: false}
+	}
+	fn := s.pendingFn
+	if fn == nil {
+		fn = s.pendingRecurring
+	}
+	pending, err := fn(ctx, chatID, p, rates)
+	if err != nil {
+		slog.WarnContext(ctx, "pending recurring forecast unavailable",
+			"chat_id", chatID,
+			"period", p.From.Format("2006-01"),
+			"err", err,
+		)
+		return pendingForecast{Available: false}
+	}
+	return pending
 }
 
 // pendingRecurring вычисляет прогнозные суммы из enabled recurring,
@@ -137,19 +152,4 @@ func (s *BudgetSkill) pendingRecurring(ctx context.Context, chatID int64, p budg
 	}
 
 	return result, nil
-}
-
-// threeMonthAvg считает средний расход за 3 предыдущих месяца.
-func (s *BudgetSkill) threeMonthAvg(ctx context.Context, p budget.Period, rates map[string]float64) float64 {
-	var total float64
-	for i := 1; i <= 3; i++ {
-		from := time.Date(p.From.Year(), p.From.Month()-time.Month(i), 1, 0, 0, 0, 0, time.UTC)
-		to := time.Date(p.From.Year(), p.From.Month()-time.Month(i)+1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
-		sum, err := s.store.GetSummary(ctx, budget.Period{From: from, To: to})
-		if err != nil {
-			continue
-		}
-		total += summaryTotalRUB(sum, rates)
-	}
-	return total / 3
 }

@@ -21,6 +21,8 @@ import (
 type BudgetSkill struct {
 	store   *budget.Store
 	buckets BucketConfig
+	// pendingFn — источник прогноза recurring для итогов; nil — s.pendingRecurring. Поле нужно тесту, у стора нет интерфейса.
+	pendingFn func(ctx context.Context, chatID int64, p budget.Period, rates map[string]float64) (pendingForecast, error)
 	// shareStore — тот же store, но суженный до чтения конверта и долей.
 	// Отдельным полем, чтобы тест мог подменить его падающим стором и доказать,
 	// что сбой расчёта не ломает запись траты (ADR-008, задача 7/8).
