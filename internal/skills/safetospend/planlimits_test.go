@@ -80,8 +80,8 @@ func TestRunShares_FromPlanUsesPlanNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"05.03 — 18.03 · осталось 9 дней", "Еда", "5 000 ฿", "13 000 ฿", "Такси", "-300 ฿", "**На день: 8 888 ฿**",
-		"Свободно до конца окна: 80 000 ฿ (ещё 13 000 ฿ отложено на лимиты категорий)", "Пробито: Такси на 300 ฿"} {
+	for _, want := range []string{"05.03 — 18.03 · осталось 9 дней", "Еда", "5 000 ฿", "13 000 ฿", "Такси", "-300 ฿",
+		"**Свободно: 80 000 ฿**", "Пробито: Такси на 300 ฿"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("в ответе нет %q:\n%s", want, out)
 		}
@@ -89,6 +89,7 @@ func TestRunShares_FromPlanUsesPlanNumbers(t *testing.T) {
 	if strings.Contains(out, "Активного конверта нет") {
 		t.Errorf("ответ из старого пути:\n%s", out)
 	}
+	assertNoBalanceNoise(t, out)
 	if len(l.calls) != 1 || l.calls[0] != "THB" {
 		t.Fatalf("валюта запроса к плану: %v, ждали [THB]", l.calls)
 	}
@@ -174,9 +175,10 @@ func TestRunRemaining_FromPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Свободно до конца окна: 80 000 ₽") || !strings.Contains(out, "На день: 8 888 ₽") || strings.Contains(out, "Активного конверта нет") {
-		t.Fatalf("ответ:\n%s", out)
+	if out != "**Свободно: 80 000 ₽**\nдо 18.03" {
+		t.Fatalf("ответ — число и конец окна, got:\n%s", out)
 	}
+	assertNoBalanceNoise(t, out)
 	if len(l.calls) != 1 || l.calls[0] != "RUB" {
 		t.Fatalf("calls=%v", l.calls)
 	}
@@ -197,11 +199,11 @@ func TestShadowDiff(t *testing.T) {
 	}
 }
 
-func TestFormatPlanLimits_NoLimitsAndNoPerDay(t *testing.T) {
+func TestFormatPlanLimits_NoLimits(t *testing.T) {
 	snap := planSnap("THB")
 	snap.Limits, snap.LimitHold, snap.PerDay = nil, 0, nil
 	out := formatPlanLimits(snap, NewDisplay("THB", 2.5), time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))
-	for _, want := range []string{"Лимитов на категории в этом окне нет", "На день: —", "Свободно до конца окна: 80 000 ฿"} {
+	for _, want := range []string{"Лимитов на категории в этом окне нет", "**Свободно: 80 000 ฿**"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("нет %q:\n%s", want, out)
 		}
@@ -243,12 +245,12 @@ func TestOldPath_NoEnvelopeReplyDoesNotAdvertiseStartEnvelope(t *testing.T) {
 func TestFormatPlanDigest(t *testing.T) {
 	snap := planSnap("THB")
 	out := FormatPlanDigest(snap)
-	for _, want := range []string{"05.03 — 18.03 · осталось 9 дней", "**На день: 8 888 ฿**", "Свободно до конца окна: 80 000 ฿",
-		"Лимиты:", "• Еда — осталось 13 000 ฿ из 20 000 ฿", "• Такси — пробито на 300 ฿ (лимит 1 000 ฿)"} {
+	for _, want := range []string{"**Свободно: 80 000 ฿**\nдо 18.03", "Лимиты:", "• Еда — осталось 13 000 ฿ из 20 000 ฿", "• Такси — пробито на 300 ฿ (лимит 1 000 ฿)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("нет %q:\n%s", want, out)
 		}
 	}
+	assertNoBalanceNoise(t, out)
 	snap.Limits = nil
 	if out := FormatPlanDigest(snap); strings.Contains(out, "Лимиты:") {
 		t.Errorf("пустой блок лимитов:\n%s", out)
@@ -259,18 +261,25 @@ func TestFormatPlanDigest(t *testing.T) {
 	}
 }
 
-// Перенос остатка прошлого окна виден в ответе бота (ADR-023), нулевой — молчит.
-func TestPlanDayLines_Carry(t *testing.T) {
+// assertNoBalanceNoise — ответ про остаток не содержит «на день», шапки окна, переноса и приписки про лимиты
+// (решение владельца 2026-11-24): число одно, детали на сайте. Мутация: вернуть любую из строк — тест краснеет.
+func assertNoBalanceNoise(t *testing.T, out string) {
+	t.Helper()
+	for _, bad := range []string{"На день", "на день", "Окно плана", "перенос", "отложено на лимиты", "до конца окна"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("в ответе лишнее %q:\n%s", bad, out)
+		}
+	}
+}
+
+// Остаток не зависит от переноса, PerDay и LimitHold: печатается только CanSpend.
+func TestPlanDayLines_OnlyCanSpend(t *testing.T) {
 	per := int64(500)
 	m := NewDisplay("RUB", 0)
-	with := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per, Carry: -700}, m)
-	if !strings.Contains(with, "перенос из прошлого окна") {
-		t.Fatalf("нет строки переноса: %q", with)
-	}
-	if plus := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per, Carry: 700}, m); !strings.Contains(plus, "окна: +") {
-		t.Fatalf("плюс без знака: %q", plus)
-	}
-	if without := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per}, m); strings.Contains(without, "перенос") {
-		t.Fatalf("нулевой перенос показан: %q", without)
+	for _, carry := range []int64{-700, 0, 700} {
+		out := planDayLines(botlimits.Snapshot{Cur: "RUB", CanSpend: 5000, PerDay: &per, Carry: carry, LimitHold: 900}, m)
+		if out != "\n**Свободно: 5 000 ₽**" {
+			t.Fatalf("carry=%d: %q", carry, out)
+		}
 	}
 }
